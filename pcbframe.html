@@ -196,6 +196,9 @@
   #pcbcamadas .pc-rodape button{flex:1; font:11px var(--font, sans-serif); color:#c8c8ce; background:rgba(255,255,255,.06); border:0; border-radius:4px; padding:3px 0; cursor:pointer;}
   #pcbcamadas .pc-rodape button:hover{background:rgba(255,255,255,.14); color:#fff;}
   body.lean #cantoesq{display:none !important;}
+  /* 1.88.0: na variante de projeto a placa é a da padrão: a barra de ferramentas some; fica a barra da variante com o
+     Suprimir / Montar (hub-variantes.js) */
+  body.variante-on #pcbtb{display:none !important;}
   body.lean #menubar, body.lean #pcbtb, body.lean #abas, body.lean #splitR, body.lean #props, body.lean #status, body.lean #btnPaineis{display:none !important;}
 </style>
 </head>
@@ -358,6 +361,9 @@
 <script src="hub-fplib.js"></script>
 <script src="hub-nexo.js"></script><script src="hub-nexopacote.js"></script>
 <script src="hub-fppacote.js"></script><script src="hub-fpeditor.js"></script>
+<!-- 1.88.0: a variante de projeto (o código dela vem do catálogo do Definir projeto) -->
+<script src="hub-catalogo.js"></script>
+<script src="hub-variantes.js"></script>
 <script src="pcbframe.js"></script>
 <!-- o canal do MCP (mcp/): a IA pede screenshot, foco e comando a esta vista -->
 <script src="mcp/hub-mcpvista.js"></script>

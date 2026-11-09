@@ -355,6 +355,14 @@ SAVE_BASENAMES = ('changes.js', 'schematic.js', 'annotations.js', 'rules.js')
 SAVE_LIB_FILES = ('lib-subs.js', 'sch-templates-casa.js', 'pcblib-hub.js')
 
 
+# a variante de projeto (tools/rotas/variantes.py, 1.88.0): a mesma PCB, so o que e montado muda; None = sem o modulo
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import variantes as _variantes  # noqa: E402
+except Exception as _e:             # noqa: BLE001
+    _variantes = None
+    print('AVISO: variantes de projeto desligadas (%s) — falta tools/rotas/variantes.py.' % _e)
+
 # a equipe do projeto e o historico com autor (tools/rotas/equipe.py, 1.84.0); None = o modulo nao veio (o Salvar segue
 # como antes)
 try:
@@ -409,6 +417,13 @@ def api_save():
         recusa = _equipe.recusa_gravar(os.path.dirname(full))
         if recusa:
             return recusa, 403
+    # 1.88.0: com uma variante de projeto ativa a PCB e a mesma: o esquema, as mudancas da PCB, os sinalizadores e as
+    # regras nao mudam (so o variantes.json, pelas rotas /api/variantes/*)
+    if ok_proj and _variantes is not None:
+        recusa = _variantes.recusa_salvar(os.path.dirname(full), parts[2], data['content'])
+        if recusa:
+            return recusa, 409
+    if ok_proj and _equipe is not None:
         try:
             with open(full, encoding='utf-8', newline='') as f:
                 antes = f.read().replace('\r\n', '\n')
@@ -1014,6 +1029,33 @@ def _count_ops(changes):
     return sum(1 for c in changes if isinstance(c, dict) and c.get('op'))
 
 
+def _placa_do_esquema(sch):
+    """1.88.0: a PCB do projeto (o rotulo da arvore): CodigoDaPlaca e NomeDaPlaca do cabecalho do schematic.js (o campo
+    plano K=V;K=V). O mesmo do index.rs (placa_dos_params)."""
+    codigo = nome = ''
+    params = sch.get('params') if isinstance(sch, dict) else None
+    for par in (params if isinstance(params, str) else '').split(';'):
+        if '=' not in par:
+            continue
+        k, v = par.split('=', 1)
+        v = ' '.join(v.split())
+        if k.strip() == 'CodigoDaPlaca' and v.upper() != 'PROJETO NÃO DEFINIDO':
+            codigo = v
+        elif k.strip() == 'NomeDaPlaca':
+            nome = v
+    return {'codigo': codigo, 'nome': nome}
+
+
+def _conta_variantes(d):
+    """1.88.0: quantas variantes de projeto (Projects/<p>/variantes.json)"""
+    try:
+        with open(os.path.join(d, 'variantes.json'), encoding='utf-8-sig') as f:
+            v = json.load(f).get('variantes')
+        return len(v) if isinstance(v, list) else 0
+    except (OSError, ValueError, AttributeError):
+        return 0
+
+
 def build_index(root):
     projects = []
     pdir = os.path.join(root, 'Projects')
@@ -1029,6 +1071,7 @@ def build_index(root):
             except Exception:
                 board = None
         stats = {'sheets': 0, 'comps': 0, 'nets': 0, 'tracks': 0, 'vias': 0}
+        placa = {'codigo': '', 'nome': ''}
         if board:
             stats['comps'] = len(board.get('components', []))
             stats['nets'] = len(board.get('nets', []))
@@ -1037,6 +1080,7 @@ def build_index(root):
         if has_sch and not board:
             try:
                 sch = load_var_file(os.path.join(d, 'schematic.js'))
+                placa = _placa_do_esquema(sch)
                 items = sch.get('items', [])
                 stats['sheets'] = sum(1 for i in items if i.get('t') == 'sheet')
                 stats['comps'] = sum(1 for i in items if i.get('t') == 'comp')
@@ -1045,6 +1089,7 @@ def build_index(root):
         elif has_sch:
             try:
                 sch = load_var_file(os.path.join(d, 'schematic.js'))
+                placa = _placa_do_esquema(sch)
                 stats['sheets'] = sum(1 for i in sch.get('items', []) if i.get('t') == 'sheet')
             except Exception:
                 pass
@@ -1067,6 +1112,7 @@ def build_index(root):
             'demo': name.startswith('_'), 'noSchematic': not has_sch,
             'stages': stages, 'pending': pending, 'stats': stats,
             'grupo': _grupo_de(d),
+            'placa': placa, 'variantes': _conta_variantes(d),
         })
     _PROJ_CACHE.clear()
     for p in projects:
@@ -1780,10 +1826,20 @@ def _bom_source(d):
     # nao montar (1.58.0): a marca e do esquema e vale sempre, mais novo que a placa ou nao
     if os.path.isfile(sch_path):
         from odoolista import dnp_refs
-        dnp = dnp_refs(load_var_file(sch_path))
+        sch = load_var_file(sch_path)
+        dnp = dnp_refs(sch)
         for comp in board.get('components', []):
             if str(comp.get('ref')) in dnp:
                 comp['dnp'] = True
+        # 1.88.0: a variante de projeto ativa nesta maquina (tools/rotas/variantes.py): o suprimido SAI do BOM (nao e
+        # "nao montar" na lista: naquele produto ele nao existe); a placa e a mesma
+        if _variantes is not None:
+            v = _variantes.ativa(d)
+            fora = _variantes.refs(sch, v)
+            if fora:
+                board['components'] = [c for c in board.get('components', []) if str(c.get('ref')) not in fora]
+            if v:
+                board['variante'] = {'id': v['id'], 'nome': v['nome'], 'codigo': v['codigo']}
     return board
 
 
@@ -2148,6 +2204,17 @@ if _equipe is not None:
         _equipe.registra_rotas(app, ROOT, {'desenhista': lambda d, u: _aprovacao.assume_desenhista(d, u)})
     except Exception as _e:        # noqa: BLE001
         print('AVISO: rotas da equipe desligadas (%s).' % _e)
+
+# ─────────────────── a variante de projeto (tools/rotas/variantes.py, 1.88.0) ───────────────────
+# /api/variantes*: listar, ativar (livre: ver e exportar), criar/editar/apagar/suprimir (a equipe do projeto)
+if _variantes is not None:
+    def _le_esquema_da_pasta(d):
+        p = os.path.join(d, 'schematic.js')
+        return load_var_file(p) if os.path.isfile(p) else None
+    try:
+        _variantes.registra(app, ROOT, _equipe, _le_esquema_da_pasta)
+    except Exception as _e:        # noqa: BLE001
+        print('AVISO: rotas das variantes desligadas (%s).' % _e)
 
 # ─────────────────── o projeto aberto e o que chega de outra maquina (tools/rotas/sincronia.py, 1.85.0) ───────────────────
 # /api/sincronia/*: a pagina diz quais projetos estao abertos e pede "Sincronizar e atualizar"; o motor (armazem.js) segura

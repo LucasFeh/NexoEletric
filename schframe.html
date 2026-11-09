@@ -315,6 +315,9 @@
   .cfg-grade{display:grid !important; grid-template-columns:repeat(auto-fill, minmax(32px, 1fr)); gap:4px !important;}
   .cfg-grade .ibtn{width:100%;}
   .cfg-acoes{display:grid; grid-template-columns:1fr 1fr; gap:6px;}
+  /* 1.88.0: na variante de projeto a folha é a da padrão: a barra de edição, o Salvar, o Definir projeto e o Trocar acervo
+     somem; fica a barra da variante com o Suprimir / Montar (hub-variantes.js) */
+  body.variante-on #schtb, body.variante-on .cfg-pe, body.variante-on .ct-sec, body.variante-on #converte{display:none !important;}
   .cfg-acoes > div{min-width:0;}
   .cfg-acoes > div:empty{display:none;}
   .cfg-acoes button{width:100%; margin:0; justify-content:center; text-align:center; padding:6px 6px; white-space:nowrap;
@@ -996,6 +999,7 @@
 <script src="hub-aprovacao.js"></script>
 <!-- o Definir projeto: o catalogo de todos os produtos (codigo da placa, codigo e nome do equipamento) -->
 <script src="hub-catalogo.js"></script>
+<script src="hub-variantes.js"></script>
 <!-- o editor de footprint (o PCB Library do Altium) e a vista 3D dele -->
 <script src="hub-fplib.js"></script>
 <script src="hub-pcb3d-modelo.js"></script>

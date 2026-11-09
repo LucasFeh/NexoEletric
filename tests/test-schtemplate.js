@@ -64,7 +64,8 @@ eq(T.resolve('=Aprovador_DiEletrons', c), '=Aprovador_DiEletrons', 'sem aprovaç
   eq([T.resolve('=Formato', c2), T.resolve('=Escala', c2), T.resolve('=Arquivo', c2)], ['A4', '1:1', 'SCH-DI261944'],
      'formato e escala da folha, arquivo = nome da folha (o que a folha gravou não conta)');
   eq(T.resolve('=CodigoDaPlaca', c2), 'PBIDP-DI261944', 'o código da placa do Definir projeto');
-  eq(T.resolve('=NomeDoEquipamento', c2), 'Velho', 'o nome antigo (Equipamento_linha_um) vale como o novo');
+  /* 1.88.0: o nome do equipamento não vai mais ao quadro (só o código); a linha dele mostra a variante de projeto ativa */
+  eq(T.resolve('=NomeDoEquipamento', c2), '', 'o nome do equipamento (novo ou antigo) não aparece no quadro');
   eq(T.resolve('=CodigoDaPlaca', T.contexto({ projeto:'PDCD-DI261939 (PTYPE)' })), 'PDCD-DI261939', 'sem definição: o código do nome do projeto');
   ok(T.automatico('Formato') && T.automatico('Data_aprovacao') && T.automatico('CodigoDaPlaca') && T.automatico('Equipamento_linha_um')
      && !T.automatico('Cliente'), 'o que se preenche sozinho');
@@ -111,8 +112,13 @@ ok(A3.some(p => p.g === 'text' && p.s === 'A3'), 'Standard numa folha A3 diz A3'
 eq(A3.filter(p => p.g === 'text' && /^[1-8]$/.test(p.s)).length, 16, 'A3 do Altium tem 8 zonas X (ArkGlobalSettings)');
 
 /* ── 5. primitivas do template da casa ── */
-const PC = T.primitivas(casa, null, { proj:'NomeDoEquipamento=Oscilador', faltante:'' });
-ok(PC.some(p => p.g === 'text' && p.s === 'Oscilador' && p.origem === '=NomeDoEquipamento'), 'campo resolvido, com a origem');
+const PC = T.primitivas(casa, null, { proj:'CodigoDoEquipamento=OSC-DI1;NomeDoEquipamento=Oscilador', faltante:'' });
+ok(PC.some(p => p.g === 'text' && p.s === 'OSC-DI1' && p.origem === '=CodigoDoEquipamento'), 'campo resolvido, com a origem');
+ok(!PC.some(p => p.s === 'Oscilador'), '1.88.0: o nome do equipamento sai do quadro');
+T.setVariante({ nome:'Sem display', codigo:'POSC-DI2' });
+ok(T.primitivas(casa, null, { proj:'NomeDoEquipamento=Oscilador', faltante:'' }).some(p => p.s === 'VARIANTE Sem display · POSC-DI2' && p.origem === '=NomeDoEquipamento'),
+   '1.88.0: a variante ativa no lugar do nome do equipamento');
+T.setVariante(null);
 ok(PC.some(p => p.s === 'PLACA:') && !PC.some(p => p.s === 'DESENHO:'), 'o quadro do desenho virou o da placa');
 const desen = PC.find(p => p.s === 'DESEN.');
 eq([desen.h, desen.v, desen.fonte, desen.tam], ['left', 'top', 'Times New Roman', 100], 'Justification=6 = em cima-esq; 10 pt = 100 mil');

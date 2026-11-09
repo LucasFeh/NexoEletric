@@ -273,7 +273,11 @@ module.exports = {
         /* nao montar (1.58.0): a marca e do esquema e vale para as duas fontes */
         let sch = null;
         try { sch = ctx.schematic(p); } catch (_) { sch = null; }
+        /* 1.88.0: a variante de projeto ativa nesta máquina: os suprimidos dela saem da lista (voltam em suprimidos) */
+        const VR = require('../lib/variantes.js');
+        const va = VR.ativa(p.dir), sup = VR.refs(sch, va);
         const dnp = ctx.hc.dnpRefs(sch), fora = new Set();
+        for (const r of sup) dnp.add(r);
         const soma = (chave, ref, extra) => { if (!linhas.has(chave)) linhas.set(chave, Object.assign({ qtd: 0, refs: [] }, extra)); const l = linhas.get(chave); l.qtd++; l.refs.push(ref); };
         if (usarPlaca) {
           const { eb } = ctx.placa(p);
@@ -295,8 +299,11 @@ module.exports = {
         }
         const nat = (x, y) => String(x).localeCompare(String(y), undefined, { numeric: true });
         const L = [...linhas.values()].map(l => Object.assign(l, { refs: l.refs.sort(nat), lados: l.lados ? Object.keys(l.lados) : undefined })).sort((x, y) => nat(x.refs[0], y.refs[0]));
+        for (const r of sup) fora.delete(r);
         return { fonte: usarPlaca ? 'placa (board.js + changes.js)' : 'esquema', itens: L.length, componentes: L.reduce((s, l) => s + l.qtd, 0), linhas: L,
-                 nao_montar: fora.size ? [...fora].sort(nat) : undefined };
+                 nao_montar: fora.size ? [...fora].sort(nat) : undefined,
+                 variante: va ? { id: va.id, nome: va.nome, codigo: va.codigo } : undefined,
+                 suprimidos: sup.size ? [...sup].sort(nat) : undefined, codigos: VR.codigos(sch || {}, va) };
       },
     },
   ],

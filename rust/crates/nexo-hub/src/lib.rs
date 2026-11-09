@@ -17,6 +17,7 @@ mod mcp;
 mod patches;
 mod proxy;
 mod statics;
+mod variantes;
 
 use axum::routing::{get, post};
 use axum::Router;

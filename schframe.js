@@ -1511,6 +1511,19 @@ leMesa();
 const SEL_FIO = '#d8ecff', ALCA_VERDE = '#1fdc1f', ALCA_VERMELHA = '#ff2a2a';
 let schDirty = false, schDiskSnapshot = null;
 const undoStack = [JSON.stringify(schematic.items)], redoStack = [];
+/* A VARIANTE DE PROJETO (1.88.0, hub-variantes.js): com uma ativa nesta máquina a folha é a mesma da padrão, sem edição --
+   só Suprimir / Montar (que grava o variantes.json, nunca o schematic.js). `var`: o commit e o setSchDirty podem rodar
+   antes do bloco da variante, lá embaixo. on = a variante ativa ao abrir a vista; refs = os suprimidos dela. */
+var VAR = { on: null, refs: new Set() };
+const MSG_VAR = () => 'Variante "' + (VAR.on && VAR.on.nome) + '" ativa: a PCB é a mesma — só Suprimir / Montar (' + (typeof HubVariantes !== 'undefined' ? HubVariantes.TECLA : 'Shift+S')
+  + '). Para editar, volte para a Padrão em Configurações › Variante de projeto';
+function recusaNaVariante(){
+  /* a edição já mexeu na memória: volta ao último estado (o topo do desfazer), sem sujar */
+  const top = undoStack[undoStack.length - 1];
+  if (top){ schematic.items.length = 0; for (const it of JSON.parse(top)) schematic.items.push(it); }
+  HubDialog.toast(MSG_VAR(), 'warn', 6000);
+  reapply();
+}
 /* ------- a grade -------
    O passo deixou de ser 100 mil cravado. Motivo medido: as folhas desta casa snapam em 1 mm
    (39,37 mil) ou 0,3 mm no proprio Altium, e 3980 dos 4188 vertices de fio dos projetos deste
@@ -1564,7 +1577,7 @@ function updateSaveBtn(){
   /* o painel não mostra mais o texto (pedido do dono, 2026-11-04): ele vai no título do botão */
   $('btnSave').title = 'Grava o schematic.js — ' + (d ? 'alterado: esquema' : 'nada pendente');
 }
-function setSchDirty(v){ schDirty = v; updateSaveBtn(); if (v) autoSalvaSch(); }
+function setSchDirty(v){ if (v && VAR.on) v = false; schDirty = v; updateSaveBtn(); if (v) autoSalvaSch(); }
 /* Arquivo » Autosave (hub-autosave.js): ligado, cada edicao grava sozinha logo depois da ultima,
    sem o aviso de "salvo" (as perguntas de sobrescrever continuam). var: roda antes do resto */
 var AUTOSAVE_SCH = typeof HubAutosave !== 'undefined' ? HubAutosave : null;
@@ -1580,6 +1593,7 @@ function alternaAutosaveSch(){
 }
 if (AUTOSAVE_SCH) AUTOSAVE_SCH.aoMudar(v => { if (v && schDirty) autoSalvaSch(); });
 function commit(){
+  if (VAR.on){ recusaNaVariante(); return; }
   undoStack.push(JSON.stringify(schematic.items));
   if (undoStack.length > 60) undoStack.shift();
   redoStack.length = 0;
@@ -2809,6 +2823,7 @@ window.addEventListener('mousedown', e => {
 window.addEventListener('blur', () => gavAbre(false));
 pintaGaveta(tool, toolPower);     /* a face nasce com o ultimo pouso usado nesta maquina */
 function setTool(t, pw){
+  if (VAR.on && t !== 'select'){ HubDialog.toast(MSG_VAR(), 'warn', 5000); t = 'select'; pw = undefined; }
   /* O FIO EM CURSO E GRAVADO, como no Esc e no botao direito: no Altium o trecho fixado ja
      esta no documento, e trocar de ferramenta (W, G, os botoes da barra) nao o apaga. Aqui ele
      sumia calado, sem undo que o trouxesse de volta. */
@@ -3083,7 +3098,30 @@ window.addEventListener('contextmenu', e => {
   panning = false; panMoved = false;
   if (!arrastou && wireDraw) endWire();
   else if (!arrastou && (tool === 'wire' || tool === 'forma' || tool === 'texto')) setTool('select');
+  else if (!arrastou && VAR.on) menuDaVariante(e);
 });
+/* 1.88.0: o botão direito na variante de projeto: Suprimir / Montar o componente debaixo do cursor (ou a seleção) */
+function menuDaVariante(e){
+  const w = worldOf(e), h = hitTest(w.x, w.y);
+  if (h && h.item && h.item.t === 'comp' && !selAlvos().some(a => a.it === h.item)){ sel.clear(); selAdd(alvoDoHit(h)); updateSelStatus(); renderProps(); cam.draw(); }
+  const rs = [...new Set(selAlvos().filter(a => a.it && a.it.t === 'comp' && a.it.ref).map(a => String(a.it.ref)))];
+  const velho = document.getElementById('vrMenu'); if (velho) velho.remove();
+  if (!rs.length) return;
+  const m = document.createElement('div');
+  m.id = 'vrMenu';
+  m.style.cssText = 'position:fixed; z-index:90; left:' + e.clientX + 'px; top:' + e.clientY + 'px; padding:4px; border-radius:6px; background:var(--panel2, #222); border:1px solid var(--border, #444); box-shadow:0 6px 20px rgba(0,0,0,.45); font:12px var(--font, sans-serif)';
+  const todos = rs.every(r => VAR.refs.has(r));
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.style.cssText = 'display:block; width:100%; text-align:left; border:0; background:transparent; color:var(--fg, #ddd); padding:6px 10px; cursor:pointer; font:inherit';
+  b.textContent = (todos ? 'Montar ' : 'Suprimir ') + rs.join(', ') + '  (' + HubVariantes.TECLA + ')';
+  b.title = 'variante "' + VAR.on.nome + '": ' + (todos ? 'volta a ser montado' : 'sai do BOM, da Neoden e da lista do Odoo; a PCB não muda');
+  b.addEventListener('click', () => { m.remove(); HubVariantes.alterna(SCH_P, rs); });
+  m.append(b);
+  document.body.append(m);
+  const fora = ev => { if (!m.contains(ev.target)){ m.remove(); window.removeEventListener('mousedown', fora, true); } };
+  setTimeout(() => window.addEventListener('mousedown', fora, true), 0);
+}
 window.addEventListener('mousemove', e => {
   if (mouse){ leftMove(e); return; }
   if (panning && panFrom && Math.hypot(e.clientX - panFrom.x, e.clientY - panFrom.y) > 4) panMoved = true;
@@ -3146,6 +3184,8 @@ function leftDown(e){
   const wasSel = selTem(a);
   if (!wasSel){ if (!e.shiftKey) sel.clear(); selAdd(a); }
   lastDown = { alvo:a, wasSel, promover };
+  /* na variante o esquerdo só seleciona (para Suprimir / Montar): nada se arrasta */
+  if (VAR.on){ mouse = { mode:'none', start:w, moved:false }; updateSelStatus(); renderProps(); cam.draw(); return; }
   const base = baseOf(selAlvos());
   /* o ima e as pontas sao montados aqui, e nao no primeiro movimento: a folha parada e a
      mesma o gesto inteiro, e varrer os pinos de 200 componentes a cada quadro engasgaria */
@@ -4633,6 +4673,15 @@ function renderProps(){
       commit();
       HubDialog.toast(it.ref + (ck.checked ? ': não montar — sai da lista do Odoo, do BOM e da Neoden' : ': volta a ser montado'), 'ok');
     });
+    /* 1.88.0: na variante, a caixa é a do Suprimir (grava o variantes.json; o "não montar" do esquema fica como está) */
+    if (VAR.on){
+      ck.checked = VAR.refs.has(String(it.ref)) || HubCore.dnpRefs(schematic).has(String(it.ref));
+      ck.disabled = HubCore.dnpRefs(schematic).has(String(it.ref)) || !HubVariantes.podeEditar(SCH_P);
+      ck.title = ck.disabled && HubCore.dnpRefs(schematic).has(String(it.ref)) ? 'marcado como não montar no esquema (vale para todas as variantes)'
+        : 'suprimido nesta variante: fica na placa, sai do BOM, da Neoden e da lista do Odoo (' + HubVariantes.TECLA + ')';
+      ck.addEventListener('change', e => { e.stopImmediatePropagation(); HubVariantes.alterna(SCH_P, [it.ref]); }, true);
+      prKvEl(g, 'Suprimido (' + VAR.on.nome + ')', ck);
+    } else
     prKvEl(g, 'Não montar', ck);
   }
 
@@ -4782,6 +4831,7 @@ async function falhaSalvar(err, nome, texto){
     HubIO.download(nome, texto);
 }
 async function saveSchematic(){
+  if (VAR.on){ HubDialog.toast(MSG_VAR(), 'warn', 6000); return null; }
   if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o schematic.js do disco. Continuar?', SOBRESCREVER))) return null;
   /* edição salva = modificação: a aprovação cai e a data do desenho vira a de hoje (hub-aprovacao.js) */
   if (schDirty && window.HubAprovacao && HubAprovacao.antesDeSalvar(schematic, schDiskSnapshot)){ cam.draw(); pintaMiniaturas(); }
@@ -4839,6 +4889,30 @@ if (window.HubAprovacao && HubIO.canPost) HubAprovacao.montaAprovar({
     schDiskSnapshot = texto;
     cam.draw(); pintaMiniaturas(); renderProps();
   } });
+
+/* A VARIANTE DE PROJETO (1.88.0; hub-variantes.js, tools/rotas/variantes.py): a área "Variante de projeto" nas
+   Configurações (o seletor, Nova, Renomear, Código, Apagar), a barra que sobra na vista com o Suprimir / Montar, o atalho
+   e o quadro da folha com a variante. Trocar de variante recarrega a vista (o desfazer e a seleção são de uma folha só). */
+if (typeof HubVariantes !== 'undefined' && HubIO.canPost){
+  const selRefs = () => [...new Set(selAlvos().filter(a => a.it && a.it.t === 'comp' && a.it.ref).map(a => String(a.it.ref)))];
+  const acha = ref => { const c = schematic.items.find(it => it.t === 'comp' && String(it.ref) === String(ref)); if (c) focusComp(c); };
+  const aplicaVar = (est) => {
+    const v = HubVariantes.ativa(SCH_P);
+    if (VAR.on === null) VAR.on = v || false;
+    if ((VAR.on ? VAR.on.id : null) !== (v ? v.id : null)){ HubDialog.ocioso ? HubDialog.ocioso().then(() => location.reload()) : location.reload(); return; }
+    VAR.on = v || false;
+    VAR.refs = HubVariantes.refs(schematic, v);
+    if (typeof HubSchTemplate !== 'undefined' && HubSchTemplate.setVariante) HubSchTemplate.setVariante(v);
+    document.body.classList.toggle('variante-on', Boolean(v));
+    if (v && tool !== 'select') setTool('select');
+    renderProps(); cam.draw(); pintaMiniaturas();
+  };
+  HubVariantes.monta($('pane-cfg'), { projeto: SCH_P, vista: 'sch', antes: document.querySelector('#pane-cfg .cfg-pe'), selecionados: selRefs, foca: acha });
+  HubVariantes.barra($('cv').parentNode, SCH_P, selRefs);
+  HubVariantes.instalaTecla(SCH_P, selRefs);
+  HubVariantes.ouve(p => { if (p === SCH_P) aplicaVar(); });
+  HubVariantes.carrega(SCH_P, true).then(() => aplicaVar());
+}
 
 /* ---------- desenho ---------- */
 /* A folha desenhada e a folha MEDIDA no Altium (w/h do espelho); so quando o espelho nao
@@ -5037,10 +5111,13 @@ function desenhaFolha(ctx, si, o){
      PINOS junto com o corpo (o stroke do hub-draw vale para os dois), e pinos de outras nets
      ficavam azuis sem motivo. Quem marca o componente e o contorno tracejado. */
   const naoMonta = HubCore.dnpRefs(schematic);
+  /* 1.88.0: o suprimido da variante ativa é o "Not Fitted" do Altium: o X vermelho e o símbolo esmaecido */
+  for (const r of VAR.refs) naoMonta.add(r);
   for (const c of s.comps) {
     const sym = HubCore.symbolOf(SLIB, c.sym);
     const part = HubCore.partOf(sym, c.part);
     ctx.save();
+    if (VAR.refs.has(String(c.ref))) ctx.globalAlpha = 0.32;
     ctx.translate(c.x, c.y);
     ctx.rotate(HubCore.rotEfetiva(c) * Math.PI/180);   /* a ordem do Altium: ver HubCore.rotEfetiva */
     /* espelho pelo DADO (opts.mirror), e nao por um ctx.scale(-1,1): o scale virava a
@@ -6561,7 +6638,7 @@ function fazAcao(id){
    tambem em Projects/<p>/PDF/SCH - <p>.pdf (o lugar do "LO -" da vista PCB). O PDF sai do que esta NA TELA: a
    edicao ainda nao salva vai junto. */
 let gerandoPdf = false;
-function nomeDoPdf(p){ return ('SCH - ' + String(p || 'esquema')).replace(/[^A-Za-z0-9 _.()+,-]+/g, '_').replace(/[ .]+$/, '').slice(0, 140); }
+function nomeDoPdf(p){ return ('SCH - ' + String(p || 'esquema') + (VAR.on && typeof HubVariantes !== 'undefined' ? HubVariantes.sufixo(VAR.on) : '')).replace(/[^A-Za-z0-9 _.()+,-]+/g, '_').replace(/[ .]+$/, '').slice(0, 140); }
 async function exportaPdfEsquema(){
   if (gerandoPdf) return;
   if (typeof HubSchPdf === 'undefined' || typeof HubPdfWriter === 'undefined') { HubDialog.toast('o gerador de PDF não carregou (hub-schpdf.js)', 'err'); return; }

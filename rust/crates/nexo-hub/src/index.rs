@@ -87,6 +87,32 @@ struct ItemSch {
 #[serde(default)]
 struct Esquema {
     items: Vec<ItemSch>,
+    params: Option<Value>,
+}
+
+/// 1.88.0: a PCB do projeto (o rotulo da arvore): CodigoDaPlaca e NomeDaPlaca do cabecalho do schematic.js (o campo plano
+/// `K=V;K=V`), como o _placa_do_esquema do hubserver.py
+pub fn placa_dos_params(params: Option<&str>) -> Value {
+    let (mut codigo, mut nome) = (String::new(), String::new());
+    for par in params.unwrap_or("").split(';') {
+        let Some((k, v)) = par.split_once('=') else { continue };
+        let v = v.split_whitespace().collect::<Vec<_>>().join(" ");
+        match k.trim() {
+            "CodigoDaPlaca" if v.to_uppercase() != "PROJETO NÃO DEFINIDO" => codigo = v,
+            "NomeDaPlaca" => nome = v,
+            _ => {}
+        }
+    }
+    json!({"codigo": codigo, "nome": nome})
+}
+
+/// 1.88.0: quantas variantes de projeto (Projects/<p>/variantes.json)
+fn conta_variantes(d: &Path) -> usize {
+    std::fs::read_to_string(d.join("variantes.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(t.trim_start_matches('\u{feff}')).ok())
+        .and_then(|j| j.get("variantes").and_then(|v| v.as_array()).map(|a| a.len()))
+        .unwrap_or(0)
 }
 
 fn le(p: &Path) -> Option<String> {
@@ -109,7 +135,7 @@ fn conta_ops(src: &str) -> usize {
     }
 }
 
-const ARQS_LINHA: [&str; 5] = ["board.js", "schematic.js", "changes.js", "apply-report.txt", "grupo.json"];
+const ARQS_LINHA: [&str; 6] = ["board.js", "schematic.js", "changes.js", "apply-report.txt", "grupo.json", "variantes.json"];
 
 fn linha(nome: &str, d: &Path) -> Value {
     let has_sch = d.join("schematic.js").is_file();
@@ -122,8 +148,10 @@ fn linha(nome: &str, d: &Path) -> Value {
         st["tracks"] = json!(b.tracks.len());
         st["vias"] = json!(b.vias.len());
     }
+    let mut placa = placa_dos_params(None);
     if has_sch {
         if let Some(sch) = le(&d.join("schematic.js")).and_then(|s| jsfile::parse_js::<Esquema>(&s).ok()) {
+            placa = placa_dos_params(sch.params.as_ref().and_then(|v| v.as_str()));
             st["sheets"] = json!(sch.items.iter().filter(|i| i.t == "sheet").count());
             if board.is_none() {
                 st["comps"] = json!(sch.items.iter().filter(|i| i.t == "comp").count());
@@ -146,6 +174,7 @@ fn linha(nome: &str, d: &Path) -> Value {
         "id": proj_id(nome), "name": nome, "path": format!("Projects\\{nome}"),
         "demo": nome.starts_with('_'), "noSchematic": !has_sch,
         "stages": stages, "pending": pending, "stats": st, "grupo": grupo_de(d),
+        "placa": placa, "variantes": conta_variantes(d),
     })
 }
 
@@ -412,5 +441,20 @@ pub async fn api_project(State(est): State<Est>, AxPath(arquivo): AxPath<String>
     match r {
         Some(s) => ([(header::CONTENT_TYPE, "application/json"), (header::CACHE_CONTROL, "no-store")], (*s).clone()).into_response(),
         None => (StatusCode::NOT_FOUND, Json(json!({"error": "projeto desconhecido"}))).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! 1.88.0: o rotulo da arvore pelo nome da PCB (o mesmo _placa_do_esquema do hubserver.py)
+    use super::placa_dos_params;
+    use serde_json::json;
+
+    #[test]
+    fn placa_vem_do_cabecalho() {
+        assert_eq!(placa_dos_params(Some("CodigoDaPlaca=PAEL-DI261940;NomeDaPlaca=PLACA ADAPTADORA  ENCODER LINEAR COM NOME BEM COMPRIDO;Revisao=REV.A")),
+                   json!({"codigo": "PAEL-DI261940", "nome": "PLACA ADAPTADORA ENCODER LINEAR COM NOME BEM COMPRIDO"}));
+        assert_eq!(placa_dos_params(Some("CodigoDaPlaca=PROJETO NÃO DEFINIDO")), json!({"codigo": "", "nome": ""}));
+        assert_eq!(placa_dos_params(None), json!({"codigo": "", "nome": ""}));
     }
 }

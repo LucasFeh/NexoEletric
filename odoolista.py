@@ -527,7 +527,7 @@ def linhas_extras(extras, acervo):
 
 
 def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observacao='',
-                  extras=None, fora=None):
+                  extras=None, fora=None, codigos=None):
     """O payload da spec, secao 2, mais o que a tela precisa saber (campos com _).
 
     `extras` sao os itens de lista-extras.json (le_extras): entram DEPOIS das linhas do
@@ -540,7 +540,14 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
     outras linhas, so para a tela mostrar e devolver: o payload_limpo os deixa deste lado, e a
     assinatura nem os ve.
     """
+    # 1.88.0: `codigos` (tools/rotas/variantes.py » codigos): {placa, montada, virgem, variante}. A "PCB montada" e a "PCB
+    # virgem" que o Odoo acha ou cria vao pelo CODIGO DA PCB (nunca o do equipamento, que so da o nome no quadro): a
+    # virgem e sempre o codigo da PCB; a montada, o da PCB ou, com uma variante ativa, o da variante -- e a chave de
+    # idempotencia ganha o codigo da variante (cada variante e outra placa montada no estoque). O schematic ja vem com o
+    # suprimido da variante marcado (variantes.aplica), e ele sai como o nao montar.
     # nao montar: sai antes de tudo (nem linha, nem "tirado" -- o esquema diz que nao vai)
+    suprimidos = sorted({str(it.get('ref') or '').strip() for it in (schematic.get('items') or [])
+                         if isinstance(it, dict) and it.get('t') == 'comp' and it.get('suprimido')}, key=_natural)
     nao_montar = dnp_refs(schematic)
     if nao_montar:
         schematic = dict(schematic, items=[it for it in (schematic.get('items') or [])
@@ -561,8 +568,10 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
     linhas = [resolve(g, acervo) for g in grupos]
     de_fora = linhas_extras(extras, acervo)
     linhas += de_fora
-    return {
-        'uid_externo': uid_externo(projeto, revisao),
+    cods = codigos or {}
+    var = cods.get('variante') or None
+    out = {
+        'uid_externo': uid_externo(projeto + (' ' + var['codigo'] if var and var.get('codigo') else ''), revisao),
         'projeto': projeto,
         'revisao': norm_rev(revisao),
         'origem': 'AltiumPCBMirror',
@@ -575,6 +584,15 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
         '_tirados': tirados,
         '_nao_montar': sorted(nao_montar, key=_natural),
     }
+    # 1.88.0: os codigos da placa montada e da virgem (o Odoo que nao os conhece ignora as chaves; ver a secao 10 do
+    # docs/prompt-altium-envio-de-lista.md)
+    if cods.get('placa') or cods.get('montada'):
+        out['codigo_placa'] = cods.get('virgem') or cods.get('placa') or ''
+        out['pcb_montada'] = {'codigo': cods.get('montada') or cods.get('placa') or ''}
+    if var:
+        out['variante'] = {'nome': var.get('nome', ''), 'codigo': var.get('codigo', '')}
+        out['_suprimidos'] = suprimidos
+    return out
 
 
 # O que o XML 1.0 nao tem: os controles C0 (menos tab, LF e CR), as metades de surrogate
@@ -1003,6 +1021,9 @@ def anexa_imagens(limpo, nome, raiz=RAIZ):
         out['imagem_montada'] = montada
     if virgem or tem_placa(nome, raiz):
         out['pcb_virgem'] = {'quantidade': 1}
+        # 1.88.0: a virgem e a da PCB (o mesmo codigo em todas as variantes)
+        if limpo.get('codigo_placa'):
+            out['pcb_virgem']['codigo'] = limpo['codigo_placa']
         if virgem:
             out['pcb_virgem']['imagem'] = virgem
     return out

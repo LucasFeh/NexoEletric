@@ -108,6 +108,14 @@ const NAO_DEFINIDO = 'PROJETO NÃO DEFINIDO';
 const CAMPOS_DEFINIR = ['CodigoDaPlaca', 'CodigoDoEquipamento'];
 const _definir = new Set(CAMPOS_DEFINIR.map(n => n.toLowerCase()));
 const ehNaoDefinido = v => String(v == null ? '' : v).trim().toUpperCase() === NAO_DEFINIDO;
+/* 1.88.0 (pedido do dono, 2026-11-09: "onde antes ia 'equipamento' no template agora só vai o código do equipamento"): o
+   NomeDoEquipamento sai do quadro (continua no cabeçalho, só não aparece). A linha que ele ocupava mostra a VARIANTE de
+   projeto ativa ("VARIANTE <nome> · <código>", hub-variantes.js), que é onde ela cabe no quadro da casa; sem variante, vazia.
+   setVariante(v) vale para os contextos seguintes (a vista e o PDF do esquema); contexto({variante}) troca. */
+const CAMPO_DA_VARIANTE = 'nomedoequipamento';
+let VARIANTE = null;
+function setVariante(v){ VARIANTE = v && (v.nome || v.codigo) ? { nome: String(v.nome || ''), codigo: String(v.codigo || '') } : null; }
+function textoVariante(v){ return v ? ('VARIANTE ' + (v.nome || '') + (v.codigo ? ' · ' + v.codigo : '')).replace(/\s+/g, ' ').trim() : ''; }
 /* o campo se preenche sozinho (não vai na tabela de campos do carimbo)? */
 function automatico(nome){
   const n = String(nome || '').toLowerCase();
@@ -212,6 +220,7 @@ function contexto(o){
   if (cod){ auto.CodigoDaPlaca = cod.codigo; if (!o.folhaNome) auto.Arquivo = 'SCH-' + cod.numero; }
   return { doc: parseParams(o.doc), proj: parseParams(o.proj), auto, tpl: (o.tpl && o.tpl.params) || {},
            estilo: o.estilo || '', faltante: o.faltante, naoDefinido: o.naoDefinido !== false,
+           variante: o.variante !== undefined ? o.variante : VARIANTE,
            /* cru: o editor de template mostra "=Title" como está, para se ver o que é campo */
            cru: !!o.cru };
 }
@@ -219,6 +228,7 @@ function contexto(o){
    apelidos dele antes de cair para a camada seguinte */
 function valor(nome, c){
   const k = nome.toLowerCase();
+  if (k === CAMPO_DA_VARIANTE && !c.cru) return textoVariante(c.variante);
   if (_auto.has(k) && !c.cru){
     const v = pega(c.auto, nome);
     if (v !== undefined) return String(v);
@@ -659,7 +669,7 @@ const API = { ESTILOS, CARIMBOS, APELIDOS, CAMPOS_PADRAO, ARQ_CASA, AUTOMATICOS,
               parseParams, serializaParams, acervo, lista, acha, contexto, valor, resolve, campos, codigoDoProjeto,
               folhaDe, estiloPorMedida, primitivas, desenha, itemFolha, daFolha,
               caixaItem, moveItem, fonteId, aplica,
-              NAO_DEFINIDO, CAMPOS_DEFINIR, ehNaoDefinido, naoDefinidos, camposNaoDefinidos, caixaTexto,
+              NAO_DEFINIDO, CAMPOS_DEFINIR, ehNaoDefinido, setVariante, textoVariante, naoDefinidos, camposNaoDefinidos, caixaTexto,
               idCasa, serializaCasa, copia };
 root.HubSchTemplate = API;
 if (typeof module === 'object' && module.exports) module.exports = API;

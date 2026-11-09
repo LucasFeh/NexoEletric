@@ -23,19 +23,33 @@
    E MAIS (2026-11-05): o botão "Logo DiEletrons" põe na PCB a logo da casa com o código da placa e a revisão, que se
    preenchem sozinhos (as strings especiais .CodigoDaPlaca e .Revisao, HubCore.resolveEspeciais); e o botão direito numa
    linha do catálogo muda o código ou o nome do item (POST /api/catalogo/editar, sem repetir código) e a categoria
-   (Placa / Equipamento / Produto: a coluna TIPO, novoGrupo). */
+   (Placa / Equipamento / Produto: a coluna TIPO, novoGrupo).
+
+   1.88.0 (pedidos do dono, 2026-11-09):
+   - "Produto" e "equipamento" viram uma coisa só (Equipamento); cabo, software, sistema, acessório e nacionalização são
+     categorias próprias, cada uma com o seu filtro (a lista vem do servidor: categorias). O agrupamento é na leitura.
+   - Placa começa com "P": a placa antiga sem o P fica com "⚠ código de placa errado" (e um filtro junta todas); escolher
+     uma delas como PCB avisa o motivo, mas deixa (o servidor recusa cadastrar ou editar placa sem o P).
+   - Sem limite de caracteres no nome (o "⚠ nome longo" saiu); o nome da PCB vai para o cabeçalho (NomeDaPlaca) e dá o
+     nome do projeto na árvore (rotuloProjeto); o quadro da folha mostra só o CÓDIGO do equipamento.
+   - HubCatalogo.escolhe({titulo, rotulo, proibidos}) -> Promise<item|null>: o mesmo catálogo para escolher (ou
+     cadastrar) um código só, o da VARIANTE de projeto (hub-variantes.js).
+   - HubCatalogo.rotuloProjeto(p) e HubCatalogo.nomeDaPlaca(codigo): o rótulo da árvore pelo nome da PCB. */
 (function (root) {
 'use strict';
 const T = () => root.HubSchTemplate;
 const DLG = () => root.HubDialog;
 const ANTIGOS = ['Desenho_linha_unica', 'Desenho_linha_um', 'Desenho_linha_dois', 'Equipamento_linha_um', 'Equipamento_linha_dois', 'Equipamento_linha_unica'];
-/* o nome do catálogo tem no máximo 27 caracteres (como "CARTAO MELPLAC 550 - P9CF01"; mcp/lib/catalogo.js NOME_MAX): o que
-   passar vai na descrição. Os antigos que passam ficam com o ⚠ na lista, e o filtro "⚠ nome longo" junta todos. */
-const NOME_MAX = 27;
-const tamNome = s => String(s || '').replace(/\s+/g, ' ').trim().length;
-const GRUPOS = [['todos', 'Todos'], ['placa', 'Placas'], ['equipamento', 'Equipamentos'], ['produto', 'Produtos']];
-const TIPOS_NOVOS = [['PLACA', 'Placa', 'placa'], ['EQUIPAMENTO', 'Equipamento', 'equipamento'], ['SISTEMA', 'Sistema', 'equipamento'],
-                     ['ACESSÓRIOS', 'Acessório', 'produto'], ['CABO', 'Cabo', 'produto'], ['SOFTWARE', 'Software', 'produto']];
+/* as categorias (1.88.0): as da casa, na ordem; o servidor manda as que a planilha tem (lista » categorias) e a tela as usa */
+const CATS_PADRAO = [
+  { id:'placa', rotulo:'Placas', tipo:'Placa' }, { id:'equipamento', rotulo:'Equipamentos', tipo:'Equipamento' },
+  { id:'sistema', rotulo:'Sistemas', tipo:'Sistema' }, { id:'cabo', rotulo:'Cabos', tipo:'Cabo' },
+  { id:'software', rotulo:'Softwares', tipo:'Software' }, { id:'acessorio', rotulo:'Acessórios', tipo:'Acessórios' },
+  { id:'nacionalizacao', rotulo:'Nacionalizações', tipo:'Nacionalização' }];
+const NOVAS = ['placa', 'equipamento', 'sistema', 'cabo', 'software', 'acessorio', 'nacionalizacao'];
+/* a placa começa com "P" (mcp/lib/catalogo.js » codigoDePlacaOk) */
+const placaSemP = i => Boolean(i && i.grupo === 'placa' && !/^P/.test(String(i.modelo || '').replace(/\s+/g, '').toUpperCase()));
+const MSG_SEM_P = 'código de placa errado: placa começa com "P" (P<sigla>-DI<ano><item>). Corrija pelo botão direito › Mudar código';
 const MAX = 400;
 
 const CSS = `
@@ -78,7 +92,9 @@ const CSS = `
 .ct-g{font-size:10px; padding:0 6px; border-radius:8px; border:1px solid currentColor; white-space:nowrap;}
 .ct-alerta{color:#f59e0b; font-weight:700; margin-left:5px; cursor:help;}
 tr.longo td.nmc{color:#f59e0b;}
-.ct-g.placa{color:#22c55e;} .ct-g.equipamento{color:#60a5fa;} .ct-g.produto{color:#f59e0b;}
+.ct-g.placa{color:#22c55e;} .ct-g.equipamento{color:#60a5fa;} .ct-g.sistema{color:#a78bfa;} .ct-g.cabo{color:#f59e0b;}
+.ct-g.software{color:#2dd4bf;} .ct-g.acessorio{color:#f472b6;} .ct-g.nacionalizacao{color:#94a3b8;}
+tr.semp td.cod{color:#f59e0b;}
 .ct-novo{margin:8px 14px 0; padding:10px; border:1px solid var(--border, var(--line, #444)); border-radius:6px; display:grid;
   grid-template-columns:repeat(4, minmax(0, 1fr)) auto; gap:8px; align-items:end;}
 .ct-novo[hidden]{display:none;}
@@ -129,11 +145,12 @@ function monta(caixa, ganchos){
   const pinta = () => {
     const p = T() ? T().parseParams(ganchos.schematic().params) : {};
     const placa = p.CodigoDaPlaca || p.Desenho_linha_unica || '';
+    const nomePlaca = p.NomeDaPlaca || '';
     const eq = p.CodigoDoEquipamento || p.Equipamento_linha_dois || '';
     /* 1.86.0: o que falta é o mesmo "PROJETO NÃO DEFINIDO" do quadro da folha */
     const ND = (T() && T().NAO_DEFINIDO) || 'PROJETO NÃO DEFINIDO';
     resumo.textContent = placa || eq ? 'placa ' + (placa || ND) + ' · equipamento ' + (eq || ND) : ND + ' — escolha a placa e o equipamento no catálogo';
-    resumo.title = (p.NomeDoEquipamento || p.Equipamento_linha_um || '');
+    resumo.title = [nomePlaca && 'PCB: ' + nomePlaca, (p.NomeDoEquipamento || p.Equipamento_linha_um) && 'equipamento: ' + (p.NomeDoEquipamento || p.Equipamento_linha_um)].filter(Boolean).join(' · ');
   };
   ganchos._pinta = pinta;
   pinta();
@@ -181,43 +198,56 @@ async function poeLogo(projeto){
   return true;
 }
 
+/* abre(g): o Definir projeto (g = {schematic(), mudou(), salva?, projeto?}); com g.escolha o mesmo catálogo escolhe UM
+   código (o da variante, 1.88.0): g.escolha = {titulo, rotulo, sub, proibidos: {CODIGO: 'motivo'}, resolve(item|null)} */
 function abre(g){
   css();
-  const sch = g.schematic();
+  const ESC = g.escolha || null;
+  const sch = ESC ? null : g.schematic();
   const T0 = T();
-  const p0 = T0.parseParams(sch.params);
+  const p0 = ESC ? {} : T0.parseParams(sch.params);
   /* a escolha: {modelo, nome, item?, cliente?} por papel */
-  const esc = {
-    placa: (p0.CodigoDaPlaca || p0.Desenho_linha_unica) ? { modelo: p0.CodigoDaPlaca || p0.Desenho_linha_unica, nome: '' } : null,
+  const esc = ESC ? { var: null } : {
+    placa: (p0.CodigoDaPlaca || p0.Desenho_linha_unica) ? { modelo: p0.CodigoDaPlaca || p0.Desenho_linha_unica, nome: p0.NomeDaPlaca || '' } : null,
     equip: (p0.CodigoDoEquipamento || p0.Equipamento_linha_dois || p0.NomeDoEquipamento || p0.Equipamento_linha_um)
       ? { modelo: p0.CodigoDoEquipamento || p0.Equipamento_linha_dois || '', nome: p0.NomeDoEquipamento || p0.Equipamento_linha_um || '' } : null,
   };
-  let itens = [], grupo = 'todos', cat = null;
+  let itens = [], grupo = 'todos', cat = null, cats = CATS_PADRAO.slice();
+  const proibido = i => ESC && ESC.proibidos ? ESC.proibidos[norm(i && i.modelo)] || '' : '';
 
   const ov = el('div', 'ct-ov'), bx = el('div', 'ct-box');
   const hd = el('div', 'ct-hd');
-  hd.append(el('h2', null, 'Definir projeto'), el('span', 'ct-dim', 'catálogo de todos os produtos — clique numa placa para o código da placa, num equipamento para o equipamento'));
-  /* as duas escolhas */
+  hd.append(el('h2', null, ESC ? (ESC.titulo || 'Escolher no catálogo') : 'Definir projeto'),
+    el('span', 'ct-dim', ESC ? (ESC.sub || 'escolha um item do catálogo ou cadastre um novo') : 'catálogo de todos os produtos — clique numa placa para o código da placa, num equipamento para o equipamento'));
+  /* as escolhas */
   const escolha = el('div', 'ct-escolha');
   const slot = (rot, papel) => {
     const s = el('div', 'ct-slot');
     const val = el('div', 'val');
     const x = bt('✕', 'tirar', () => { esc[papel] = null; pintaSlots(); pintaLista(); });
     s.append(el('span', 'rot', rot), val, x);
-    return { s, val, x };
+    return { s, val, x, papel };
   };
-  const sPlaca = slot('Código da placa', 'placa'), sEquip = slot('Equipamento', 'equip');
-  escolha.append(sPlaca.s, sEquip.s);
+  const slots = ESC ? [slot(ESC.rotulo || 'Código', 'var')] : [slot('Código da placa', 'placa'), slot('Equipamento', 'equip')];
+  if (ESC) escolha.style.gridTemplateColumns = '1fr';
+  escolha.append(...slots.map(s => s.s));
   /* a busca e os filtros */
   const barra = el('div', 'ct-barra');
   const busca = el('input'); busca.type = 'search'; busca.placeholder = 'pesquisar por código, nome, cliente ou descrição…';
-  const filtros = el('div'); filtros.style.cssText = 'display:flex; gap:4px';
+  const filtros = el('div'); filtros.style.cssText = 'display:flex; gap:4px; flex-wrap:wrap';
   const bFiltro = {};
-  for (const [id, rot] of GRUPOS){ const b = bt(rot, null, () => { grupo = id; pintaFiltros(); pintaLista(); }); bFiltro[id] = b; filtros.append(b); }
-  let soLongos = false;
-  const bLongo = bt('⚠ nome longo', 'só os itens com o nome acima de ' + NOME_MAX + ' caracteres (botão direito › Mudar nome para encurtar; o resto vai na descrição)',
-                    () => { soLongos = !soLongos; bLongo.classList.toggle('on', soLongos); pintaLista(); });
-  filtros.append(bLongo);
+  let soSemP = false;
+  const bSemP = bt('⚠ código de placa errado', 'só as placas com o código sem o "P" do começo (botão direito › Mudar código para corrigir)',
+                   () => { soSemP = !soSemP; bSemP.classList.toggle('on', soSemP); pintaLista(); });
+  function montaFiltros(){
+    filtros.replaceChildren();
+    for (const k of Object.keys(bFiltro)) delete bFiltro[k];
+    for (const [id, rot] of [['todos', 'Todos']].concat(cats.filter(c => c.n !== 0 || NOVAS.indexOf(c.id) < 2).map(c => [c.id, c.rotulo]))){
+      const b = bt(rot, null, () => { grupo = id; pintaFiltros(); pintaLista(); }); bFiltro[id] = b; filtros.append(b);
+    }
+    filtros.append(bSemP);
+    pintaFiltros();
+  }
   const conta = el('span', 'ct-dim');
   const bNovo = bt('+ Adicionar ao catálogo', 'quando o produto ainda não está no catálogo', () => { novo.hidden = !novo.hidden; if (!novo.hidden) iNome.focus(); });
   barra.append(busca, filtros, conta, bNovo);
@@ -225,9 +255,17 @@ function abre(g){
   const novo = el('div', 'ct-novo'); novo.hidden = true;
   const lab = (rot, input) => { const l = el('label'); l.append(document.createTextNode(rot), input); return l; };
   const sTipo = el('select');
-  for (const [v, r] of TIPOS_NOVOS){ const o = el('option', null, r); o.value = v; sTipo.append(o); }
-  const iNome = el('input'); iNome.placeholder = 'nome do produto (até ' + NOME_MAX + ' caracteres)'; iNome.maxLength = NOME_MAX;
-  iNome.title = 'até ' + NOME_MAX + ' caracteres, como "CARTAO MELPLAC 550 - P9CF01"; o que passar vai na descrição';
+  const pintaTipos = () => {
+    const v = sTipo.value;
+    sTipo.replaceChildren();
+    for (const id of NOVAS){ const c = cats.find(x => x.id === id) || CATS_PADRAO.find(x => x.id === id); const o = el('option', null, c.tipo); o.value = String(c.tipo).toUpperCase(); o.dataset.grupo = id; sTipo.append(o); }
+    if (v) sTipo.value = v;
+    else if (ESC) sTipo.value = 'EQUIPAMENTO';
+  };
+  pintaTipos();
+  const grupoDoTipo = () => (sTipo.selectedOptions[0] && sTipo.selectedOptions[0].dataset.grupo) || 'equipamento';
+  const iNome = el('input'); iNome.placeholder = 'nome do produto';
+  iNome.title = 'o nome no catálogo (sem limite de tamanho)';
   const iCli = el('input'); iCli.placeholder = 'cliente';
   const iVin = el('input'); iVin.placeholder = 'para que serve / de qual equipamento';
   const iSig = el('input'); iSig.placeholder = 'sigla'; iSig.style.textTransform = 'uppercase';
@@ -240,19 +278,34 @@ function abre(g){
   const erro = el('div', 'ct-erro');
   const lista = el('div', 'ct-lista');
   const pe = el('div', 'ct-pe');
-  const fecha = () => { ov.remove(); document.removeEventListener('keydown', tecla, true); };
+  let resolvido = false;
+  const fecha = () => {
+    ov.remove(); document.removeEventListener('keydown', tecla, true);
+    if (ESC && !resolvido){ resolvido = true; ESC.resolve(null); }
+  };
   const tecla = e => { if (e.key === 'Escape'){ e.stopPropagation(); e.preventDefault(); fecha(); } };
-  const bDef = bt('Definir', 'grava no carimbo do projeto (Salvar para ir ao disco)', () => define(), 'prim');
-  const bLogo = bt('Logo DiEletrons', 'define o projeto e põe na PCB a logo DiEletrons com o código da placa e a revisão (os dois automáticos: mudam com o projeto)',
-                   async () => {
-                     define();
-                     /* a PCB lê o código e a revisão do schematic.js do disco: a definição vai antes */
-                     if (g.salva && !(await g.salva())) return;
-                     if (g.projeto) await poeLogo(g.projeto);
-                   });
-  if (!g.projeto) bLogo.disabled = true;
-  pe.append(bLogo, el('span', 'ct-dim', 'os códigos vão para o carimbo; o projeto aprovado perde a aprovação (é uma modificação)'), el('span', 'sp'),
-            bt('Cancelar', null, fecha), bDef);
+  if (ESC){
+    const bUsa = bt('Usar este código', 'grava a variante com o código escolhido', () => {
+      const i = esc.var;
+      if (!i){ erro.textContent = 'escolha um item do catálogo (ou cadastre um novo)'; return; }
+      const m = proibido(i);
+      if (m){ erro.textContent = m; return; }
+      resolvido = true; ESC.resolve(i); fecha();
+    }, 'prim');
+    pe.append(el('span', 'ct-dim', ESC.pe || 'o código vem do catálogo de todos os produtos (cadastre se ainda não existe)'), el('span', 'sp'), bt('Cancelar', null, fecha), bUsa);
+  } else {
+    const bDef = bt('Definir', 'grava no carimbo do projeto (Salvar para ir ao disco)', () => define(), 'prim');
+    const bLogo = bt('Logo DiEletrons', 'define o projeto e põe na PCB a logo DiEletrons com o código da placa e a revisão (os dois automáticos: mudam com o projeto)',
+                     async () => {
+                       define();
+                       /* a PCB lê o código e a revisão do schematic.js do disco: a definição vai antes */
+                       if (g.salva && !(await g.salva())) return;
+                       if (g.projeto) await poeLogo(g.projeto);
+                     });
+    if (!g.projeto) bLogo.disabled = true;
+    pe.append(bLogo, el('span', 'ct-dim', 'os códigos vão para o carimbo; o projeto aprovado perde a aprovação (é uma modificação)'), el('span', 'sp'),
+              bt('Cancelar', null, fecha), bDef);
+  }
   bx.append(hd, escolha, barra, novo, erro, lista, pe);
   ov.append(bx); document.body.append(ov);
   document.addEventListener('keydown', tecla, true);
@@ -268,50 +321,53 @@ function abre(g){
     return num ? itens.find(i => { const m = norm(i.modelo); return m === num || m.endsWith('-' + num); }) || null : null;
   }
   function pintaSlots(){
-    for (const [s, v] of [[sPlaca, esc.placa], [sEquip, esc.equip]]){
+    for (const s of slots){
+      const v = esc[s.papel];
       s.s.classList.toggle('cheio', Boolean(v));
       s.val.replaceChildren();
       s.x.hidden = !v;
       if (!v){ s.val.append(el('div', 'nm', '— nenhum —')); continue; }
       const i = v.item ? v : (achaPorCodigo(v.modelo) || v);
       s.val.append(el('div', 'cod', i.modelo || '—'), el('div', 'nm', (i.nome || v.nome || '') + (i.cliente ? ' · ' + i.cliente : '')));
-      if (tamNome(i.nome || v.nome) > NOME_MAX){
-        const a = el('span', 'ct-alerta', '⚠ nome com ' + tamNome(i.nome || v.nome) + ' caracteres (limite ' + NOME_MAX + ')');
-        a.title = 'o nome passa do limite: encurte pelo botão direito › Mudar nome e ponha o resto na descrição';
+      if (s.papel === 'placa' && placaSemP(i)){
+        const a = el('span', 'ct-alerta', '⚠ código de placa errado');
+        a.title = MSG_SEM_P;
         s.val.append(a);
       }
+      const m = proibido(i);
+      if (m) s.val.append(el('span', 'ct-alerta', '⚠ ' + m));
     }
   }
-  function pintaFiltros(){ for (const [id] of GRUPOS) bFiltro[id].classList.toggle('on', grupo === id); }
+  function pintaFiltros(){ for (const id of Object.keys(bFiltro)) bFiltro[id].classList.toggle('on', grupo === id); }
   function pintaLista(){
     if (!cat){ return; }
     const q = semAcento(busca.value.trim());
     const qc = norm(busca.value);
-    const achou = itens.filter(i => (grupo === 'todos' || i.grupo === grupo) && (!soLongos || tamNome(i.nome) > NOME_MAX)
+    const achou = itens.filter(i => (grupo === 'todos' || i.grupo === grupo) && (!soSemP || placaSemP(i))
       && (!q || semAcento(i.modelo + ' ' + i.nome + ' ' + i.cliente + ' ' + i.vinculo + ' ' + i.tipo).includes(q) || (qc && norm(i.modelo).includes(qc))));
     conta.textContent = achou.length + ' de ' + itens.length;
     const tb = el('tbody');
-    const sel = new Set([esc.placa && norm(esc.placa.modelo), esc.equip && norm(esc.equip.modelo)].filter(Boolean));
+    const sel = new Set(Object.values(esc).filter(Boolean).map(v => norm(v.modelo)));
     for (const i of achou.slice(0, MAX)){
       const tr = el('tr');
       tr.title = i.vinculo || '';
       if (sel.has(norm(i.modelo))) tr.className = 'sel';
-      const g = el('span', 'ct-g ' + i.grupo, i.tipo || i.grupo);
-      const tdG = el('td'); tdG.append(g);
+      const gg = el('span', 'ct-g ' + i.grupo, i.tipo || i.grupo);
+      const tdG = el('td'); tdG.append(gg);
       const tdA = el('td', 'acoes');
-      tdA.append(bt('Placa', 'usar como código da placa', ev => { ev.stopPropagation(); usa(i, 'placa'); }),
+      if (ESC) tdA.append(bt('Usar', ESC.rotulo || 'usar este código', ev => { ev.stopPropagation(); usa(i, 'var'); }));
+      else tdA.append(bt('Placa', 'usar como código da placa', ev => { ev.stopPropagation(); usa(i, 'placa'); }),
                  document.createTextNode(' '),
-                 bt('Equip.', 'usar como equipamento (código e nome)', ev => { ev.stopPropagation(); usa(i, 'equip'); }));
-      const tdN = el('td', 'nmc', i.nome);
-      const n = tamNome(i.nome);
-      if (n > NOME_MAX){
-        tr.classList.add('longo');
+                 bt('Equip.', 'usar como equipamento (o código vai para o quadro da folha)', ev => { ev.stopPropagation(); usa(i, 'equip'); }));
+      const tdC = el('td', 'cod', i.modelo);
+      if (placaSemP(i)){
+        tr.classList.add('semp');
         const a = el('span', 'ct-alerta', '⚠');
-        a.title = 'nome com ' + n + ' caracteres: o limite é ' + NOME_MAX + ' (como "CARTAO MELPLAC 550 - P9CF01"). Encurte pelo botão direito › Mudar nome; o resto vai na descrição';
-        tdN.append(a);
+        a.title = MSG_SEM_P;
+        tdC.append(a);
       }
-      tr.append(el('td', null, String(i.item)), tdG, el('td', 'cod', i.modelo), tdN, el('td', null, i.cliente), el('td', 'vin', i.vinculo), tdA);
-      tr.addEventListener('click', () => usa(i, i.grupo === 'placa' ? 'placa' : 'equip'));
+      tr.append(el('td', null, String(i.item)), tdG, tdC, el('td', 'nmc', i.nome), el('td', null, i.cliente), el('td', 'vin', i.vinculo), tdA);
+      tr.addEventListener('click', () => usa(i, ESC ? 'var' : i.grupo === 'placa' ? 'placa' : 'equip'));
       tr.addEventListener('contextmenu', ev => { ev.preventDefault(); menuDoItem(i, ev.clientX, ev.clientY); });
       tb.append(tr);
     }
@@ -321,9 +377,9 @@ function abre(g){
     th.append(hr); tab.append(th, tb);
     lista.replaceChildren(tab);
     if (achou.length > MAX) lista.append(el('div', 'ct-dim', 'mostrando ' + MAX + ' de ' + achou.length + ': refine a pesquisa'));
-    if (!achou.length) lista.append(el('div', 'ct-dim', 'nada com essa pesquisa' + (grupo !== 'todos' ? ' neste filtro' : '') + ' — "+ Adicionar ao catálogo" registra um novo'));
+    if (!achou.length) lista.append(el('div', 'ct-dim', 'nada com essa pesquisa' + (grupo !== 'todos' || soSemP ? ' neste filtro' : '') + ' — "+ Adicionar ao catálogo" registra um novo'));
   }
-  /* o botão direito: mudar o código ou o nome do item no catálogo */
+  /* o botão direito: mudar o código ou o nome do item no catálogo, e a categoria */
   let menu = null;
   const fechaMenu = () => { if (menu){ menu.remove(); menu = null; } };
   ov.addEventListener('mousedown', e => { if (menu && !menu.contains(e.target)) fechaMenu(); }, true);
@@ -334,11 +390,12 @@ function abre(g){
       bt('Mudar código…', 'o código (MODELO) deste item no catálogo', () => { fechaMenu(); muda(i, 'codigo'); }),
       bt('Mudar nome…', 'o nome deste item no catálogo', () => { fechaMenu(); muda(i, 'nome'); }),
       el('div', 'tit', 'Categoria'));
-    /* a categoria (2026-11-05): grava na coluna TIPO do catálogo */
-    for (const [g, rot] of [['placa', 'Placa'], ['equipamento', 'Equipamento'], ['produto', 'Produto']]){
-      const b = bt('', i.grupo === g ? 'a categoria de agora' : 'passar este item para ' + rot, () => { fechaMenu(); mudaCategoria(i, g); });
-      b.append(el('span', 'ct-g ' + g, rot), document.createTextNode(i.grupo === g ? '  ✓' : ''));
-      if (i.grupo === g) b.style.fontWeight = '600';
+    /* a categoria (2026-11-05; 1.88.0: as da casa, sem "Produto"): grava na coluna TIPO do catálogo */
+    for (const gid of NOVAS){
+      const c = cats.find(x => x.id === gid) || CATS_PADRAO.find(x => x.id === gid);
+      const b = bt('', i.grupo === gid ? 'a categoria de agora' : 'passar este item para ' + c.tipo, () => { fechaMenu(); mudaCategoria(i, gid); });
+      b.append(el('span', 'ct-g ' + gid, c.tipo), document.createTextNode(i.grupo === gid ? '  ✓' : ''));
+      if (i.grupo === gid) b.style.fontWeight = '600';
       menu.append(b);
     }
     ov.append(menu);
@@ -352,7 +409,7 @@ function abre(g){
     const v = D && D.texto ? await D.texto((campo === 'codigo' ? 'Código novo' : 'Nome novo') + ' do item ' + i.item + ' (' + i.tipo + '):',
       { title: campo === 'codigo' ? 'Mudar código' : 'Mudar nome', v: atual, ok: 'Mudar',
         valida: s => !String(s || '').trim() ? 'não pode ficar vazio'
-          : campo === 'nome' && tamNome(s) > NOME_MAX ? 'tem ' + tamNome(s) + ' caracteres: o limite é ' + NOME_MAX + ' (o resto vai na descrição)'
+          : campo === 'codigo' && i.grupo === 'placa' && !/^P/.test(norm(s)) ? 'placa começa com "P"'
           : campo === 'codigo' && itens.some(o => o !== i && norm(o.modelo) === norm(s)) ? 'esse código já é de outro item' : '' }) : null;
     if (v == null || v.trim() === String(atual).trim()) return;
     const corpo = { item: i.item, codigo: i.modelo };
@@ -364,17 +421,17 @@ function abre(g){
     if (!j || !j.ok){ erro.textContent = 'não mudou: ' + ((j && j.error) || 'sem resposta'); return; }
     const velho = norm(i.modelo);
     i.modelo = j.codigo; i.nome = j.nome;
-    for (const k of ['placa', 'equip']) if (esc[k] && (esc[k] === i || norm(esc[k].modelo) === velho)) esc[k] = i;
+    for (const k of Object.keys(esc)) if (esc[k] && (esc[k] === i || norm(esc[k].modelo) === velho)) esc[k] = i;
     erro.textContent = '';
     pintaSlots(); pintaLista();
     toast('item ' + i.item + ': ' + (campo === 'codigo' ? 'código ' + j.codigo : 'nome ' + j.nome) + ' (gravado no catálogo)', 'ok', 5000);
   }
-  async function mudaCategoria(i, g){
-    if (i.grupo === g) return;
+  async function mudaCategoria(i, gid){
+    if (i.grupo === gid) return;
     let j = null;
     try {
       j = await (await fetch('/api/catalogo/editar', { method:'POST', headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ item: i.item, codigo: i.modelo, novoGrupo: g }) })).json();
+        body: JSON.stringify({ item: i.item, codigo: i.modelo, novoGrupo: gid }) })).json();
     } catch (e) { j = { ok:false, error:String(e && e.message || e) }; }
     if (!j || !j.ok){ erro.textContent = 'não mudou: ' + ((j && j.error) || 'sem resposta'); return; }
     i.tipo = j.tipo; i.grupo = j.grupo;
@@ -388,7 +445,8 @@ function abre(g){
     if (papel === 'placa' && (!esc.equip || !esc.equip.modelo)){
       for (const c of codigosNoTexto(i.vinculo + ' ' + i.nome)){ const e = achaPorCodigo(c, true); if (e && e.grupo !== 'placa'){ esc.equip = e; break; } }
     }
-    erro.textContent = '';
+    erro.textContent = papel === 'placa' && placaSemP(i) ? '⚠ ' + i.modelo + ': ' + MSG_SEM_P + ' — dá para usar assim mesmo' : (proibido(i) ? '⚠ ' + proibido(i) : '');
+    if (papel === 'placa' && placaSemP(i)) toast(i.modelo + ': ' + MSG_SEM_P, 'warn', 8000);
     pintaSlots(); pintaLista();
   }
   /* o código que o item novo vai ganhar (o mesmo motor do Novo projeto) */
@@ -404,7 +462,8 @@ function abre(g){
       if (!iSig.dataset.mexida) iSig.value = j.sigla;
       cod.textContent = j.codigo;
       const dup = achaPorCodigo(j.codigo);
-      erro.textContent = dup ? 'o código ' + j.codigo + ' já existe (item ' + dup.item + ')' : '';
+      erro.textContent = dup ? 'o código ' + j.codigo + ' já existe (item ' + dup.item + ')'
+        : grupoDoTipo() === 'placa' && !/^P/.test(norm(j.codigo)) ? 'placa começa com "P": ' + j.codigo + ' seria recusado' : '';
     }, 300);
   };
   iNome.addEventListener('input', previa); sTipo.addEventListener('change', previa);
@@ -412,8 +471,8 @@ function abre(g){
   async function registra(){
     const nome = iNome.value.trim();
     if (!nome){ erro.textContent = 'dê o nome do produto'; iNome.focus(); return; }
-    if (tamNome(nome) > NOME_MAX){ erro.textContent = 'o nome tem ' + tamNome(nome) + ' caracteres e o limite é ' + NOME_MAX + ': o que passar vai na descrição'; iNome.focus(); return; }
-    const gr = (TIPOS_NOVOS.find(t => t[0] === sTipo.value) || [])[2];
+    const gr = grupoDoTipo();
+    if (gr === 'placa' && iSig.value.trim() && !/^P/i.test(iSig.value.trim())){ erro.textContent = 'placa começa com "P": a sigla ' + iSig.value.trim().toUpperCase() + ' não começa'; iSig.focus(); return; }
     const igual = itens.find(i => i.grupo === gr && semAcento(i.nome).trim() === semAcento(nome));
     if (igual){ erro.textContent = '"' + nome + '" já está no catálogo com o código ' + igual.modelo + ' (item ' + igual.item + '): use esse'; return; }
     bReg.disabled = true; bReg.textContent = 'Registrando…';
@@ -425,20 +484,27 @@ function abre(g){
     } catch (e) { j = { ok:false, error:String(e && e.message || e) }; }
     bReg.disabled = false; bReg.textContent = 'Registrar';
     if (!j || !j.ok){ erro.textContent = 'não registrou: ' + ((j && j.error) || 'sem resposta'); return; }
-    const i = { item: j.item, tipo: j.tipo, grupo: gr || 'produto', nome: j.nome, cliente: iCli.value.trim().toUpperCase(), modelo: j.codigo, vinculo: iVin.value.trim() };
+    const i = { item: j.item, tipo: j.tipo, grupo: gr, nome: j.nome, cliente: iCli.value.trim().toUpperCase(), modelo: j.codigo, vinculo: iVin.value.trim() };
     itens.unshift(i);
     for (const x of [iNome, iCli, iVin, iSig]) x.value = '';
     delete iSig.dataset.mexida; cod.textContent = '—'; novo.hidden = true;
-    usa(i, i.grupo === 'placa' ? 'placa' : 'equip');
+    usa(i, ESC ? 'var' : i.grupo === 'placa' ? 'placa' : 'equip');
     toast(j.codigo + ' registrado no catálogo (item ' + j.item + ')', 'ok', 5000);
   }
   function define(){
     const p = T0.parseParams(sch.params);
     for (const k of ANTIGOS) delete p[k];
-    if (esc.placa) p.CodigoDaPlaca = esc.placa.modelo; else delete p.CodigoDaPlaca;
+    if (esc.placa){
+      p.CodigoDaPlaca = esc.placa.modelo;
+      /* 1.88.0: o nome da PCB (sem limite) vai para o cabeçalho: é o nome do projeto na árvore; não vai ao quadro */
+      const ip = esc.placa.item ? esc.placa : achaPorCodigo(esc.placa.modelo);
+      const nm = limpaParam((ip && ip.nome) || esc.placa.nome || '');
+      if (nm) p.NomeDaPlaca = nm.toUpperCase(); else delete p.NomeDaPlaca;
+    } else { delete p.CodigoDaPlaca; delete p.NomeDaPlaca; }
     if (esc.equip){
       if (esc.equip.modelo) p.CodigoDoEquipamento = esc.equip.modelo; else delete p.CodigoDoEquipamento;
-      if (esc.equip.nome) p.NomeDoEquipamento = String(esc.equip.nome).toUpperCase(); else delete p.NomeDoEquipamento;
+      /* o nome do equipamento continua guardado no cabeçalho, mas o quadro da folha mostra só o código (1.88.0) */
+      if (esc.equip.nome) p.NomeDoEquipamento = limpaParam(String(esc.equip.nome).toUpperCase()); else delete p.NomeDoEquipamento;
     } else { delete p.CodigoDoEquipamento; delete p.NomeDoEquipamento; }
     const cli = (esc.equip && esc.equip.cliente) || (esc.placa && esc.placa.cliente);
     if (cli) p.Cliente = String(cli).toUpperCase();
@@ -450,12 +516,15 @@ function abre(g){
     toast('projeto definido: placa ' + (p.CodigoDaPlaca || '—') + ' · equipamento ' + (p.CodigoDoEquipamento || '—'), 'ok', 5000);
   }
 
-  pintaSlots(); pintaFiltros();
+  pintaSlots(); montaFiltros();
   lista.append(el('div', 'ct-dim', 'abrindo o catálogo de todos os produtos…'));
   busca.addEventListener('input', pintaLista);
   carregaCatalogo().then(j => {
     cat = j;
     itens = (j.itens || []).slice().sort((a, b) => b.item - a.item);
+    if (Array.isArray(j.categorias) && j.categorias.length) cats = j.categorias;
+    guardaNomes(itens);
+    montaFiltros(); pintaTipos();
     pintaSlots(); pintaLista();
     busca.focus();
   }, e => {
@@ -463,5 +532,36 @@ function abre(g){
   });
 }
 
-root.HubCatalogo = { monta, abre, abreDaFolha, poeLogo, codigosNoTexto };
+/* o código de UM item do catálogo (a variante de projeto, hub-variantes.js) -> Promise<item|null> */
+function escolhe(o){
+  o = o || {};
+  return new Promise(resolve => abre({ escolha: Object.assign({}, o, { resolve }) }));
+}
+
+/* ============================== a árvore: o nome da PCB ==============================
+   1.88.0 (pedido do dono: "os nomes que ficam na lateral esquerda levam o nome da PCB e não do equipamento"): a linha do
+   projeto mostra o NOME DA PCB (NomeDaPlaca do cabeçalho; sem ele, o nome do item do catálogo para o CodigoDaPlaca) e o
+   código ao lado; sem placa definida, o nome da pasta com a marca "PCB não definida". A pasta não muda de nome. */
+const NOMES = new Map();                  /* CODIGO -> nome no catálogo (o que esta sessão já leu) */
+let pedidoNomes = null;
+function guardaNomes(lst){ for (const i of lst || []) if (i && i.modelo) NOMES.set(norm(i.modelo), i.nome || ''); }
+function nomeDaPlaca(codigo){ return NOMES.get(norm(codigo)) || ''; }
+/* lê o catálogo uma vez por sessão (a planilha mora no NAS), só se algum projeto precisa -> Promise<bool> */
+function carregaNomes(){
+  if (!pedidoNomes) pedidoNomes = carregaCatalogo().then(j => { guardaNomes(j.itens); return true; }, () => false);
+  return pedidoNomes;
+}
+/* {nome, codigo, definida, pasta, semNome, busca} do projeto p (uma linha do /api/index.json: p.placa = {codigo, nome}) */
+function rotuloProjeto(p){
+  const pasta = String((p && p.name) || '');
+  const pl = (p && p.placa) || {};
+  const codigo = String(pl.codigo || '').trim();
+  const nome = String(pl.nome || '').trim() || (codigo ? nomeDaPlaca(codigo) : '');
+  const definida = Boolean(codigo);
+  return { nome: nome || codigo || pasta, codigo, definida, pasta, semNome: definida && !nome,
+           busca: (nome + ' ' + codigo + ' ' + norm(codigo) + ' ' + pasta).toLowerCase() };
+}
+const limpaParam = s => String(s == null ? '' : s).replace(/[;|]/g, ' ').replace(/\s+/g, ' ').trim();
+
+root.HubCatalogo = { monta, abre, abreDaFolha, poeLogo, codigosNoTexto, escolhe, rotuloProjeto, nomeDaPlaca, carregaNomes, placaSemP };
 })(typeof window !== 'undefined' ? window : globalThis);

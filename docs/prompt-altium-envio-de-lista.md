@@ -285,3 +285,24 @@ ignora as duas chaves.
 5. O **código** da placa (`codigo`) hoje cai no nome do projeto (`PRJ-UR-DI261924`), e a placa da
    casa se chama `PURI-DI261924`. Quem confere corrige na ficha antes de aprovar; a virgem tem
    que usar o código **corrigido**, por isso ela é achada/criada na aprovação e não no recebimento.
+
+## 11. Os códigos da placa montada e da virgem (o hub manda desde o NexoEletric 1.88.0; o Odoo ainda NÃO usa)
+
+Pedido do dono (2026-11-09): "na lista de envio para o odoo, agora pra gerar a 'PCB montada' e a 'PCB virgem' usa o
+código da PCB; equipamento só é utilizado pra definir o nome no template". O payload (ensaio e envio) ganha:
+
+```python
+payload = {
+    ...
+    'codigo_placa': 'PAEL-DI261940',              # o código da PCB (CodigoDaPlaca do esquema): a VIRGEM
+    'pcb_montada': {'codigo': 'PAELST-DI261951'}, # o código da MONTADA: o da PCB, ou o da variante de projeto ativa
+    'variante': {'nome': 'Sem timer', 'codigo': 'PAELST-DI261951'},   # só com uma variante ativa
+    'pcb_virgem': {'quantidade': 1, 'codigo': 'PAEL-DI261940', ...},  # só no envio (seção 10), agora com o código
+}
+```
+
+A **variante de projeto** é a mesma PCB montando menos componentes (os suprimidos não vão nas linhas). Cada variante é
+outro produto montado (o código dela vem do catálogo da casa) sobre a MESMA virgem; a `uid_externo` ganha o código da
+variante (`altium:<PROJETO>-<CODIGO DA VARIANTE>:<REV>`). Sem variante, a chave é a de sempre. O código do equipamento
+não vai ao Odoo. O Odoo deve usar `pcb_montada.codigo` para achar/criar a montada e `codigo_placa` para a virgem, no
+lugar do código tirado do nome do projeto (item 5 da seção 10).

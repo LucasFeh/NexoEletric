@@ -4,6 +4,71 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.88.0 — 2026-11-09
+
+**A árvore da esquerda vira o controle de PCB, o catálogo fica com Placas e Equipamentos (mais as categorias próprias) e
+nasce a VARIANTE DE PROJETO: a mesma PCB para produtos diferentes, onde só se suprime (não monta) componente.**
+
+- **Árvore = controle de PCB.** Cada projeto aparece pelo **nome da PCB** (o nome do item do catálogo para o código da
+  placa do projeto) com o **código da placa** em cinza ao lado; o título (passar o mouse) diz também a pasta. Projeto sem
+  placa definida: o nome da pasta, como antes, com a marca discreta **"sem PCB"** (o título diz "PCB não definida"). Projeto com variantes ganha a
+  etiqueta "N variantes". A busca acha pelo nome da PCB, pelo código e pelo nome da pasta. Nenhuma pasta muda de nome.
+  O nome da PCB vai para o cabeçalho do esquema (`NomeDaPlaca`) no Definir projeto e no Novo projeto; projeto antigo que
+  só tem o código busca o nome no catálogo uma vez por sessão. O `/api/index.json` (Python e Rust) traz `placa: {codigo,
+  nome}` e `variantes`.
+- **Sem limite de caracteres no nome** (placa ou equipamento): o limite de 27 da 1.82.0 e o "⚠ nome longo" saíram.
+- **Quadro da folha:** onde ia o equipamento agora vai **só o código do equipamento** (o `NomeDoEquipamento` continua
+  guardado no cabeçalho, só não aparece). Sem código: "PROJETO NÃO DEFINIDO", como na 1.86.0. O campo PLACA continua com o
+  código da placa.
+- **Catálogo (Definir projeto):** "produto" e "equipamento" viram uma coisa só — **Equipamento**. Cabo, software, sistema,
+  acessório e nacionalização são **categorias próprias**, cada uma com o seu filtro (um TIPO novo que a planilha inventar
+  vira uma categoria com o próprio nome). O filtro "Produtos" sumiu; o cadastro novo e o "mudar categoria" do botão direito
+  oferecem Placa, Equipamento, Sistema, Cabo, Software, Acessórios e Nacionalização. O agrupamento é **na leitura**: a
+  planilha não é reescrita; só grava o que a pessoa cadastra ou edita pela tela. Na cópia do catálogo de 09/11 (1.887
+  itens): Placas 89, Equipamentos 1.746, Acessórios 28, Nacionalizações 16, Sistemas 4, Cabos 3, Software 1 (nenhum item
+  tem TIPO "Produto"; os 32 que a 1.87 chamava de produto eram acessório, cabo e software).
+- **Placa começa com "P".** Cadastrar ou editar placa com código sem o "P" é recusado com a mensagem (também passar um
+  item para Placa sem o P no código). As placas antigas sem o P ficam marcadas **"⚠ código de placa errado"** e o filtro
+  de mesmo nome junta todas (30 na cópia de 09/11); escolher uma delas como PCB no Definir projeto **avisa o motivo e
+  deixa** (o Novo projeto também recusa sigla de placa sem o P).
+- **Lista do Odoo:** a **PCB montada** e a **PCB virgem** vão pelo **código da PCB** (`codigo_placa`,
+  `pcb_montada.codigo`, `pcb_virgem.codigo` no payload; o equipamento só dá o nome no quadro e não vai ao Odoo). Regra com
+  variantes (decisão de 09/11, fácil de trocar: `tools/rotas/variantes.py » codigos` e `hub-variantes.js » codigos`):
+  **PCB virgem = código da PCB** (a fibra é a mesma em todas as variantes); **PCB montada = código da PCB na variante
+  padrão, e o código da variante quando há uma ativa** (cada variante é outro produto montado; a chave de idempotência
+  ganha o código da variante). A tela do envio mostra "PCB montada: … · PCB virgem: …" e a variante.
+- **Variante de projeto** (`Projects/<p>/variantes.json`, formato `nexoeletric-variantes-1`, viaja para o NexoBD com o
+  projeto; quem suprimiu o quê vai para o Histórico › Modificações):
+  - Área **"Variante de projeto"** no painel da direita: em Configurações no Esquema, nas Propriedades da placa na PCB.
+    Seletor "Padrão (todos montados)" + as variantes; **+ Nova** pede o nome e **na hora** abre o catálogo do Definir
+    projeto para escolher ou cadastrar o **código da variante** (sem código não cria; o código não pode ser o da PCB nem o
+    de outra variante); Renomear, Código… (pelo catálogo) e Apagar. Mostra a PCB montada/virgem e os suprimidos (clique
+    acha o componente).
+  - A variante ativa é **desta máquina** (`.variante-ativa.json`, fora do NexoBD): trocar aqui não muda a vista de quem
+    abre o mesmo projeto noutro computador. Trocar recarrega o esquema e a PCB.
+  - **Na variante a PCB é exatamente a mesma**: as barras de edição do esquema e da PCB somem (o Salvar, o Definir projeto
+    e o Trocar acervo também); fica a barra da variante com **Suprimir / Montar** (botão, menu do botão direito e
+    **Shift+S**). Qualquer outra edição (mover, apagar, propriedades, fio, trilha, destravar a PCB…) é desfeita com o aviso.
+    No servidor: com uma variante ativa o `/api/save` (Python e Rust) e as escritas do MCP recusam mudar `schematic.js`,
+    `changes.js`, `annotations.js` e `rules.js` (409 `variante_ativa`); só o `variantes.json` muda.
+  - **Componente suprimido** (não montado): no esquema com o **X vermelho** do "Not Fitted" e o símbolo esmaecido; na PCB
+    com um véu escuro e o X (o cobre, os pads e os furos continuam: a placa é a mesma) e **fora do 3D** (e da foto da placa
+    montada). Sai do **BOM** (do painel e da página da bancada no NexoBD), da **lista do Odoo**, do **CSV da Neoden**
+    (pick-and-place) e do `bom_listar` do MCP. **Gerber da variante = Gerber da PCB.** O envio à JLC só manda o Gerber
+    (não há BOM/CPL de montagem na JLC hoje), então não muda.
+  - **Exportações dizem a variante**: o nome do BOM e do CSV da Neoden e o PDF do esquema ganham " - variante <código>";
+    o quadro da folha mostra **"VARIANTE <nome> · <código>"** na linha que era do nome do equipamento (e um selo no alto da
+    vista). O campo PLACA continua com o código da PCB.
+  - **Permissões:** criar, renomear, trocar código, apagar e suprimir = edição (responsável, colaborador convidado ou
+    admin); o visualizador e quem não foi convidado levam 403 `sem_permissao` (tela e servidor, `ROTAS_EDICAO`). Todo
+    mundo pode **trocar de variante** para ver e exportar.
+  - **MCP:** `variante_listar`, `variante_ativar` (livre também para o visualizador) e `variante_suprimir` (a equipe).
+- Por dentro: `tools/rotas/variantes.py` (rotas `/api/variantes*`, a trava do save, `aplica`/`codigos`), `hub-variantes.js`
+  (o mesmo no navegador e no Node, e a tela), `rust/crates/nexo-hub/src/variantes.rs`, `mcp/lib/variantes.js`,
+  `mcp/ferramentas/variantes.js`; `hub-catalogo.js` ganhou `escolhe()` (o catálogo para escolher um código só) e
+  `rotuloProjeto()`. Testes: `tests/test_variantes.py`, `tests/test-variantes.js`, `tests/test-catalogo.js` (categorias,
+  placa sem P, sem limite), Rust (a trava do save e o `placa` do índice).
+
 ## 1.87.0 — 2026-11-09
 
 **A função do usuário vem do Nexo Hub: Administrador, Usuário ou Apenas visualizador. O visualizador vê, baixa, exporta

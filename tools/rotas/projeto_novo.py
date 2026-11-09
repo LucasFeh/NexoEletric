@@ -16,7 +16,8 @@ Rotas:
   GET  /api/catalogo                           -> {ok, itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo}], proximo, ano}
   POST /api/catalogo/registrar {tipo, nome, cliente?, vinculo?, sigla?} -> {ok, item, codigo, ...} (409: codigo ou nome repetido)
   POST /api/catalogo/editar {item, codigo, novoCodigo?, novoNome?, novoGrupo?}  -> {ok, item, codigo, nome, tipo, grupo}
-       (409: codigo repetido; novoGrupo = placa|equipamento|produto, grava na coluna TIPO)
+       (409: codigo repetido ou placa sem o P; novoGrupo = placa|equipamento|sistema|cabo|software|acessorio|
+       nacionalizacao -- 1.88.0: "produto" virou equipamento --, grava na coluna TIPO)
   GET  /api/projeto/novo/catalogo?codigo=      -> {ok, achou:{item, nome, cliente, modelo, ...}|null}
   GET  /api/projeto/novo/templates             -> {ok, padrao, templates:[{id, nome, w, h, estilo}]} (os da casa)
   POST /api/projeto/novo {nome, cliente?, vinculo?, sigla?, iniciador?, projeto?, template? ('' = sem template)}
@@ -70,6 +71,8 @@ def params_template(codigo, nome, iniciador, cliente='', data=None):
     placa, o desenhista e a data; o equipamento vem do Definir projeto (2026-11-05)"""
     t = data or time.localtime()
     p = {'CodigoDaPlaca': codigo,
+         # 1.88.0: o nome da PCB (o do catalogo, sem limite) da o nome do projeto na arvore; nao vai ao quadro
+         'NomeDaPlaca': ' '.join(str(nome or '').split()).upper(),
          'Desenhista_DiEletrons': ' '.join(str(iniciador).split()),
          'Data_desenho': time.strftime('%d/%m/%y', t), 'Revisao': 'REV.A'}
     if cliente:
@@ -152,7 +155,8 @@ def registra(app, root, h):
                               'vinculo': data.get('vinculo') or '', 'sigla': data.get('sigla') or ''})
         except Exception as e:             # noqa: BLE001
             msg = str(e)
-            return {'ok': False, 'error': msg}, 409 if ('já está no catálogo' in msg or 'caracteres' in msg) else 503
+            return {'ok': False, 'error': msg}, 409 if ('já está no catálogo' in msg or 'começar com "P"' in msg
+                                                      or 'sigla' in msg) else 503
         r.pop('ok', None)
         return dict(ok=True, **r)
 
@@ -172,7 +176,7 @@ def registra(app, root, h):
         except Exception as e:             # noqa: BLE001
             msg = str(e)
             return {'ok': False, 'error': msg}, 409 if ('já é do item' in msg or 'inválido' in msg or 'vazio' in msg
-                                                      or 'categoria' in msg or 'caracteres' in msg) else 503
+                                                      or 'categoria' in msg or 'começar com "P"' in msg) else 503
         r.pop('ok', None)
         return dict(ok=True, **r)
 
@@ -236,8 +240,9 @@ def registra(app, root, h):
             r = _motor(root, {'acao': 'registra', 'nome': nome, 'tipo': 'PLACA', 'cliente': data.get('cliente') or '',
                               'vinculo': data.get('vinculo') or '', 'sigla': data.get('sigla') or ''})
         except Exception as e:             # noqa: BLE001
-            msg = str(e)                   # o nome passa de 27 caracteres ou já está no catálogo: é do pedido
-            return {'ok': False, 'error': msg}, 409 if ('caracteres' in msg or 'já está no catálogo' in msg) else 503
+            msg = str(e)                   # ja esta no catalogo, ou placa sem o P: e do pedido
+            return {'ok': False, 'error': msg}, 409 if ('começar com "P"' in msg or 'já está no catálogo' in msg
+                                                      or 'sigla' in msg) else 503
         codigo = r['codigo']
         if not projeto:
             projeto = codigo

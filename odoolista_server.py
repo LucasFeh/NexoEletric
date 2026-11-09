@@ -149,10 +149,20 @@ def _prepara(data, vazia_ok=False):
         extras, fora = OL.le_lista_extras(nome, ROOT)
     except OL.ErroOdoo as e:
         return None, str(e), 400
+    # 1.88.0: a variante de projeto ativa nesta maquina (tools/rotas/variantes.py): o suprimido sai como o nao montar, e
+    # a placa montada vai com o codigo da variante (a virgem, sempre com o da PCB)
+    codigos = None
+    try:
+        import variantes as _var
+        v = _var.ativa(_pasta(nome))
+        schematic = _var.aplica(schematic, v)
+        codigos = _var.codigos(schematic, v)
+    except ImportError:
+        pass
     payload = OL.monta_payload(nome, rev, schematic, OL.carrega_acervo(ROOT),
                                str(data.get('enviado_por') or '').strip()[:60],
                                str(data.get('observacao') or '').strip()[:500],
-                               extras=extras, fora=fora)
+                               extras=extras, fora=fora, codigos=codigos)
     if not payload['linhas']:
         if payload['_tirados'] and vazia_ok:
             return payload, None, 200

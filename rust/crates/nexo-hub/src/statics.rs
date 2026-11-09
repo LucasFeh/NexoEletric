@@ -189,6 +189,10 @@ pub async fn api_save(State(est): State<Est>, Json(d): Json<serde_json::Value>) 
         if let Err(corpo) = crate::equipe::pode(&crate::equipe::le_equipe(&pdir), &modo) {
             return (StatusCode::FORBIDDEN, Json(corpo)).into_response();
         }
+        // 1.88.0: com uma variante de projeto ativa a PCB e a mesma (variantes.rs): so o variantes.json muda
+        if let Some(corpo) = crate::variantes::recusa_salvar(&pdir, parts[2], &content) {
+            return (StatusCode::CONFLICT, Json(corpo)).into_response();
+        }
         antes = std::fs::read_to_string(&full).ok().map(|t| t.replace("\r\n", "\n"));
     }
     let novo = content.clone();

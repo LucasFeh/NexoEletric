@@ -214,6 +214,14 @@ body.eh-shell .tab[aria-selected="true"]::after {
 .eh-row .tag-n { margin-left: auto; font-size: 10px; padding: 0 5px; border-radius: 4px;
   color: var(--text-3); background: rgba(var(--tint), 0.07); font-variant-numeric: tabular-nums; }
 .eh-row .tag-n.pend { color: var(--warn); background: var(--warn-soft); }
+/* 1.88.0: a árvore é o controle de PCB -- o nome da PCB, o código dela em mono ao lado; sem placa, a marca discreta */
+.eh-row.proj .nm { flex: 0 1 auto; min-width: 110px; }
+.eh-row .pcb-cod, .eh-row .pcb-nd, .eh-row .pcb-var { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.eh-row .pcb-cod { font: 10px var(--mono, ui-monospace, monospace); color: var(--text-4); }
+.eh-row .pcb-nd { font-size: 9.5px; padding: 0 4px; border-radius: 3px; color: var(--text-4);
+  border: 1px dashed currentColor; opacity: 0.8; }
+.eh-row .pcb-var { font-size: 9.5px; padding: 0 4px; border-radius: 3px; color: var(--text-3);
+  background: rgba(var(--tint), 0.07); }
 .eh-vazio { padding: 10px 14px; font-size: 12px; color: var(--text-4); }
 .eh-panel-tabs {
   display: flex; align-items: stretch; gap: 2px; flex: none; height: 28px; padding: 0 6px;
@@ -324,7 +332,8 @@ body.eh-shell .tab[aria-selected="true"]::after {
     /* "Só o atual" (pedido do dono, 2026-10-14: "mostrar todos os projetos, ou apenas o projeto
        que deseja ... pra não ficar tão poluído"): a busca continua procurando em todos */
     /* a busca acha a PCB pelo nome dela ou pelo do projeto multi-PCB em que ela esta */
-    const casa = (p) => p.name.toLowerCase().includes(q) || (p.grupo || '').toLowerCase().includes(q);
+    /* 1.88.0: e pelo nome da PCB e pelo código dela (HubCatalogo.rotuloProjeto) */
+    const casa = (p) => rotulo(p).busca.includes(q) || (p.grupo || '').toLowerCase().includes(q);
     const lista = (S.projects || []).filter((p) => q ? casa(p) : (!soAtual || (ativo && ativo.id === p.id)));
     if (soAtual && !q && ativo) { abertos.add(ativo.id); if (ativo.grupo) gruposAbertos.add(ativo.grupo); }
     const frag = document.createDocumentFragment();
@@ -346,7 +355,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
     const grupos = new Map();
     const entradas = [];
     for (const p of lista) {
-      if (!p.grupo) { entradas.push({ nome: p.name, p }); continue; }
+      if (!p.grupo) { entradas.push({ nome: rotulo(p).nome, p }); continue; }
       if (!grupos.has(p.grupo)) { const g = { nome: p.grupo, pcbs: [] }; grupos.set(p.grupo, g); entradas.push(g); }
       grupos.get(p.grupo).pcbs.push(p);
     }
@@ -379,12 +388,33 @@ body.eh-shell .tab[aria-selected="true"]::after {
       alvoDeSoltar(r, e.nome);
       frag.append(r);
       if (!aberto) continue;
-      e.pcbs.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base', numeric: true }));
+      e.pcbs.sort((a, b) => rotulo(a).nome.localeCompare(rotulo(b).nome, 'pt-BR', { sensitivity: 'base', numeric: true }));
       for (const p of e.pcbs) linhaDoProjeto(frag, p, 2, ativo, aba, q);
     }
 
     // o grupo "Bibliotecas" saiu do painel (pedido do dono, 2026-11-05: "nao precisa existir, pode remover")
     tree.replaceChildren(frag);
+  }
+
+  /* O RÓTULO DA PCB (1.88.0, pedido do dono: "os nomes que ficam na lateral esquerda levam o nome da PCB e não do
+     equipamento, então ali fica o controle de PCB"): o nome da PCB no catálogo (NomeDaPlaca do cabeçalho; sem ele, o nome
+     do item do CodigoDaPlaca no catálogo, lido uma vez por sessão) com o código ao lado; sem placa definida, o nome da
+     pasta e a marca "PCB não definida". A pasta não muda de nome (o title diz qual é). */
+  let pediuNomes = false;
+  function rotulo(p) {
+    const C = window.HubCatalogo;
+    if (!C || !C.rotuloProjeto) return { nome: p.name, codigo: '', definida: true, pasta: p.name, busca: p.name.toLowerCase() };
+    const r = C.rotuloProjeto(p);
+    if (r.semNome && !pediuNomes && C.carregaNomes) { pediuNomes = true; C.carregaNomes().then((ok) => { if (ok) renderArvore(); }); }
+    return r;
+  }
+  function pecasDoRotulo(p) {
+    const r = rotulo(p);
+    const out = [el('span', 'nm', r.nome)];
+    if (r.codigo && r.codigo !== r.nome) out.push(el('span', 'pcb-cod', r.codigo));
+    if (!r.definida) { const t = el('span', 'pcb-nd', 'sem PCB'); t.title = 'sem código de placa: abra o esquema › Configurações › Definir projeto'; out.push(t); }
+    if (p.variantes) { const t = el('span', 'pcb-var', p.variantes + (p.variantes === 1 ? ' variante' : ' variantes')); t.title = 'variantes de projeto desta PCB (a placa é a mesma; muda o que é montado)'; out.push(t); }
+    return { pecas: out, titulo: (r.definida ? 'PCB: ' + r.nome + (r.codigo ? ' (' + r.codigo + ')' : '') + '\n' : 'PCB não definida\n') + 'pasta: ' + p.name };
   }
 
   /* uma PCB (um projeto em Projects\) e os documentos dela, no nivel dado: 1 avulsa, 2 dentro de um multi-PCB */
@@ -404,10 +434,11 @@ body.eh-shell .tab[aria-selected="true"]::after {
     const eqTag = window.HubEquipe && !p.demo ? window.HubEquipe.tagArvore(p.name) : null;
     // desatualizado (hub-sincronia.js, 1.85.0): chegou versão mais nova de outra máquina e a pessoa respondeu "Agora não"
     const syTag = window.HubSincronia && !p.demo ? window.HubSincronia.tagArvore(p.name) : null;
+    const rot = pecasDoRotulo(p);
     const r = linha(nivel, 'proj' + (eAtivo ? ' ativo' : '') + (p.demo ? ' demo' : ''),
-      [caret(aberto), icone(p.grupo ? 'pcb' : 'projeto'), el('span', 'nm', p.name), syTag, eqTag, aprov, dot, ...extras]);
+      [caret(aberto), icone(p.grupo ? 'pcb' : 'projeto'), ...rot.pecas, syTag, eqTag, aprov, dot, ...extras]);
     arrastavel(r, p);
-    r.title = p.name;
+    r.title = rot.titulo;
     r.querySelector('.car').addEventListener('click', (e) => {
       e.stopPropagation();
       if (abertos.has(p.id)) abertos.delete(p.id); else abertos.add(p.id);

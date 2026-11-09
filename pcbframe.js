@@ -1665,6 +1665,12 @@ function desenhaAnotacoes(){
 /* ============================== mudancas: commit, desfazer, refazer ============================== */
 
 const undoStack = [JSON.stringify(CH)], redoStack = [];
+/* A VARIANTE DE PROJETO (1.88.0, hub-variantes.js): com uma ativa nesta máquina a placa é a mesma da padrão, travada --
+   só Suprimir / Montar (que grava o variantes.json; o changes.js não muda). `var`: o commit e o setEdit rodam antes do
+   bloco da variante, lá embaixo. on = a variante ativa ao abrir a vista; refs = os suprimidos dela. */
+var VAR = { on: null, refs: new Set() };
+const MSG_VAR = () => 'Variante "' + (VAR.on && VAR.on.nome) + '" ativa: a PCB é a mesma — só Suprimir / Montar (' + (typeof HubVariantes !== 'undefined' ? HubVariantes.TECLA : 'Shift+S')
+  + '). Para editar, volte para a Padrão em Propriedades › Variante de projeto';
 /* o alvo da tela de um item do modelo (o que uma linha do changes.js fez) */
 function alvoDoModelo(m){
   if (!m) return null;
@@ -1695,6 +1701,14 @@ function reaplica(){
   pede();
 }
 function commit(){
+  if (VAR.on) {
+    /* a edição já mexeu no CH: volta ao topo do desfazer, sem sujar */
+    const top = undoStack[undoStack.length - 1];
+    if (top) { CH.length = 0; for (const c of JSON.parse(top)) CH.push(c); }
+    HubDialog.toast(MSG_VAR(), 'warn', 6000);
+    reaplica();
+    return;
+  }
   undoStack.push(JSON.stringify(CH));
   if (undoStack.length > 80) undoStack.shift();
   redoStack.length = 0;
@@ -1709,8 +1723,8 @@ function restauraCH(json){
 }
 function desfaz(){ if (undoStack.length < 2) return false; encerraDraft(true); redoStack.push(undoStack.pop()); restauraCH(undoStack[undoStack.length - 1]); return true; }
 function refaz(){ if (!redoStack.length) return false; encerraDraft(true); const s = redoStack.pop(); undoStack.push(s); restauraCH(s); return true; }
-function setChDirty(v){ chDirty = !!v; if (painel) painel.atualizaSalvar(); if (chDirty) autoSalva(); }
-function setAnnDirty(v){ annDirty = !!v; if (painel) painel.atualizaSalvar(); if (annDirty) autoSalva(); }
+function setChDirty(v){ chDirty = !!v && !VAR.on; if (painel) painel.atualizaSalvar(); if (chDirty) autoSalva(); }
+function setAnnDirty(v){ annDirty = !!v && !VAR.on; if (painel) painel.atualizaSalvar(); if (annDirty) autoSalva(); }
 
 /* ============================== escrever as ops ==============================
    Regra de sempre: um objeto PLANO por linha, orig_* copiados do board.js (a trava do
@@ -2835,6 +2849,7 @@ function encerraDraft(){
 }
 function garanteEdicao(){
   if (LEAN) return false;
+  if (VAR.on) { HubDialog.toast(MSG_VAR(), 'warn', 5000); return false; }
   if (!editOn) { setEdit(true); HubDialog.toast('edição destravada (' + (teclaDe('editar') || 'E') + ' trava de novo)', 'info', 2600); }
   return true;
 }
@@ -4281,7 +4296,8 @@ function setGrade(id){
    A vista abre em LEITURA: o arrasto acidental nao mexe na placa. Escolher uma ferramenta ou
    mudar um campo do painel destrava (com aviso); E trava de novo. lean=1 nunca destrava. */
 function setEdit(v){
-  editOn = !!v && !LEAN;
+  if (v && VAR.on) HubDialog.toast(MSG_VAR(), 'warn', 5000);
+  editOn = !!v && !LEAN && !VAR.on;
   if (!editOn) {
     if (tool !== 'select') { tool = 'select'; encerraDraft(); cv.style.cursor = 'default'; }
     if (arrasto) cancelaArrasto();
@@ -4791,6 +4807,12 @@ function menuContexto(sx, sy, w){
 /* o que so o hub tem, no fim do menu do Altium (o formato do hub-pcbaltium.js) */
 function extrasDoHub(w){
   const it = [];
+  /* 1.88.0: na variante de projeto, o Suprimir / Montar dos componentes selecionados (o resto da edição está travado) */
+  if (VAR.on && compsDaSel().length) {
+    const rs = [...new Set(compsDaSel().map(m => String(refDnp(m))).filter(Boolean))];
+    const todos = rs.every(r => VAR.refs.has(r));
+    it.push({ rot:(todos ? 'Montar ' : 'Suprimir ') + rs.join(', ') + ' (variante ' + VAR.on.nome + ')', tecla:HubVariantes.TECLA, f:() => HubVariantes.alterna(PROJ, rs) });
+  }
   const muda = SEL.filter(CAMADA_LIVRE);
   if (muda.length) {
     const ks = new Set(muda.map(a => a.m.eff.layer));
@@ -5742,6 +5764,8 @@ async function corpos3d(vista, tela, todos){
   /* a solda e so de visualizacao: fora da tela (o pacote da placa para o NexoCAD, o Editar 3D) o
      corpo vai inteiro e sem o ponto de solda */
   if (!vista) corpos = corpos.filter(b => b && b.kind !== 'solda').map(b => { if (!b.corte) return b; const c = Object.assign({}, b); delete c.corte; return c; });
+  /* 1.88.0: o suprimido da variante ativa não é montado: o corpo 3D (e a foto da placa montada) sai; a placa fica */
+  if (VAR.refs.size) corpos = corpos.filter(b => !(b && VAR.refs.has(String(b.owner))));
   return { corpos, esp };
 }
 /* Editar 3D no NexoCAD: o corpo STEP sob o cursor (no 3D) ou o primeiro do componente; sem STEP,
@@ -6955,7 +6979,7 @@ function campoNoAlvo(a, k, v){
       if (k === 'layer') { if ((v !== 'Top' && v !== 'Bottom') || v === g.layer) return false; moveComp(a.m, viraGeo(g, [g.x, g.y])); return true; }
       if (k === 'x' || k === 'y' || k === 'rot') { if (!isNum(v)) return false; g[k] = k === 'rot' ? normAng(v) : v; moveComp(a.m, g); return true; }
       if (k === 'designator' || k === 'comment') { attrComp(a.m, k, v); return true; }
-      if (k === 'naoMontar') { marcaNaoMontar(refDnp(a.m), !!v); return false; }
+      if (k === 'naoMontar') { if (VAR.on) HubVariantes.alterna(PROJ, [refDnp(a.m)]); else marcaNaoMontar(refDnp(a.m), !!v); return false; }
       if (k === 'mostraDes' || k === 'mostraCom') {
         const t = textoDoComp(a.m, k === 'mostraDes' ? 'designator' : 'comment'); if (!t) return false;
         moveTextoComp(t, { hidden:!v }); return true;
@@ -7169,6 +7193,10 @@ function exportCsv(){
 function irPara(alvo, dePainel){ if (!alvo) return; selSo([alvo], dePainel); enquadraAlvos([alvo]); }
 const V = {
   LEAN, PROJ,
+  /* 1.88.0: a área "Variante de projeto" nas Propriedades da placa (hub-pcbpainel.js » desenhaPlaca); o mesmo elemento
+     volta a cada redesenho do painel */
+  variantes:pag => { if (VAR.caixa) pag.append(VAR.caixa); },
+  emVariante:() => Boolean(VAR.on),
   marcacoes:() => { try { return marcacoesSemFuro(null).length; } catch (e) { return 0; } },
   get B(){ return B; }, get model(){ return model; }, get EB(){ return EB; }, get CH(){ return CH; }, ANN,
   camadas:() => LAYERS.map(l => ({ key:l.key, nome:l.name, rot:rotuloAba(l), cor:l.color, count:l.count, usada:!!(l.used || l.inBoard),
@@ -7529,16 +7557,36 @@ async function marcaNaoMontar(ref, on){
 function camposNaoMontar(c){
   if (!SCH_SRC) return [];
   if (dnpSemEsquema) return [{ k:'naoMontarRo', rot:'Não montar', tipo:'ro', v:'sem schematic.js (a marca mora no esquema)' }];
+  /* 1.88.0: na variante a caixa é a do Suprimir (grava o variantes.json; o "não montar" do esquema vale para todas) */
+  if (VAR.on) {
+    const r = String(refDnp(c));
+    if (DNP.has(r)) return [{ k:'naoMontarRo', rot:'Não montar', tipo:'ro', v:'marcado no esquema (vale para todas as variantes)' }];
+    return [{ k:'naoMontar', rot:'Suprimido (' + VAR.on.nome + ')', tipo:'bool', v:VAR.refs.has(r),
+              dica:'suprimido nesta variante: a placa é a mesma (cobre, pads e furos), mas o componente sai do BOM, da Neoden e da lista do Odoo (' + HubVariantes.TECLA + ')' }];
+  }
   return [{ k:'naoMontar', rot:'Não montar', tipo:'bool', v:DNP.has(String(refDnp(c))),
             dica:'DNP: o componente fica na placa (footprint e nets), mas sai do BOM, da Neoden e da lista do Odoo — grava no esquema' }];
 }
 function desenhaNaoMontar(){
-  if (!DNP.size) return;
+  /* 1.88.0: o suprimido da variante ativa: esmaecido (um véu sobre o componente; o cobre e os pads continuam lá) e o X */
+  if (VAR.refs.size) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(16,16,20,0.58)';
+    for (const c of EB.components || []) {
+      if (!c || !c.bbox || !(VAR.refs.has(String(c.ref)) || (c.designator && VAR.refs.has(String(c.designator))))) continue;
+      const b = c.bbox;
+      if (![b.x1, b.y1, b.x2, b.y2].every(isNum)) continue;
+      ctx.fillRect(Math.min(b.x1, b.x2), Math.min(b.y1, b.y2), Math.abs(b.x2 - b.x1), Math.abs(b.y2 - b.y1));
+    }
+    ctx.restore();
+  }
+  if (!DNP.size && !VAR.refs.size) return;
   ctx.save();
   ctx.strokeStyle = '#ff5252'; ctx.globalAlpha = 0.9; ctx.lineWidth = px(1.6); ctx.setLineDash([]); ctx.lineCap = 'round';
   ctx.beginPath();
   for (const c of EB.components || []) {
-    if (!c || !c.bbox || !(DNP.has(String(c.ref)) || (c.designator && DNP.has(String(c.designator))))) continue;
+    const tem = r => r != null && (DNP.has(String(r)) || VAR.refs.has(String(r)));
+    if (!c || !c.bbox || !(tem(c.ref) || tem(c.designator))) continue;
     const b = c.bbox;
     if (![b.x1, b.y1, b.x2, b.y2].every(isNum)) continue;
     ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.moveTo(b.x1, b.y2); ctx.lineTo(b.x2, b.y1);
@@ -7619,6 +7667,7 @@ async function salvaAnnotations(quieto){
 let salvando = false;
 async function salvar(){
   if (salvando || LEAN) return;
+  if (VAR.on) { HubDialog.toast(MSG_VAR(), 'warn', 5000); return; }
   if (!chDirty && !annDirty) { HubDialog.toast('nada a salvar', 'info', 1500); return; }
   salvando = true;
   try {
@@ -7719,6 +7768,42 @@ function montaDivisoria(){
   aplica();
 }
 
+/* ============================== a variante de projeto ==============================
+   1.88.0 (hub-variantes.js, tools/rotas/variantes.py): a área nas Propriedades da placa, a barra que sobra no lugar da
+   barra de ferramentas (some), com o Suprimir / Montar, o atalho, o véu e o X nos suprimidos, e o 3D sem os corpos deles.
+   Trocar de variante recarrega a vista (o desfazer é da placa de uma variante só). */
+function ligaVariante(){
+  if (typeof HubVariantes === 'undefined' || !HubIO.canPost || !PROJ || LEAN) return;
+  const selRefs = () => [...new Set(compsDaSel().map(m => String(refDnp(m))).filter(Boolean))];
+  const acha = ref => {
+    const m = model.comps.find(x => String(refDnp(x)) === String(ref));
+    const a = m && ALVO_COMP.get(m);
+    if (a) { SEL = [a]; aoMudarSel(); enquadraAlvos([a]); }
+  };
+  VAR.caixa = document.createElement('div');
+  VAR.caixa.className = 'pr-sec';
+  HubVariantes.monta(VAR.caixa, { projeto: PROJ, vista: 'pcb', selecionados: selRefs, foca: acha });
+  HubVariantes.barra($('cvwrap'), PROJ, selRefs);
+  HubVariantes.instalaTecla(PROJ, selRefs);
+  const aplica = () => {
+    const v = HubVariantes.ativa(PROJ);
+    if (VAR.on === null) VAR.on = v || false;
+    if ((VAR.on ? VAR.on.id : null) !== (v ? v.id : null)) { HubDialog.ocioso().then(() => location.reload()); return; }
+    VAR.on = v || false;
+    globalDe('schematic', SCH_SRC, true).then(sch => {
+      const antes = [...VAR.refs].sort().join(',');
+      VAR.refs = HubVariantes.refs(sch, v);
+      document.body.classList.toggle('variante-on', Boolean(v));
+      if (v && editOn) setEdit(false);
+      if (painel) painel.atualiza();
+      pede();
+      if (antes !== [...VAR.refs].sort().join(',') && modo3d && typeof refaz3d === 'function') refaz3d();
+    });
+  };
+  HubVariantes.ouve(p => { if (p === PROJ) aplica(); });
+  HubVariantes.carrega(PROJ, true).then(aplica);
+}
+
 /* ============================== inicio ============================== */
 
 let painel = null;
@@ -7788,6 +7873,7 @@ function inicia(){
     else { const p = $('props'); if (p) p.textContent = 'O painel (hub-pcbpainel.js) não carregou — atualize a página.'; }
   }
   if (CW && CHH) enquadra(); else enquadrarPendente = 'placa';
+  ligaVariante();
   setEdit(false);
   pintaStatus();
   if (painel) painel.atualiza();

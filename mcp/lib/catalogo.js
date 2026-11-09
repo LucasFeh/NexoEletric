@@ -174,44 +174,70 @@ function previa(o) {
            ultimo: u && { item: u.item, nome: u.nome, modelo: u.modelo } };
 }
 
-/* OS GRUPOS DO "DEFINIR PROJETO" (2026-11-05: "separar em filtro Placas, Produtos, Equipamentos"): a coluna TIPO do
-   catálogo é escrita à mão (Placa, PLACA, PCB; Equipamento, EQUIAPAMENTO, Equipmaento, Sistema, Nacionalização...),
-   então o grupo sai de uma regra, e não de uma lista fechada. O que não é placa nem equipamento é produto (acessório,
-   cabo, software). */
+/* AS CATEGORIAS DO "DEFINIR PROJETO". A coluna TIPO do catálogo é escrita à mão (Placa, PLACA, PCB; Equipamento,
+   EQUIAPAMENTO, Equipmaento; Acessórios, ASSESORIO; CABO; Software; Sistema; Nacionalização...), então a categoria sai de
+   uma regra, e não de uma lista fechada.
+   1.88.0 (pedido do dono, 2026-11-09: "não, cabos, softwares, sistema, é diferente de equipamento, é só produtos e
+   equipamentos que viram 1 só"): o "produto" de antes deixa de existir -- quem era produto (ou tem TIPO "Produto") conta
+   como EQUIPAMENTO, e cabo, software, sistema, acessório e nacionalização são categorias PRÓPRIAS, cada uma com o seu
+   filtro. Um TIPO que não cai em nenhuma regra vira uma categoria com o próprio nome (o filtro aparece sozinho).
+   O agrupamento é NA LEITURA: a planilha não é reescrita; só o que a pessoa cadastra ou edita pela tela grava. */
+const CATEGORIAS = [
+  { id: 'placa', rotulo: 'Placas', tipo: 'Placa', re: /PLACA|PCB/ },
+  { id: 'equipamento', rotulo: 'Equipamentos', tipo: 'Equipamento', re: /EQU?I?A?P|EQUIPM|PRODUTO|REVENDA/ },
+  { id: 'sistema', rotulo: 'Sistemas', tipo: 'Sistema', re: /SISTEMA/ },
+  { id: 'cabo', rotulo: 'Cabos', tipo: 'Cabo', re: /CABO/ },
+  { id: 'software', rotulo: 'Softwares', tipo: 'Software', re: /SOFTWARE/ },
+  { id: 'acessorio', rotulo: 'Acessórios', tipo: 'Acessórios', re: /^A[CS]+ES+OR/ },
+  { id: 'nacionalizacao', rotulo: 'Nacionalizações', tipo: 'Nacionalização', re: /NACIONALIZ/ },
+];
+const slugCat = t => semAcento(String(t || '')).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'sem-tipo';
 function grupo(tipo) {
-  const t = semAcento(String(tipo || '')).toUpperCase();
-  if (/PLACA|PCB/.test(t)) return 'placa';
-  if (/EQU?I?A?P|EQUIPM|SISTEMA|NACIONALIZ|REVENDA/.test(t)) return 'equipamento';
-  return 'produto';
+  const t = semAcento(String(tipo || '')).toUpperCase().trim();
+  for (const c of CATEGORIAS) if (c.re.test(t)) return c.id;
+  return t ? slugCat(t) : 'equipamento';      /* sem TIPO: o costume da planilha é equipamento */
 }
 const normCod = s => String(s || '').replace(/\s+/g, '').toUpperCase();
-
-/* NOME CURTO (2026-11-05: "CARTAO MELPLAC 550 - P9CF01 o nome precisa ser limitado a esse número de caracteres, se
-   precisar acrescentar algo é na descrição, e isso vale pros novos e antigos"): no máximo 27 caracteres. O produto novo e
-   o nome mudado não passam disso; os antigos que passam ficam com o alerta na lista (nomeLongo) até alguém encurtar. */
-const NOME_MAX = 27;
-const nomeLongo = n => limpa(n).length > NOME_MAX;
-function checaNome(n) {
-  const t = limpa(n);
-  if (t.length > NOME_MAX) throw new Error('o nome tem ' + t.length + ' caracteres e o limite é ' + NOME_MAX
-    + ' (como "CARTAO MELPLAC 550 - P9CF01"): o que passar vai na descrição');
+/* as categorias que a lista tem, na ordem da casa (as conhecidas primeiro, as que a planilha inventou depois) */
+function categoriasDe(itens) {
+  const n = new Map();
+  for (const i of itens) n.set(i.grupo, (n.get(i.grupo) || 0) + 1);
+  const out = CATEGORIAS.map(c => ({ id: c.id, rotulo: c.rotulo, tipo: c.tipo, n: n.get(c.id) || 0 }));
+  for (const [id, q] of n) if (!CATEGORIAS.some(c => c.id === id)) {
+    const ex = itens.find(i => i.grupo === id);
+    out.push({ id, rotulo: ex ? ex.tipo : id, tipo: ex ? ex.tipo : id, n: q });
+  }
+  return out;
 }
 
-/* MUDAR A CATEGORIA (2026-11-05: "tem coisa que é produto e tá categorizado como placa, quero poder mudar a
-   categoria"): a categoria é a coluna TIPO. Se o TIPO de agora já cai na categoria pedida, fica; senão vira a palavra
-   da categoria. O código não muda. (O mesmo do Gerência Dieletrons, app/produtos.mjs.) */
-const TIPO_DO_GRUPO = { placa: 'Placa', equipamento: 'Equipamento', produto: 'Produto' };
+/* SEM LIMITE DE NOME (1.88.0, pedido do dono: "pode remover o limite de caracter no nome"): o limite de 27 caracteres da
+   1.82.0 saiu de vez, para placa e equipamento (o quadro da folha agora mostra só o CÓDIGO do equipamento). */
+
+/* A PLACA COMEÇA COM "P" (1.88.0, pedido do dono: "as placa precisam começar com P, se tiver placa começando sem P tá
+   errado"): placa nova ou editada com código sem o P é recusada; as antigas ficam marcadas (codigoErrado) na lista. */
+const codigoDePlacaOk = c => /^P/.test(normCod(c));
+const MSG_PLACA_SEM_P = c => 'o código de placa tem que começar com "P" (' + (c || '—') + ' não começa): placa é P<sigla>-DI<ano><item>, como PAEL-DI261940';
+
+/* MUDAR A CATEGORIA (2026-11-05): a categoria é a coluna TIPO. Se o TIPO de agora já cai na categoria pedida, fica; senão
+   vira a palavra da categoria. O código não muda. "produto" (de antes da 1.88.0) é Equipamento. */
 function tipoDoGrupo(g, atual) {
-  if (!TIPO_DO_GRUPO[g]) throw new Error('categoria desconhecida: ' + g + ' (placa, equipamento ou produto)');
-  return atual && grupo(atual) === g ? atual : TIPO_DO_GRUPO[g];
+  if (g === 'produto') g = 'equipamento';
+  const c = CATEGORIAS.find(x => x.id === g);
+  if (!c) throw new Error('categoria desconhecida: ' + g + ' (' + CATEGORIAS.map(x => x.id).join(', ') + ')');
+  return atual && grupo(atual) === g ? atual : c.tipo;
 }
 
-/* o catálogo inteiro, para a tela: {itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo}], ultimo, proximo, ano} */
+/* o catálogo inteiro, para a tela: {itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo, codigoErrado?}], categorias:[{id,
+   rotulo, tipo, n}], ultimo, proximo, ano} */
 function lista(o) {
   const c = abre(o && o.arquivo);
-  return { arquivo: c.arquivo, ultimo: c.ultimo, proximo: c.proximo, ano: c.ano, nomeMax: NOME_MAX,
-           itens: c.itens.map(i => ({ item: i.item, tipo: i.tipo, grupo: grupo(i.tipo), nome: i.nome, cliente: i.cliente,
-                                      modelo: i.modelo, vinculo: i.vinculo, nomeLongo: nomeLongo(i.nome) })) };
+  const itens = c.itens.map(i => {
+    const g = grupo(i.tipo);
+    const o = { item: i.item, tipo: i.tipo, grupo: g, nome: i.nome, cliente: i.cliente, modelo: i.modelo, vinculo: i.vinculo };
+    if (g === 'placa' && !codigoDePlacaOk(i.modelo)) o.codigoErrado = true;
+    return o;
+  });
+  return { arquivo: c.arquivo, ultimo: c.ultimo, proximo: c.proximo, ano: c.ano, categorias: categoriasDe(itens), itens };
 }
 
 /* o produto de um código ("PDCD-DI261939", espaços em volta do hífen não contam): {item, nome, cliente, modelo, ...} ou null */
@@ -239,12 +265,12 @@ function registra(o) {
   o = o || {};
   const nome = limpa(o.nome).toUpperCase();
   if (!nome) throw new Error('falta o nome do produto');
-  checaNome(nome);
   const tipo = limpa(o.tipo || 'PLACA').toUpperCase();
   const c = abre(o.arquivo);
   const sg = o.sigla ? String(o.sigla).toUpperCase().trim() : sigla(nome, tipo);
   if (!siglaOk(sg)) throw new Error('sigla inválida: ' + sg + ' (letras e números, começando por letra)');
   const numero = c.proximo, cod = codigo(sg, c.ano, numero);
+  if (grupo(tipo) === 'placa' && !codigoDePlacaOk(cod)) throw new Error(MSG_PLACA_SEM_P(cod));
   if (c.itens.some(i => normCod(i.modelo) === cod)) throw new Error('o código ' + cod + ' já está no catálogo');
   /* o mesmo produto duas vezes também não (2026-11-05: "não pode deixar repetir"): mesmo nome no mesmo grupo */
   const igual = !o.permitirMesmoNome && c.itens.find(i => limpa(i.nome).toUpperCase() === nome && grupo(i.tipo) === grupo(tipo));
@@ -321,7 +347,9 @@ function edita(o) {
     if (outro) throw new Error('o código ' + novoCod + ' já é do item ' + outro.item + ' (' + outro.nome + ')');
   }
   if (novoNome !== null && !novoNome) throw new Error('o nome não pode ficar vazio');
-  if (novoNome !== null && novoNome !== limpa(it.nome)) checaNome(novoNome);
+  /* placa com código sem o P: recusada quando a edição mexe no código ou faz do item uma placa (só o nome, não) */
+  if ((novoCod !== null || novoTipo !== null) && grupo(novoTipo !== null ? novoTipo : it.tipo) === 'placa'
+      && !codigoDePlacaOk(novoCod !== null ? novoCod : it.modelo)) throw new Error(MSG_PLACA_SEM_P(novoCod !== null ? novoCod : it.modelo));
   const uso = emUso(c.arquivo);
   if (uso) throw new Error(uso);
   const linha = c.linhas.find(l => l.r === it.linha);
@@ -353,15 +381,18 @@ function paramsTemplate(o) {
      Definir projeto, e o Arquivo é o nome da folha */
   const p = {
     CodigoDaPlaca: o.codigo,
+    /* 1.88.0: o nome da PCB (o do catálogo, sem limite de tamanho) dá o nome do projeto na árvore; não vai ao quadro */
+    NomeDaPlaca: limpa(o.nome).toUpperCase() || undefined,
     Desenhista_DiEletrons: limpa(o.iniciador),
     Data_desenho: dd(d.getDate()) + '/' + dd(d.getMonth() + 1) + '/' + String(d.getFullYear()).slice(-2),
     Revisao: 'REV.A',
   };
   if (o.cliente) p.Cliente = limpa(o.cliente).toUpperCase();
+  if (!p.NomeDaPlaca) delete p.NomeDaPlaca;
   return p;
 }
 
-module.exports = { PADRAO, abre, previa, registra, edita, busca, lista, grupo, tipoDoGrupo, NOME_MAX, nomeLongo, sigla, codigo, paramsTemplate, lerZip, escreverZip };
+module.exports = { PADRAO, abre, previa, registra, edita, busca, lista, grupo, tipoDoGrupo, CATEGORIAS, categoriasDe, codigoDePlacaOk, sigla, codigo, paramsTemplate, lerZip, escreverZip };
 
 /* ============================== a linha de comando ==============================
    node mcp/lib/catalogo.js --cli  < {acao:'previa'|'registra'|'busca'|'lista', nome, tipo?, cliente?, vinculo?, sigla?, codigo?, arquivo?}

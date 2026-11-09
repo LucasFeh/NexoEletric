@@ -19,6 +19,8 @@
 <!-- gravação (POST /api/save, com queda para download em file://) — a aba Biblioteca
      escreve Libs/lib-subs.js por aqui -->
 <script src="hub-io.js"></script>
+<!-- 1.88.0: o nome da PCB na árvore (hub-catalogo.js) e a variante de projeto (hub-variantes.js); sem defer: o script do hub os usa ao carregar -->
+<script src="hub-catalogo.js"></script><script src="hub-variantes.js"></script>
 <!-- o menu de botão direito e o fluxo de excluir um valor moram aqui, e são os MESMOS que a
      vista Esquema usa — inclusive o texto da pergunta. Duas cópias divergiriam no dia em que
      uma delas ganhasse um aviso a mais. -->
@@ -3960,14 +3962,21 @@ const bomSplits = mkSplits({
 let bomTimer = null, bomFeito = null, bomPedido = 0; /* evita resposta antiga apos trocar projeto */
 
 /* nao montar (1.58.0): a marca mora no esquema (HubCore.ehDnp); o BOM e a Neoden a recebem aqui */
-const dnpDoProjeto = () => HubCore.dnpRefs(S.detail && S.detail.schematic);
+/* 1.88.0: a variante de projeto ativa nesta máquina (hub-variantes.js): os suprimidos dela saem do BOM e da Neoden */
+const varAtiva = () => (window.HubVariantes && proj() ? HubVariantes.ativa(proj().name) : null);
+const supDoProjeto = () => (window.HubVariantes ? HubVariantes.refs(S.detail && S.detail.schematic, varAtiva()) : new Set());
+const dnpDoProjeto = () => { const s = HubCore.dnpRefs(S.detail && S.detail.schematic); for (const r of supDoProjeto()) s.add(r); return s; };
 function bomGerar(B) {
   B = B || bomBoard();
   if (!B) return null;
   const p = proj();
-  const dnp = dnpDoProjeto();
+  /* o suprimido não é "não montar" na lista: naquele produto ele não existe, então sai do BOM */
+  const sup = supDoProjeto();
+  if (sup.size) B = HubVariantes.filtraPlaca(B, sup);
+  const dnp = HubCore.dnpRefs(S.detail && S.detail.schematic);
   if (dnp.size) B = Object.assign({}, B, { components: (B.components || []).map(c => dnp.has(String(c.ref)) ? Object.assign({}, c, { dnp: true }) : c) });
-  return HubBom.gerar(B, S.bom, { proj: (p && p.name) || 'placa', generated: B.generated || '' });
+  const v = varAtiva();
+  return HubBom.gerar(B, S.bom, { proj: ((p && p.name) || 'placa') + (v ? HubVariantes.sufixo(v) : ''), generated: B.generated || '' });
 }
 
 async function bomCompute() {
@@ -4178,7 +4187,8 @@ function neodenDownload(side) {
     toast('nenhum componente incluído no lado ' + side + ' — nada a baixar', 'warn'); return;
   }
   const csv = HubCore.neodenCsv(res.rows, side);
-  const name = sanitizeName(proj().name) + '-NEODEN-' + side + 'Layer.csv';
+  const v = varAtiva();
+  const name = sanitizeName(proj().name + (v ? HubVariantes.sufixo(v) : '')) + '-NEODEN-' + side + 'Layer.csv';
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name; a.click();
@@ -4631,6 +4641,11 @@ function readURL() {
            tab: tab === 'libsym' ? 'libsym'
                 : (TAB_FOLHAS.indexOf(tab) >= 0 ? tab : null) };
 }
+function refazPelaVariante() {
+  try { if (typeof bomCompute === 'function') bomCompute(); } catch (e) { console.warn('variante: BOM', e); }
+  try { if (typeof renderNeoden === 'function') renderNeoden(); } catch (e) { console.warn('variante: Neoden', e); }
+}
+if (window.HubVariantes) HubVariantes.ouve((p) => { const pr = proj(); if (pr && pr.name === p) refazPelaVariante(); });
 async function loadProject(id) {
   const det = await API.detail(id);
   if (!det) { toast(t('load.failDetail'), 'err'); return; }
@@ -4639,6 +4654,8 @@ async function loadProject(id) {
      painel de "substituto em uso"/desfazer um segundo depois de aparecer */
   const trocouProjeto = S.projId !== id;
   S.projId = id; S.detail = det;
+  /* 1.88.0: a variante de projeto ativa (o BOM e a Neoden a seguem; trocar na vista refaz os dois) */
+  if (window.HubVariantes && det && det.name) HubVariantes.carrega(det.name, true).then(() => { if (S.projId === id) refazPelaVariante(); });
   /* as strings especiais da placa (a logo da casa) com os parametros do projeto aberto (HubCore.resolveEspeciais) */
   if (HubCore.setParamsProjeto) HubCore.setParamsProjeto(det && det.schematic ? det.schematic.params : '', (det && det.schematic && det.schematic.project) || (det && det.name) || '');
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;

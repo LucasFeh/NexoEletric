@@ -355,8 +355,20 @@ function pintaLista(payload, recibo){
       + 'diferentes. Rode o ExportProject de novo (ele agora traz os parâmetros) ou confira '
       + 'essas linhas peça a peça antes de aprovar.']);
   }
+  /* 1.88.0: a PCB MONTADA e a PCB VIRGEM pelo código da PCB (o equipamento só dá o nome no quadro da folha); com uma
+     variante de projeto ativa, a montada é a da variante e os suprimidos dela não vão (odoolista.monta_payload) */
+  if (payload && payload.pcb_montada){
+    const v = payload.variante;
+    avisos.push(['ok', 'PCB montada: ' + (payload.pcb_montada.codigo || '—') + ' · PCB virgem: ' + (payload.codigo_placa || '—')
+      + (v ? ' — variante "' + v.nome + '" (' + v.codigo + ')' : ' — variante padrão (todos montados)')
+      + ((payload._suprimidos || []).length ? '; suprimidos na variante: ' + payload._suprimidos.join(', ') : '') + '.']);
+  } else if (payload){
+    avisos.push(['', 'Projeto sem código de placa: a PCB montada e a virgem vão sem código (o Odoo usa o nome do projeto). '
+      + 'Defina a placa no esquema › Configurações › Definir projeto.']);
+  }
   /* nao montar (1.58.0): marcado no esquema, nao vai -- e e dito, para ninguem estranhar o que falta */
-  const naoMontar = (payload && payload._nao_montar) || [];
+  const supr = new Set((payload && payload._suprimidos) || []);
+  const naoMontar = ((payload && payload._nao_montar) || []).filter(r => !supr.has(r));
   if (naoMontar.length){
     avisos.push(['', naoMontar.length + (naoMontar.length === 1 ? ' componente marcado' : ' componentes marcados')
       + ' como não montar no esquema ' + (naoMontar.length === 1 ? 'fica' : 'ficam') + ' fora da lista ('

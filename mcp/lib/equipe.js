@@ -28,7 +28,9 @@ const MSG_VISUALIZADOR = 'Seu usuário é apenas visualizador — peça ao admin
 /* o que não é leitura (f.leitura) mas o visualizador faz: abrir o app e a vista, consultar, exportar, mandar à JLC e ao
    NexoCAD (o resto -- editar esquema, PCB, regras, biblioteca, criar/restaurar projeto -- é edição) */
 const SAIDAS = new Set(['app_abrir', 'vista_abrir', 'lote', 'hub_modulo_chamar', 'vista_comando', 'hub_recarregar_ferramentas',
-  'gerber_gerar', 'pdf_layout', 'pcb_render_3d', 'jlc_enviar', 'jlc_login', 'nexo_enviar_placa']);
+  'gerber_gerar', 'pdf_layout', 'pcb_render_3d', 'jlc_enviar', 'jlc_login', 'nexo_enviar_placa',
+  /* 1.88.0: trocar de variante de projeto é ver e exportar (suprimir é edição) */
+  'variante_ativar']);
 
 function funcao(u) {
   if (!u) return 'usuario';

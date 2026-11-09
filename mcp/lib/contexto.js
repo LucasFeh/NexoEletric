@@ -340,6 +340,9 @@ class Contexto {
     if (onde) {
       const nao = equipe.recusa(onde.pdir);
       if (nao) throw new ErroMcp(nao, { codigo: 'sem_permissao' });
+      /* 1.88.0: com uma variante de projeto ativa a PCB é a mesma (lib/variantes.js): o desenho não muda */
+      const naVar = require('./variantes.js').recusaGravar(onde.pdir, onde.arquivo, texto);
+      if (naVar) throw new ErroMcp(naVar, { codigo: 'variante_ativa' });
     } else if (equipe.ehVisualizador()) {
       /* 1.87.0: o apenas visualizador também não muda a biblioteca (Libs/) nem nada fora do projeto */
       throw new ErroMcp(equipe.MSG_VISUALIZADOR, { codigo: 'sem_permissao', visualizador: true });

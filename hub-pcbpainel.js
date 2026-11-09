@@ -497,6 +497,9 @@ function instala(aside, V) {
       () => V.acao('fixacaoMarcacoes'));
     bf.disabled = !nm;
 
+    /* ---- 1.88.0: a variante de projeto (pcbframe.js » ligaVariante) ---- */
+    if (typeof V.variantes === 'function') V.variantes(pag);
+
     /* ---- Grade: passo, unidade e snap ---- */
     const g2 = grade(sec(pag, 'Grade'));
     /* so os passos da unidade em uso (a troca de unidade leva o passo junto: pcbframe.js » setUnidade); o atual

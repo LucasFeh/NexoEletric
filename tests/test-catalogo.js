@@ -71,37 +71,53 @@ const outros = C.lerZip(fs.readFileSync(ARQ)).filter(e => e.nome !== 'xl/workshe
   /* a mesma placa outra vez é recusada (2026-11-05: "não pode deixar repetir"), dizendo o código que já existe; outro
      nome ganha o número seguinte */
   assert.throws(() => C.registra({ nome: 'Placa medidora de nível' }), /já está no catálogo com o código PMN-DI\d+1942/);
-  /* o nome tem no máximo 27 caracteres (2026-11-05: "CARTAO MELPLAC 550 - P9CF01 o nome precisa ser limitado a esse
-     número de caracteres"): o que passar vai na descrição */
-  assert.strictEqual(C.NOME_MAX, 'CARTAO MELPLAC 550 - P9CF01'.length);
-  assert.throws(() => C.registra({ nome: 'Placa medidora de temperatura' }), /tem 29 caracteres e o limite é 27/);
-  const r43 = C.registra({ nome: 'Placa medidora de temp' });
+  /* 1.88.0 (pedido do dono: "pode remover o limite de caracter no nome"): sem limite de tamanho, placa ou equipamento */
+  assert.strictEqual(C.NOME_MAX, undefined, 'o limite de 27 saiu');
+  const r43 = C.registra({ nome: 'Placa medidora de temperatura com nome bem comprido, mais de 27 caracteres' });
   assert.strictEqual(r43.item, 1943);
+  assert.ok(r43.codigo.startsWith('P'), 'placa nova começa com P');
   const L0codigo = () => r43.codigo;
-  /* os grupos do Definir projeto e a lista inteira */
-  assert.deepStrictEqual(['PLACA', 'Placa', 'PCB', 'Equipamento', 'EQUIAPAMENTO', 'Equipmaento', 'Sistema', 'Nacionalização', 'Acessórios', 'CABO', 'Software'].map(C.grupo),
-    ['placa', 'placa', 'placa', 'equipamento', 'equipamento', 'equipamento', 'equipamento', 'equipamento', 'produto', 'produto', 'produto']);
+  /* 1.88.0: as categorias — produto e equipamento viram uma coisa só (Equipamento); cabo, software, sistema, acessório e
+     nacionalização são categorias próprias; TIPO desconhecido vira uma categoria com o próprio nome */
+  assert.deepStrictEqual(['PLACA', 'Placa', 'PCB', 'Equipamento', 'EQUIAPAMENTO', 'Equipmaento', 'Equiapamento/Nacion.', 'Revenda Equipamento', 'Produto',
+                          'Sistema', 'Nacionalização', 'Acessórios', 'ASSESORIO', 'CABO', 'Software', 'Ferramenta', ''].map(C.grupo),
+    ['placa', 'placa', 'placa', 'equipamento', 'equipamento', 'equipamento', 'equipamento', 'equipamento', 'equipamento',
+     'sistema', 'nacionalizacao', 'acessorio', 'acessorio', 'cabo', 'software', 'ferramenta', 'equipamento']);
+  const cats = C.categoriasDe([{ grupo: 'placa' }, { grupo: 'cabo' }, { grupo: 'ferramenta', tipo: 'Ferramenta' }]);
+  assert.deepStrictEqual(cats.map(c => c.id), ['placa', 'equipamento', 'sistema', 'cabo', 'software', 'acessorio', 'nacionalizacao', 'ferramenta']);
+  assert.ok(!cats.some(c => c.id === 'produto'), 'o filtro Produtos saiu');
+  /* a placa começa com "P": cadastro recusado; a antiga sem P fica marcada (codigoErrado) */
+  assert.throws(() => C.registra({ nome: 'Placa sem pe', sigla: 'XSP' }), /tem que começar com "P"/);
+  assert.ok(C.registra({ nome: 'Cabo sem pe', tipo: 'CABO', sigla: 'XSP' }).codigo.startsWith('XSP-'), 'cabo não precisa do P');
+  assert.ok(C.codigoDePlacaOk('pael - di261940') && !C.codigoDePlacaOk('ISO-DI181526'));
   /* mudar o nome e o código de um item (o botão direito do Definir projeto): na mesma linha, sem repetir código */
-  assert.throws(() => C.edita({ item: 1943, codigo: L0codigo(), novoNome: 'Placa medidora de temperatura v2' }), /tem 32 caracteres/);
-  const e1 = C.edita({ item: 1943, codigo: L0codigo(), novoNome: 'Placa med. temperatura v2' });
-  assert.strictEqual(e1.nome, 'Placa med. temperatura v2');
+  const e1 = C.edita({ item: 1943, codigo: L0codigo(), novoNome: 'Placa med. temperatura v2 — também sem limite de tamanho' });
+  assert.strictEqual(e1.nome, 'Placa med. temperatura v2 — também sem limite de tamanho');
   assert.throws(() => C.edita({ item: 1943, codigo: e1.codigo, novoCodigo: C.abre().itens.find(i => i.item === 1942).modelo }), /já é do item 1942/);
   assert.throws(() => C.edita({ item: 1943, codigo: 'OUTRO-DI000000', novoNome: 'x' }), /não está mais no catálogo/);
   const e2 = C.edita({ item: 1943, codigo: e1.codigo, novoCodigo: 'pmtv-di261943' });
   assert.strictEqual(e2.codigo, 'PMTV-DI261943');
   const depois = C.abre().itens.find(i => i.item === 1943);
-  assert.deepStrictEqual([depois.nome, depois.modelo], ['Placa med. temperatura v2', 'PMTV-DI261943'], 'gravado na planilha');
-  /* mudar a categoria (a coluna TIPO), sem mexer no código */
+  assert.deepStrictEqual([depois.nome, depois.modelo], ['Placa med. temperatura v2 — também sem limite de tamanho', 'PMTV-DI261943'], 'gravado na planilha');
+  /* placa: o código novo sem o P é recusado */
+  assert.throws(() => C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoCodigo: 'MTV-DI261943' }), /tem que começar com "P"/);
+  /* mudar a categoria (a coluna TIPO), sem mexer no código; "produto" agora é equipamento */
   const e3 = C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoGrupo: 'produto' });
-  assert.deepStrictEqual([e3.tipo, e3.grupo, e3.codigo], ['Produto', 'produto', 'PMTV-DI261943']);
-  assert.throws(() => C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoGrupo: 'produto' }), /já é dessa categoria/);
+  assert.deepStrictEqual([e3.tipo, e3.grupo, e3.codigo], ['Equipamento', 'equipamento', 'PMTV-DI261943']);
+  assert.throws(() => C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoGrupo: 'equipamento' }), /já é dessa categoria/);
   assert.throws(() => C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoGrupo: 'outra' }), /categoria desconhecida/);
-  assert.deepStrictEqual([C.tipoDoGrupo('equipamento', 'EQUIAPAMENTO'), C.tipoDoGrupo('produto', 'CABO'), C.tipoDoGrupo('placa', 'CABO')],
-    ['EQUIAPAMENTO', 'CABO', 'Placa']);
+  const e5 = C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoGrupo: 'cabo' });
+  assert.deepStrictEqual([e5.tipo, e5.grupo], ['Cabo', 'cabo']);
+  assert.deepStrictEqual([C.tipoDoGrupo('equipamento', 'EQUIAPAMENTO'), C.tipoDoGrupo('cabo', 'CABO'), C.tipoDoGrupo('placa', 'CABO'), C.tipoDoGrupo('produto', 'Produto')],
+    ['EQUIAPAMENTO', 'CABO', 'Placa', 'Produto']);
   const e4 = C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoGrupo: 'placa' });
   assert.deepStrictEqual([e4.tipo, e4.grupo], ['Placa', 'placa']);
+  /* um item com código sem P não vira placa */
+  const cabo = C.abre().itens.find(i => i.tipo === 'CABO');
+  assert.throws(() => C.edita({ item: cabo.item, codigo: cabo.modelo, novoGrupo: 'placa' }), /tem que começar com "P"/);
   const L = C.lista();
-  assert.deepStrictEqual(L.itens.map(i => [i.item, i.grupo]).slice(-2), [[1942, 'placa'], [1943, 'placa']]);
+  assert.deepStrictEqual(L.itens.filter(i => i.item <= 1943).map(i => [i.item, i.grupo]).slice(-2), [[1942, 'placa'], [1943, 'placa']]);
+  assert.ok(L.categorias.some(c => c.id === 'cabo' && c.n === 1) && !('nomeMax' in L));
   console.log('  registrar: linha nova, estilos, o resto do .xlsx intacto ok');
 
   /* ---- 4. o template preenchido ---- */
@@ -137,26 +153,27 @@ const outros = C.lerZip(fs.readFileSync(ARQ)).filter(e => e.nome !== 'xl/workshe
     return { erro: j.result && j.result.isError, j: JSON.parse(j.result.content[0].text) };
   };
   let x = await chama('catalogo_previa', { nome: 'Placa de teste do MCP' });
-  assert.ok(!x.erro && x.j.codigo === 'PTM-DI' + d.ano + '1944', JSON.stringify(x.j));
+  assert.ok(!x.erro && x.j.codigo === 'PTM-DI' + d.ano + '1945', JSON.stringify(x.j));
   x = await chama('projeto_criar', { produto: { nome: 'Placa de teste do MCP' } });
   assert.ok(x.erro && /iniciador/.test(JSON.stringify(x.j)), 'sem quem iniciou: recusa');
-  assert.strictEqual(C.abre().ultimo, 1943, 'e nada foi registrado');
+  assert.strictEqual(C.abre().ultimo, 1944, 'e nada foi registrado');
   x = await chama('projeto_criar', { produto: { nome: 'Placa de teste do MCP', iniciador: 'Ana Teste', cliente: 'usiminas' } });
   assert.ok(!x.erro && x.j.ok, JSON.stringify(x.j));
-  assert.strictEqual(x.j.projeto, 'PTM-DI' + d.ano + '1944', 'o código vira o nome do projeto');
-  assert.strictEqual(x.j.catalogo.item, 1944);
+  assert.strictEqual(x.j.projeto, 'PTM-DI' + d.ano + '1945', 'o código vira o nome do projeto');
+  assert.strictEqual(x.j.catalogo.item, 1945);
   const sch = fs.readFileSync(path.join(PROJETOS, x.j.projeto, 'schematic.js'), 'utf8');
   assert.ok(/"template":"casa:A4_DiEletrons"/.test(sch.replace(/\s/g, '')), 'a folha no template da casa');
-  assert.ok(/Desenhista_DiEletrons=Ana Teste/.test(sch) && /Cliente=USIMINAS/.test(sch) && /CodigoDaPlaca=PTM-DI\d+1944/.test(sch), sch);
-  assert.ok(/"name":"SCH-DI\d+1944"/.test(sch.replace(/\s/g, '')), 'a folha com o nome do arquivo do carimbo');
-  x = await chama('sch_validar', { projeto: 'PTM-DI' + d.ano + '1944' });
+  assert.ok(/Desenhista_DiEletrons=Ana Teste/.test(sch) && /Cliente=USIMINAS/.test(sch) && /CodigoDaPlaca=PTM-DI\d+1945/.test(sch), sch);
+  assert.ok(/NomeDaPlaca=PLACA DE TESTE DO MCP/.test(sch), '1.88.0: o nome da PCB no cabeçalho (a árvore)');
+  assert.ok(/"name":"SCH-DI\d+1945"/.test(sch.replace(/\s/g, '')), 'a folha com o nome do arquivo do carimbo');
+  x = await chama('sch_validar', { projeto: 'PTM-DI' + d.ano + '1945' });
   assert.ok(!x.erro, JSON.stringify(x.j));
-  x = await chama('catalogo_previa', { codigo: 'PTM-DI' + d.ano + '1944' });
+  x = await chama('catalogo_previa', { codigo: 'PTM-DI' + d.ano + '1945' });
   assert.strictEqual(x.j.achou.cliente, 'USIMINAS');
   /* o template do esquema: o que não existe é recusado ANTES de registrar; "" cria a folha sem template */
   x = await chama('projeto_criar', { produto: { nome: 'Outra placa', iniciador: 'Ana' }, template: 'casa:nao-existe' });
   assert.ok(x.erro && /não existe/.test(JSON.stringify(x.j)), JSON.stringify(x.j));
-  assert.strictEqual(C.abre().ultimo, 1944, 'template errado: nada registrado');
+  assert.strictEqual(C.abre().ultimo, 1945, 'template errado: nada registrado');
   x = await chama('projeto_criar', { produto: { nome: 'Outra placa', iniciador: 'Ana' }, template: '' });
   assert.ok(!x.erro && x.j.ok, JSON.stringify(x.j));
   assert.ok(!/"template"/.test(fs.readFileSync(path.join(PROJETOS, x.j.projeto, 'schematic.js'), 'utf8')), 'sem template');
