@@ -402,8 +402,10 @@ body.eh-shell .tab[aria-selected="true"]::after {
     const aprov = window.HubAprovacao && !p.demo ? window.HubAprovacao.tagProjeto(p.name) : null;
     // meu / colaborador / somente leitura (hub-equipe.js, 1.84.0): a equipe do projeto pelo login do Nexo Hub
     const eqTag = window.HubEquipe && !p.demo ? window.HubEquipe.tagArvore(p.name) : null;
+    // desatualizado (hub-sincronia.js, 1.85.0): chegou versão mais nova de outra máquina e a pessoa respondeu "Agora não"
+    const syTag = window.HubSincronia && !p.demo ? window.HubSincronia.tagArvore(p.name) : null;
     const r = linha(nivel, 'proj' + (eAtivo ? ' ativo' : '') + (p.demo ? ' demo' : ''),
-      [caret(aberto), icone(p.grupo ? 'pcb' : 'projeto'), el('span', 'nm', p.name), eqTag, aprov, dot, ...extras]);
+      [caret(aberto), icone(p.grupo ? 'pcb' : 'projeto'), el('span', 'nm', p.name), syTag, eqTag, aprov, dot, ...extras]);
     arrastavel(r, p);
     r.title = p.name;
     r.querySelector('.car').addEventListener('click', (e) => {

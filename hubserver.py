@@ -2115,6 +2115,16 @@ if _equipe is not None:
     except Exception as _e:        # noqa: BLE001
         print('AVISO: rotas da equipe desligadas (%s).' % _e)
 
+# ─────────────────── o projeto aberto e o que chega de outra maquina (tools/rotas/sincronia.py, 1.85.0) ───────────────────
+# /api/sincronia/*: a pagina diz quais projetos estao abertos e pede "Sincronizar e atualizar"; o motor (armazem.js) segura
+# a revisao de fora de um projeto aberto e escreve o aviso (quem, onde, o que mudou). Conversam por .altiumhub/.
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import sincronia as _sincronia   # noqa: E402
+    _sincronia.registra(app, ROOT)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: aviso de projeto desatualizado desligado (%s) — falta tools/rotas/sincronia.py.' % _e)
+
 # ─────────────────── MCP: o canal da IA com a vista aberta (mcp/) ───────────────────
 # /api/mcp/{status,pedido,pedidos,resposta/<id>}: o servidor MCP (mcp/eletrichub-mcp.js) pede
 # screenshot/foco/comando a vista aberta; fila em memoria, nada em disco.

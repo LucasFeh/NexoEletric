@@ -21,12 +21,20 @@
 // Roda: antes de o hub abrir (a primeira, com espera curta), quando Projects/ ou Libs/ mudam (3 s depois), quando um
 // item nosso muda no NexoBD (o Altium exportou pela pasta do Hub), a cada 2 min, e antes do sincronismo do Odoo.
 // Desligado: numa pasta de desenvolvedor (git), com settings.nexobd === false e nos testes sem NEXOHUB_URL.
+//
+// O PROJETO ABERTO (1.85.0, lib/sincronia.js): a revisao que chega de outra maquina para um projeto aberto numa janela
+// daqui nao entra calada. A rodada a segura, escreve o aviso (quem, onde, o que mudou) para a pagina perguntar
+// "Sincronizar e atualizar?", e so a puxa quando a pessoa pede. O evento do NexoBD de outro NexoEletric (antes ignorado:
+// so a rodada de 2 min o via) agora dispara a rodada na hora; o eco das revisoes desta maquina (a maquina vai na nota da
+// revisao) continua ignorado.
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { execFile } = require('node:child_process');
 const { createHash } = require('node:crypto');
+const os = require('node:os');
 const { PY_FLAGS } = require('./python-flags');
+const sincronia = require('./sincronia');
 
 const ESPERA = 3000;
 const ESPERA_EVENTO = 1500;
@@ -359,7 +367,8 @@ async function renomearProjetos({ cliente, raiz, renomear = [], estado, boms = {
  * op: {ws, bundle (a pasta com os scripts do instalador, ou ''), cliente, estado, log}
  * → {scripts, biblioteca, projetos}
  */
-async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = true, fonte = null, versao = '' }) {
+async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = true, fonte = null, versao = '', maquina = '', segurar = null }) {
+  const nota = sincronia.notaComMaquina('NexoEletric', maquina);
   const { espelho } = await modulos();
   await espelho.garantirCategoriaInterna(cliente);
   const conflitos = CONFLITOS(ws);
@@ -373,7 +382,7 @@ async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = t
   }
   const biblioteca = await espelho.espelharComRetentativa({
     cliente, pasta: path.join(ws, 'Libs'), alvo: espelho.ALVO_BIBLIOTECA, estado: (estado.biblioteca ??= {}),
-    modo: 'ambos', aceita: aceitaLib, conflitos: path.join(conflitos, 'Libs'), app: APP, log, nota: 'NexoEletric',
+    modo: 'ambos', aceita: aceitaLib, conflitos: path.join(conflitos, 'Libs'), app: APP, log, nota,
   });
   let chat = null;
   try {
@@ -389,10 +398,22 @@ async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = t
   }
   // os projetos que o hub mandou para a lixeira: apagar no NexoBD (a lista so sai do arquivo depois de feito)
   const apagar = lerJson(ARQ_APAGAR(ws), []).filter((n) => typeof n === 'string');
+  // 1.85.0: os projetos abertos nesta maquina com revisao nova de fora ficam segurados (lib/sincronia.js)
+  const segurados = new Map();
+  const cliProjetos = segurar ? sincronia.segurando({ cliente, estadoProjetos: () => (estado.projetos || {}).projetos, abertos: segurar.abertos,
+    liberar: segurar.liberar, maquina, segurados, sistema: espelho.SISTEMA_PROJETO }) : cliente;
   const projetos = await espelho.espelharProjetos({
-    cliente, raiz: path.join(ws, 'Projects'), estado: (estado.projetos ??= {}), modo: 'ambos', apagar,
-    lixeira: path.join(ws, 'Trash'), conflitos, app: APP, log, nota: 'NexoEletric',
+    cliente: cliProjetos, raiz: path.join(ws, 'Projects'), estado: (estado.projetos ??= {}), modo: 'ambos', apagar,
+    lixeira: path.join(ws, 'Trash'), conflitos, app: APP, log, nota,
   });
+  const avisos = {};
+  for (const [nome, sg] of segurados) {
+    const est = (estado.projetos.projetos || {})[nome];
+    if (!est) continue;
+    try { avisos[nome] = await sincronia.montaAviso({ cliente, espelho, pasta: path.join(ws, 'Projects', nome), nome, est, it: sg.it, revs: sg.revs }); }
+    catch (err) { log(`aviso de ${nome}: ${err.message}`); avisos[nome] = { projeto: nome, rev: sg.it.rev, desde: est.rev || 0, revisoes: [], arquivos: [], entradas: [], locais: [], conflitos: [] }; }
+    log(`⏸ ${nome}: revisão ${sg.it.rev} de fora segurada (o projeto está aberto aqui; a página pergunta)`);
+  }
   if (apagar.length) {
     const resto = lerJson(ARQ_APAGAR(ws), []).filter((n) => !apagar.includes(n));
     if (resto.length) fs.writeFileSync(ARQ_APAGAR(ws), JSON.stringify(resto)); else fs.rmSync(ARQ_APAGAR(ws), { force: true });
@@ -403,7 +424,7 @@ async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = t
     boms = await espelharBoms({ cliente, ws, nomes: Object.keys(projetos.projetos), estado: (estado.boms ??= {}), fonte, versao, apagados: projetos.apagadosNoNexoBD || [], log });
     for (const e of boms.erros) log(`BOM ${e.nome}: ${e.erro}`);
   }
-  return { scripts: rScripts, biblioteca, projetos, boms, chat };
+  return { scripts: rScripts, biblioteca, projetos, boms, chat, avisos };
 }
 
 /** o login de quem está logado no Nexo Hub ('' = ninguém, Hub antigo ou fora) */
@@ -423,8 +444,12 @@ function comAutor(cliente, autor) {
 }
 
 class Armazem {
-  constructor({ log, bundle, python, versao } = {}) {
+  constructor({ log, bundle, python, versao, maquina } = {}) {
     this.log = log || console;
+    this.maquina = maquina || os.hostname();
+    this.liberar = new Set();         // os projetos que a pagina pediu para sincronizar (a proxima rodada os puxa)
+    this.pedidos = new Map();         // nome -> id do pedido (volta no "sincronizado")
+    this.avisos = {};                 // os projetos segurados agora
     this.bundle = bundle || '';
     this.python = python || '';
     this.versao = versao || '';
@@ -499,7 +524,20 @@ class Armazem {
         const autor = await autorDoHub(this.est.url);
         const cliente = autor ? comAutor(base, autor) : base;
         const log = (l) => this.log.info(`[nexobd] ${l}`);
-        const r = await rodada({ ws, bundle: this.bundle, cliente, estado: this.estado, log, scripts: !this.scriptsFeitos, fonte: fonteEfetiva(this.bundle || ws, ws, fonteDoHub(this.hub)), versao: this.versao });
+        for (const p of sincronia.lerPedidos(ws)) { this.liberar.add(p.projeto); this.pedidos.set(p.projeto, p.id); }
+        const liberados = new Set(this.liberar);
+        const segurar = { abertos: sincronia.abertos(ws), liberar: liberados };
+        const r = await rodada({ ws, bundle: this.bundle, cliente, estado: this.estado, log, scripts: !this.scriptsFeitos, fonte: fonteEfetiva(this.bundle || ws, ws, fonteDoHub(this.hub)), versao: this.versao, maquina: this.maquina, segurar });
+        // o aviso para a pagina (lib/sincronia.js): os segurados de agora e os que acabaram de ser sincronizados
+        const sincronizados = {};
+        for (const nome of liberados) {
+          const p = r.projetos.projetos[nome] || {};
+          sincronizados[nome] = { id: this.pedidos.get(nome) || '', quando: Date.now(), rev: p.rev || 0, baixados: (p.baixados || []).length,
+            subidos: (p.subidos || []).length, conflitos: (p.conflitos || []).map((c) => c.rel), erro: (r.projetos.erros.find((e) => e.nome === nome) || {}).erro || '' };
+          this.liberar.delete(nome); this.pedidos.delete(nome);
+        }
+        this.avisos = r.avisos || {};
+        try { sincronia.gravarAvisos(ws, { avisos: this.avisos, sincronizados }); } catch (e) { this.log.warn(`[nexobd] aviso de desatualizado: ${e.message}`); }
         if (r.scripts) this.scriptsFeitos = true;
         fs.mkdirSync(path.dirname(ARQ_ESTADO(ws)), { recursive: true });
         const tmp = ARQ_ESTADO(ws) + '.tmp';
@@ -566,13 +604,32 @@ class Armazem {
         this.log.warn(`[nexobd] sem vigia em ${raiz}: ${e.message}`);
       }
     }
+    // 1.85.0: o "Sincronizar e atualizar" da pagina e o projeto segurado que fechou (lib/sincronia.js)
+    try {
+      const dir = path.join(this.ws, '.altiumhub');
+      fs.mkdirSync(dir, { recursive: true });
+      const v = fs.watch(dir, (_t, nome) => {
+        const n = String(nome || '');
+        if (n === 'nexobd-sincronizar.json') this.agendar(200, 'sincronizar o projeto aberto');
+        else if (n === 'nexobd-abertos.json' && Object.keys(this.avisos).length) {
+          const ab = sincronia.abertos(this.ws);
+          if (Object.keys(this.avisos).some((p) => !ab.has(p))) this.agendar(1000, 'projeto desatualizado fechado');
+        }
+      });
+      v.on('error', () => {});
+      this.vigias.push(v);
+    } catch (e) {
+      this.log.warn(`[nexobd] sem vigia em .altiumhub: ${e.message}`);
+    }
   }
 
   // Um item nosso mudou no NexoBD por outro programa (a pasta do Altium no Nexo Hub, outra maquina).
   ouvir(cliente) {
     if (this.ouvinte) return;
     this.ouvinte = cliente.eventos(null, (ev) => {
-      if (!ev || !ev.tipo || ev.app === APP) return;
+      if (!ev || !ev.tipo) return;
+      // 1.85.0: outro NexoEletric (outra maquina) tambem vale, na hora; so o eco do que esta maquina subiu fica de fora
+      if (ev.app === APP && (ev.tipo !== 'item.revisao' || sincronia.maquinaDaNota(ev.dados && ev.dados.nota) === this.maquina)) return;
       const nosso = ev.tipo.startsWith('item.') ? this.nossos.has(ev.item_id) || (ev.dados && ev.dados.tipo === 'projeto')
         : ev.tipo === 'chave' && ev.dados && /^nexoeletric-(projeto|biblioteca)$/.test(ev.dados.sistema);
       if (nosso) this.agendar(ESPERA_EVENTO, 'NexoBD mudou');

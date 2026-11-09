@@ -4,6 +4,33 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.85.0 — 2026-11-09
+
+**Projeto desatualizado: quem está com o projeto aberto fica sabendo na hora que outra pessoa mudou, e escolhe quando
+atualizar.**
+- Antes, a mudança de outra máquina só chegava na rodada de 2 em 2 minutos e entrava calada: a vista aberta
+  recarregava sozinha (ou, com edição não salva, pedia F5 e perguntava "sobrescrever?" ao salvar).
+- Agora, se alguém (colaborador, administrador, o responsável em outra máquina, ou você mesmo em outro computador)
+  grava o projeto que está aberto aqui, em poucos segundos aparece o aviso **Projeto desatualizado**: a foto e o nome
+  de quem mudou, onde ("Paula Prado, em PC-OFICINA"; "Você, em …" quando é o seu login), quando, e o que mudou (as
+  modificações do histórico com autor). A pergunta: "Seu projeto está desatualizado. Sincronizar e atualizar para a
+  última versão?".
+  - **Sincronizar e atualizar** puxa o projeto do NexoBD na hora e recarrega o projeto e as vistas abertas. O que
+    você salvou aqui e ainda não tinha subido sobe junto. Se os dois mexeram no mesmo arquivo, o aviso explica antes:
+    fica o seu, e o outro vai para `.altiumhub\conflitos-nexobd\`.
+  - Com edição **não salva** no Esquema/PCB, o botão vira **Descartar as minhas e atualizar** (ou "Agora não", salve
+    e atualize depois).
+  - **Agora não** deixa o selo **Projeto desatualizado — sincronizar** na barra da vista e um ícone na árvore de
+    projetos; clicar reabre o aviso. Mudanças novas atualizam o mesmo aviso (não empilham janelas).
+- Enquanto o aviso está pendente, a versão nova não entra sozinha no projeto aberto. Projeto que não está aberto
+  continua sincronizando sozinho, como sempre; mudança feita neste mesmo computador não avisa.
+- Quem grava: a gravação sobe para o NexoBD uns 3 s depois, e a revisão leva o login e o nome da máquina, para o
+  aviso dizer quem e onde.
+- Por dentro: `electron/lib/sincronia.js` (o motor segura a revisão de fora do projeto aberto e escreve o aviso),
+  `tools/rotas/sincronia.py` (`/api/sincronia/*`, a porta da página: projeto aberto, aviso e pedido de sincronizar,
+  por arquivos em `.altiumhub\`), `hub-sincronia.js` (o aviso e o selo). O evento do NexoBD de outro NexoEletric, antes
+  ignorado, agora dispara a rodada na hora; a nota das revisões leva "@<máquina>".
+
 ## 1.84.0 — 2026-11-09
 
 **Sem carimbo: quem desenha, quem aprova e quem mexe em cada projeto vêm do login do Nexo Hub. E o histórico diz
