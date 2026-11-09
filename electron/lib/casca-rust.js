@@ -15,6 +15,8 @@
 //   saida padrao    "menu:<id>"   o menu que a casca Rust ainda nao tem: o motor abre a tela dele
 //   entrada padrao  "focar"       o atalho clicado de novo (segunda instancia)
 //                   "toast {texto, tipo, ms}"   um aviso do motor na pagina
+//                   "nexohub {ok, url, ...}"    a resposta ao eletricApp.garantirHub() da pagina (1.83.0, o login
+//                                               do Nexo Hub): o pedido chega como o menu "nexohubGarantir"
 const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
@@ -133,6 +135,8 @@ class CascaRust extends EventEmitter {
   }
   focar() { return this.manda('focar'); }
   toast(texto, tipo = 'info', ms = 8000) { return this.manda('toast ' + JSON.stringify({ texto: String(texto || ''), tipo, ms })); }
+  /** A resposta do motor ao eletricApp.garantirHub() da pagina: {ok, url, abriu, login, logado, erro?}, numa linha. */
+  nexohub(r) { return this.manda('nexohub ' + JSON.stringify(r && typeof r === 'object' ? r : { ok: false })); }
 
   /** Fecha a janela (o motor vai sair, ou vai abri-la de novo com outra configuracao). */
   parar() {

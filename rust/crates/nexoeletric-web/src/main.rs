@@ -12,7 +12,8 @@
 //! runtime do MCP -- e abre esta janela (resources\rust\NexoEletric.exe) com NEXOELETRIC_MOTOR=1:
 //!   - o menu que esta casca ainda nao tem (configuracoes, Conectar IA, Nexo Hub, Sobre...) sai pela
 //!     saida padrao como "menu:<id>", e o motor abre a tela dele;
-//!   - pela entrada padrao o motor manda "focar" (o atalho clicado de novo) e "toast <json>";
+//!   - pela entrada padrao o motor manda "focar" (o atalho clicado de novo), "toast <json>" e (1.83.0)
+//!     "nexohub <json>": a resposta do eletricApp.garantirHub() da pagina (o login do Nexo Hub);
 //!   - NEXOELETRIC_VERSAO = a versao do app, que vai para o session.json do MCP.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -75,6 +76,8 @@ enum Ev {
     Escolheu(u64, Vec<String>),
     Focar,
     Toast(String),
+    /// a resposta do motor ao eletricApp.garantirHub() (JSON {ok, url, abriu, login, logado, erro?})
+    NexoHub(String),
 }
 
 /// o mesmo AppUserModelID do Electron (app.setAppUserModelId e o appId do instalador): a janela
@@ -266,6 +269,10 @@ fn apaga_sessao() {
 ///                                            e o "abrir projeto do Altium" so com o .PrjPcb precisa dele);
 ///   esperaCaminhos(nomes, ms) -> Promise<[caminho]|null>  o caminho dos arquivos ARRASTADOS chega aqui um instante
 ///                                            depois do soltar da pagina (o Rust repassa pelo evaluate_script): espera.
+/// e (1.83.0) garantirHub() -> Promise<{ok, url, abriu, login, logado, erro?}>: o login do Nexo Hub
+///                                            (hub-nexohub-login.js). O pedido vai ao motor como o menu
+///                                            "nexohubGarantir"; ele confere o Hub (e abre o NexoHub.exe
+///                                            se nao responde) e devolve pela entrada padrao ("nexohub <json>").
 const PONTE: &str = r#"(function(){
   if (!(location.protocol === 'http:' && (location.hostname === '127.0.0.1' || location.hostname === 'localhost'))) return;
   var T = function () { return window.top || window; };
@@ -278,6 +285,11 @@ const PONTE: &str = r#"(function(){
     var f = window.__nexoEscolhas && window.__nexoEscolhas[id];
     if (f) { delete window.__nexoEscolhas[id]; f(lista || []); }
   };
+  if (window.top === window) window.__nexoHubGarantiu = function (r) {
+    var l = window.__nexoHubEspera || [];
+    window.__nexoHubEspera = [];
+    l.forEach(function (f) { try { f(r || { ok: false }); } catch (e) {} });
+  };
   window.eletricApp = {
     menu: function (id) { T().ipc.postMessage(JSON.stringify({ menu: String(id) })); return Promise.resolve(true); },
     caminho: function (f) { return achaUltimo(f && f.name); },
@@ -286,6 +298,18 @@ const PONTE: &str = r#"(function(){
       t.__nexoEscolhas = t.__nexoEscolhas || {};
       var id = (t.__nexoEscSeq = (t.__nexoEscSeq || 0) + 1);
       return new Promise(function (ok) { t.__nexoEscolhas[id] = ok; t.ipc.postMessage(JSON.stringify({ escolher: id })); });
+    },
+    garantirHub: function () {
+      var t = T();
+      return new Promise(function (ok) {
+        var feito = false;
+        var fim = function (r) { if (!feito) { feito = true; ok(r); } };
+        t.__nexoHubEspera = t.__nexoHubEspera || [];
+        t.__nexoHubEspera.push(fim);
+        // o motor espera o Hub ate 45 s (nexohub-abrir.mjs); passou muito disto, a pagina segue sem resposta
+        setTimeout(function () { fim({ ok: false, erro: 'o NexoEletric não respondeu sobre o Nexo Hub' }); }, 60000);
+        t.ipc.postMessage(JSON.stringify({ menu: 'nexohubGarantir' }));
+      });
     },
     esperaCaminhos: function (nomes, ms) {
       var t0 = Date.now(), fim = t0 + (ms || 1500);
@@ -307,6 +331,16 @@ const PONTE: &str = r#"(function(){
 fn script_soltou(caminhos: &[String]) -> String {
     let l = serde_json::to_string(caminhos).unwrap();
     format!("window.__nexoArrastados = {l}; window.__nexoArrastadosEm = Date.now(); window.__nexoSoltou && window.__nexoSoltou({l});")
+}
+
+/// o script que entrega a resposta do motor sobre o Nexo Hub a pagina (eletricApp.garantirHub). So JSON valido
+/// passa: qualquer outra coisa vira {ok:false} (a linha vem do motor, mas nao vira codigo na pagina)
+fn script_nexohub(j: &str) -> String {
+    let v = serde_json::from_str::<serde_json::Value>(j)
+        .ok()
+        .filter(|v| v.is_object())
+        .unwrap_or_else(|| serde_json::json!({"ok": false, "erro": "resposta do motor ilegivel"}));
+    format!("window.__nexoHubGarantiu && window.__nexoHubGarantiu({});", serde_json::to_string(&v).unwrap())
 }
 
 /// o script que entrega a escolha da janela de arquivos a pagina (eletricApp.escolheArquivos)
@@ -376,6 +410,8 @@ fn main() {
                     Ev::Focar
                 } else if let Some(j) = l.strip_prefix("toast ") {
                     Ev::Toast(j.to_string())
+                } else if let Some(j) = l.strip_prefix("nexohub ") {
+                    Ev::NexoHub(j.to_string())
                 } else {
                     continue;
                 };
@@ -481,6 +517,9 @@ fn main() {
                      else if (window.toast) toast(t.texto); else console.warn(t.texto); }})({j});"
                 ));
             }
+            Event::UserEvent(Ev::NexoHub(j)) => {
+                let _ = webview.evaluate_script(&script_nexohub(&j));
+            }
             Event::UserEvent(Ev::Arrastou(p)) => {
                 let lista: Vec<String> = p.iter().map(|x| x.to_string_lossy().into_owned()).collect();
                 let _ = webview.evaluate_script(&script_soltou(&lista));
@@ -517,6 +556,13 @@ fn main() {
                     }
                     *flow = ControlFlow::Exit;
                 }
+                // sem o motor (a casca rodando sozinha, para desenvolver): ninguem abre o Hub; a pagina
+                // segue conferindo sozinha e libera quando ele aparecer
+                "nexohubGarantir" if !motor => {
+                    let _ = webview.evaluate_script(&script_nexohub(
+                        r#"{"ok":false,"erro":"Sem o motor do NexoEletric: abra o Nexo Hub e tente de novo"}"#,
+                    ));
+                }
                 outro if motor => {
                     // o motor de fundo (Electron) tem a tela: configuracoes, Conectar IA, Nexo Hub, Sobre...
                     use std::io::Write;
@@ -539,7 +585,21 @@ fn main() {
 
 #[cfg(test)]
 mod testes {
-    use super::{destino_link, script_escolheu, script_soltou, DestinoLink, PONTE};
+    use super::{destino_link, script_escolheu, script_nexohub, script_soltou, DestinoLink, PONTE};
+
+    #[test]
+    fn resposta_do_nexohub_vai_para_a_pagina() {
+        let s = script_nexohub(r#"{"ok":true,"url":"http://127.0.0.1:47800","logado":false}"#);
+        assert!(s.starts_with("window.__nexoHubGarantiu && window.__nexoHubGarantiu({"), "{s}");
+        assert!(s.contains(r#""url":"http://127.0.0.1:47800""#), "{s}");
+        // o que nao e um objeto JSON nao vira codigo na pagina
+        let s = script_nexohub("1);alert(1");
+        assert!(s.contains(r#""ok":false"#) && !s.contains("alert"), "{s}");
+        assert!(script_nexohub("[1]").contains(r#""ok":false"#));
+        for f in ["garantirHub:", "__nexoHubGarantiu", "nexohubGarantir"] {
+            assert!(PONTE.contains(f), "a PONTE nao tem {f}");
+        }
+    }
 
     #[test]
     fn arquivo_solto_vai_para_a_pagina() {

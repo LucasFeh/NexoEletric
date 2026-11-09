@@ -58,6 +58,7 @@ process.stdin.on('data', (d) => {
   for (const l of buf.split('\\n').slice(0, -1)) {
     if (l === 'focar') process.stdout.write('menu:sobre\\n');
     if (l.startsWith('toast ')) { const t = JSON.parse(l.slice(6)); process.stdout.write('menu:' + (t.tipo === 'warn' ? 'nexobd' : 'x') + '\\n'); }
+    if (l.startsWith('nexohub ')) { const r = JSON.parse(l.slice(8)); process.stdout.write('menu:' + (r.ok && r.url === 'http://127.0.0.1:47800' ? 'nexohubOk' : 'x') + '\\n'); }
     if (l === 'sair') process.exit(0);
   }
   buf = buf.slice(buf.lastIndexOf('\\n') + 1);
@@ -79,8 +80,10 @@ test('o canal inteiro com uma casca falsa: origem, menu, focar, toast e a saida'
   assert.ok(c.viva);
   assert.ok(c.focar());
   assert.ok(c.toast('Sem conexão', 'warn'));
-  for (let i = 0; i < 50 && menus.length < 3; i++) await new Promise((r) => setTimeout(r, 50));
-  assert.deepStrictEqual(menus, ['configApp', 'sobre', 'nexobd']);
+  // a resposta ao eletricApp.garantirHub() da pagina (o login do Nexo Hub, 1.83.0): uma linha so, JSON
+  assert.ok(c.nexohub({ ok: true, url: 'http://127.0.0.1:47800', logado: false }));
+  for (let i = 0; i < 50 && menus.length < 4; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepStrictEqual(menus, ['configApp', 'sobre', 'nexobd', 'nexohubOk']);
   await c.parar();
   const ev = await saiu;
   assert.ok(!c.viva);

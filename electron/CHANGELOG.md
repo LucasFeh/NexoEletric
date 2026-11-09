@@ -4,6 +4,25 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.83.0 — 2026-11-09
+
+**Só funciona logado no Nexo Hub, com o login no canto superior direito.**
+- Regra da atmosfera Nexo (contrato do Nexo Hub, §9 Login): sem alguém logado no Nexo Hub desta máquina, uma tela
+  por cima de tudo pede **usuário (ou e-mail) e senha** — a conta é a do Nexo Hub, e entrar aqui (ou no Hub, ou
+  em qualquer programa da atmosfera) libera todos. Enquanto ela está aberta, os atalhos de teclado não chegam ao
+  NexoEletric por baixo e arquivo solto na janela não abre projeto.
+- Logado, **o crachá** (foto ou iniciais + primeiro nome) fica na ponta direita da barra de menus; clicar mostra a
+  conta, **Abrir o Nexo Hub** e **Sair** (sair aqui sai de todos). Login ou saída em outro programa aparece na hora.
+- **Na abertura, o NexoEletric confere o Nexo Hub** e, se ele não responde, abre o Nexo Hub instalado (oculto na
+  bandeja) e espera até 45 s ("Conectando ao Nexo Hub…"). O Hub cair depois de logado não trava o trabalho: o crachá
+  fica apagado e ele volta sozinho.
+- A vista Esquema/PCB aberta numa janela à parte também pede o login. O MCP e a janela de testes não pedem.
+- Nexo Hub antigo (sem login, até a 2.24): libera como antes, sem crachá.
+- Por dentro: `nexohub-sessao.js` e `electron/lib/nexohub-abrir.mjs` são cópias sem mudança do `cliente/` do
+  repositório nexohub; `hub-nexohub-login.js` liga os dois. A página pede o Hub ao motor por
+  `eletricApp.garantirHub()` (janela Rust: menu `nexohubGarantir` → resposta `nexohub <json>` na entrada padrão;
+  janela Electron: `nexohub:garantir` no preload).
+
 ## 1.82.0 — 2026-11-06
 
 **Formas e texto na barra do Esquema.**

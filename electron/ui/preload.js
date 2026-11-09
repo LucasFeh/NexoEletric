@@ -55,5 +55,9 @@ if ((location.protocol === 'http:' || location.protocol === 'https:') &&
     // nome que o Chromium ja tem; quem abre o arquivo e o hubserver, que so aceita caminho de
     // .SchDoc/.PcbDoc/.PrjPcb vindo do proprio PC.
     caminho: (arquivo) => { try { return webUtils.getPathForFile(arquivo) || ''; } catch { return ''; } },
+    // O login do Nexo Hub (1.83.0, hub-nexohub-login.js): confere o Hub desta maquina e, se ele nao responde, o
+    // processo principal abre o NexoHub.exe instalado e espera (lib/nexohub-abrir.mjs). Sem argumento; devolve
+    // {ok, url, abriu, login, logado, erro?} -- a URL e o que a pagina usa para falar com o Hub.
+    garantirHub: () => ipcRenderer.invoke('nexohub:garantir'),
   });
 }

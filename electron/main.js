@@ -128,6 +128,28 @@ app.on('browser-window-created', (_e, w) => {
   w.webContents.on('page-title-updated', (e, t) => { e.preventDefault(); if (!w.isDestroyed()) w.setTitle(tituloComVersao(t)); });
 });
 
+/* ── O LOGIN DO NEXO HUB (1.83.0, contrato do Nexo Hub §9) ──
+   Pedido do dono (2026-11-09): o programa so funciona com alguem logado no Nexo Hub, o login aparece no canto
+   superior direito e, se o Hub nao responde, a conexao e feita na abertura. Aqui fica a abertura: o
+   lib/nexohub-abrir.mjs (copia do cliente/ do repositorio nexohub, sem mudanca) confere o Hub e, fora do ar, abre
+   o NexoHub.exe instalado oculto na bandeja e espera. Roda logo no comeco, junto com a janela (o NexoBD dos
+   projetos tambem vem pelo Hub), e de novo a cada pedido da pagina (eletricApp.garantirHub: a tela de login do
+   hub-nexohub-login.js, com o nexohub-sessao.js do Hub). O MCP e o modo de teste (SMOKE) nao passam por aqui. */
+let nexoHubAbrir = null;
+function garantirNexoHub() {
+  if (!nexoHubAbrir) nexoHubAbrir = import(pathToFileURL(path.join(__dirname, 'lib', 'nexohub-abrir.mjs')).href);
+  return nexoHubAbrir
+    .then((m) => m.garantirHub({ app: 'nexoeletric', aoAbrir: (exe) => log.info('[nexohub] o Nexo Hub não respondia: abrindo ' + exe) }))
+    .then((r) => {
+      const o = { ok: !!r.ok, url: r.url || '', abriu: !!r.abriu, login: !!r.login, logado: !!r.logado };
+      if (r.erro) o.erro = String(r.erro);
+      log.info(`[nexohub] ${o.ok ? 'no ar' : 'fora do ar'} em ${o.url}${o.abriu ? ' (aberto agora)' : ''}` +
+        `${o.login ? (o.logado ? ', logado' : ', sem login') : ', sem login no Hub (antigo)'}${o.erro ? ': ' + o.erro : ''}`);
+      return o;
+    })
+    .catch((e) => { log.warn('[nexohub] garantir: ' + e.message); return { ok: false, erro: e.message }; });
+}
+
 // ───────────────────────────── instancia unica ─────────────────────────────
 // Duas copias disputariam a mesma porta e a mesma pasta de trabalho. Com a janela
 // principal fechada e um pop-up do hub ainda aberto, o atalho traz o pop-up.
@@ -555,6 +577,8 @@ function acoesDoMenu() {
     nexoSync: () => sincronizarNexoHub(),
     nexobd: () => sincronizarNexoBD(),
     sobre: () => sobre(),
+    // a pagina da janela Rust pede o Hub (eletricApp.garantirHub): a resposta volta pela entrada padrao dela
+    nexohubGarantir: () => garantirNexoHub().then((r) => { if (casca && casca.viva) casca.nexohub(r); }),
   };
 }
 
@@ -838,6 +862,12 @@ function handle(canal, fn) {
 }
 
 function registrarIpc() {
+  // a janela Electron (sem a Rust): o mesmo eletricApp.garantirHub, pela ponte do preload
+  ipcMain.handle('nexohub:garantir', (e) => {
+    const url = (e.senderFrame && e.senderFrame.url) || '';
+    if (!origem || !url.startsWith(origem)) throw new Error('chamada recusada: ' + url);
+    return garantirNexoHub();
+  });
   ipcMain.handle('menu:acao', (e, id) => {
     const url = (e.senderFrame && e.senderFrame.url) || '';
     if (!origem || !url.startsWith(origem)) throw new Error('chamada recusada: ' + url);
@@ -1069,6 +1099,8 @@ app.whenReady().then(async () => {
   registrarIpc();
   montarMenu();
   vigiarConexao();
+  // o Nexo Hub no ar desde a abertura (abre o instalado, oculto, se preciso): o login e o NexoBD dependem dele
+  if (!SMOKE) garantirNexoHub();
   if (precisaConfigurar()) {
     criarJanela();
     await carregarUi('config.html', { modo: 'setup' });
