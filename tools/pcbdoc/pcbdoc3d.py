@@ -186,6 +186,18 @@ def u32(v):
         return None
 
 
+def cp1252(t):
+    """texto que o props() leu em latin-1 sem a versao %UTF8%: volta ao codepage do Windows (o mesmo
+    _1252 do tools/pcblib/pcblib2js.py, que faz o nome do footprint no pcblib.js). Sem byte
+    0x80-0x9F (o travessao, as aspas curvas, o '…' do Windows) o texto nao muda."""
+    if t and any('\x80' <= c <= '\x9f' for c in t):
+        try:
+            return t.encode('latin-1').decode('cp1252')
+        except UnicodeError:
+            return t
+    return t
+
+
 def _ext(dados, nome):
     cab = dados[:64].lstrip()
     if cab.startswith(b'ISO-10303-21'):
@@ -214,7 +226,7 @@ def le_modelos(arq, storage='Models'):
                 except zlib.error:
                     dados = None
         ck = u32(pr.get('CHECKSUM'))
-        nome = pr.get('NAME', '')
+        nome = cp1252(pr.get('NAME', ''))
         out.setdefault(mid, {'id': mid, 'name': nome, 'checksum': ck, 'embed': L._bool(pr.get('EMBED')),
                              'rotx': _f(pr.get('ROTX')), 'roty': _f(pr.get('ROTY')), 'rotz': _f(pr.get('ROTZ')),
                              'dz': mm_prop(pr.get('DZ')), 'dados': dados,
@@ -404,7 +416,10 @@ def le_biblioteca3d(fonte):
             d = A.stream(ent[0] + '/Data')
             nome, regs = _registros_footprint(d)
             par = L.props(A.stream(ent[0] + '/Parameters')[4:]) if A.ole.exists(ent[0] + '/Parameters') else {}
-            nome = par.get('PATTERN') or nome or ent[0]
+            # o nome no MESMO texto do pcblib.js (pcblib2js.footprint): o props() le latin-1, e o byte
+            # 0x96 do Windows (o travessao de 'TO–220AB') virava um caractere de controle -- a chave 3D
+            # nao casava com o footprint e o corpo nao aparecia
+            nome = cp1252(par.get('PATTERN') or nome or ent[0])
             bodies = []
             for r in regs:
                 if isinstance(r, tuple):

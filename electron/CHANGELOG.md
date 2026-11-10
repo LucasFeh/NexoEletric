@@ -4,6 +4,44 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.92.1 — 2026-11-10
+
+**O corpo 3D da biblioteca volta a aparecer: o cache dos STEP da PcbLib se conserta sozinho (e saiu do %TEMP%), e o
+corpo é achado pelo nome do footprint como o `pcblib.js` o escreve.**
+Pedido do dono: "alguns footprint estão bugando, o 3D mesmo posicionado não aparece no footprint, como é o caso do
+ESP32-WROOM-32D - pads 1-38 com expansao de mascara 0,05 mm (ponte de mascara 0,27 mm no passo 1,27)" — e "verifica se
+não é caractere especial também".
+- **A causa do ESP32 (FP-ESP32-WROOM-32D-MFG) não era o nome:** o STEP dele é o `Libs/3d/2475317612.step`, que o
+  hubserver extrai da PcbLib da casa para um cache. O cache morava no `%TEMP%`, e a limpeza do Windows apagou 328 dos
+  330 STEP da máquina do dono, deixando o `pcblib-3d.js` — que era a marca de "cache pronto". O modelo dava 404 para
+  sempre e a vista 3D (editor de footprint e PCB) mostrava só os pads. Valia para todo footprint cujo corpo vem da
+  PcbLib: 13 dos 26 footprints da biblioteca do hub com STEP (CAP 0805, CAP 1206, RES 1206, SOIC 24, SOT-223,
+  ESP32PICOMINI02UN8R2...) e 414 dos 416 da PcbLib; os do `3d-hub` (STEP subido pelo editor), do NexoCAD e do
+  `board3d.js` da placa não eram afetados, e o que já estava no cache do navegador continuava aparecendo — daí o
+  "alguns".
+- **Agora:** o cache mora em `%LOCALAPPDATA%\NexoEletric\pcblib3d` (fora do Temp); ao abrir, o hub confere se cada STEP
+  que o `pcblib-3d.js` lista está lá e extrai de novo só o que falta; o STEP que sumir com o hub aberto é extraído no
+  próprio pedido (~2 s); e o STEP que a PcbLib atual não tem (footprint do hub que copiou o corpo de outra PcbLib) é
+  procurado nos caches das outras PcbLib antes do 404. A primeira vista 3D depois de atualizar refaz o cache (~10 s).
+- **Caractere especial:** varridos os 619 footprints da PcbLib, os 78 da biblioteca do hub e os 368 modelos 3D. Vírgula,
+  parênteses, barra, ponto e vírgula, aspas, acento/ç, °, µ, Ω, ±, &, #, %, + **não quebram** nada: o arquivo do
+  modelo é sempre `3d/<checksum>.step` ou `3d-hub/<sha1>.step` (o nome do STEP só aparece na tela), o upload manda o
+  nome por `encodeURIComponent` e o NexoCAD por `encodeURIComponent` do id; os 10 STEP com nome especial e os 7 do
+  `3d-hub` convertem em malha. O que **quebrava** era o nome do footprint diferente nos dois arquivos: o `pcblib.js` lê
+  o nome em cp1252 e troca o antigo pelo padronizado do `Libs/rename-map.js`, e o `pcblib-3d.js` saía com o nome cru.
+  124 footprints com corpo na PcbLib nunca achavam o corpo — 123 renomeados (`BARRA 7 VIAS FEMEA` → `CONE BARRA 7 VIAS
+  FEMEA`, `CAP EL 2mm L10 D6` → `CAP EL 2MM L10 D6`...) e o `TO–220AB`, cujo travessão (byte 0x96 do Windows) virava
+  um caractere de controle. O `pcblib-3d.js` agora sai com o nome do `pcblib.js` (e o cru como apelido): de 351 para
+  475 dos 619 footprints com corpo achado (os outros 144 não têm corpo na PcbLib).
+- **Nome com caractere invisível:** a vista 3D acha o footprint também quando o nome difere só por espaço duro (NBSP),
+  zero-width, BOM, espaço no fim ou repetido, ou acento decomposto (NFD); maiúscula e pontuação continuam valendo. Na
+  biblioteca de hoje nenhum nome depende disso.
+- Nenhum dado real precisou de reparo: o `pcblib-hub.js` e a PcbLib estão íntegros (todo corpo aponta para um modelo do
+  índice). O cache velho em `%TEMP%\eletrichub-pcblib3d` fica sem uso.
+- Testes: `tests/test_lib3d_servidor.py` (cache apagado com o hub aberto e ao abrir, outra PcbLib, rename-map, cp1252,
+  nomes com vírgula/parênteses/longo do ESP32) e `tests/test-pcb3d-nomes.js` (o corpo e a URL do STEP pelo nome com cada
+  caractere especial; NBSP/zero-width/NFD).
+
 ## 1.92.0 — 2026-11-10
 
 **A borda da placa com o mouse: Tab, Tab seleciona a borda inteira (e só ela), e as alças arrastam a borda, uma aresta

@@ -299,6 +299,27 @@ function inversa(M){
   return o;
 }
 
+/* ---- o footprint da biblioteca pelo nome ----
+   O nome do componente e a chave da biblioteca tem que casar BYTE A BYTE, e o texto que vem do Altium
+   nem sempre e o mesmo dos dois lados: espaco duro (NBSP, U+00A0) ou estreito no lugar do espaco,
+   caractere invisivel (zero-width, BOM), espaco no fim ou repetido, acento composto de outro jeito
+   (NFD x NFC). Primeiro o nome exato; sem ele, o nome com esses caracteres normalizados (sem mexer em
+   maiuscula/minuscula nem em pontuacao: 'CAP 1206' e 'CAP 1,206' continuam diferentes). */
+const INVISIVEIS = /[\u200b-\u200d\u2060\ufeff\u00ad]/g;
+function chaveNome(s){
+  let t = String(s);
+  try { t = t.normalize('NFC'); } catch (e) { /* sem ICU */ }
+  return t.replace(INVISIVEIS, '').replace(/[\s\u00a0\u2007\u202f]+/g, ' ').trim();
+}
+function achaNome(mapa, nome){
+  if (!mapa || nome == null || nome === '') return null;
+  if (Object.prototype.hasOwnProperty.call(mapa, nome)) return mapa[nome];
+  const alvo = chaveNome(nome);
+  if (!alvo) return null;
+  for (const k of Object.keys(mapa)) if (chaveNome(k) === alvo) return mapa[k];
+  return null;
+}
+
 /* ---- um corpo (do board3d ou da biblioteca) levado pela matriz D ---- */
 function urlDe(models, base, id){
   const m = models && Object.prototype.hasOwnProperty.call(models, id) ? models[id] : null;
@@ -393,7 +414,7 @@ function corpos(eb, d3, opcoes){
     if (!c || !c.footprint) return false;
     /* com a funcao (a caixa "Solda embaixo" da tela), ela decide sozinha: e opcao de visualizacao */
     if (typeof opcoes.solda === 'function') { try { return !!opcoes.solda(c.footprint); } catch (e) { return false; } }
-    const fh = hub && hub.footprints && tem(hub.footprints, c.footprint) ? hub.footprints[c.footprint] : null;
+    const fh = hub ? achaNome(hub.footprints, c.footprint) : null;
     return !!(fh && fh.solda);
   }
   /* a biblioteca do NexoCAD (opcoes.nexo, o HubNexo.resolvedor()), pela prioridade do contrato:
@@ -423,7 +444,7 @@ function corpos(eb, d3, opcoes){
   function corposDoComp(c){
     /* o corpo que o editor de footprint do hub pos (Libs/pcblib-hub.js) vale mais que o do PcbDoc:
        foi escolhido DEPOIS, de proposito */
-    const fh = hub && hub.footprints && tem(hub.footprints, c.footprint) ? hub.footprints[c.footprint] : null;
+    const fh = hub ? achaNome(hub.footprints, c.footprint) : null;
     if (fh && Array.isArray(fh.bodies) && fh.bodies.length) { daBiblioteca(fh, hub.models, 'hub'); return; }
     const refO = tem(ren, c.ref) ? ren[c.ref] : c.ref;
     const o = tem(origem, refO) ? origem[refO] : null;
@@ -455,7 +476,7 @@ function corpos(eb, d3, opcoes){
       }
       return;
     }
-    const fp = lib && lib.footprints && tem(lib.footprints, c.footprint) ? lib.footprints[c.footprint] : null;
+    const fp = lib ? achaNome(lib.footprints, c.footprint) : null;
     if (fp && Array.isArray(fp.bodies) && fp.bodies.length) { daBiblioteca(fp, lib.models, 'biblioteca'); return; }
     if (opcoes.placeholder !== false) out.push(placeholder(c, eb, { thickness: esp, alturas: opcoes.alturas }));
     /* os corpos LOCAIS de um footprint da biblioteca, na pose do componente e encaixados nos pads dele */
@@ -479,6 +500,6 @@ function corpos(eb, d3, opcoes){
   return out;
 }
 
-return { corpos, soldaDoComp, matrizCorpo, matrizLocal, placeholder, ajusteFootprint, deltaComp, matPose, mul4, aplica, colMaior, deColMaior,
+return { corpos, soldaDoComp, matrizCorpo, matrizLocal, placeholder, ajusteFootprint, achaNome, chaveNome, deltaComp, matPose, mul4, aplica, colMaior, deColMaior,
          ALTURAS, ESPESSURA_PADRAO, VERSAO };
 });
