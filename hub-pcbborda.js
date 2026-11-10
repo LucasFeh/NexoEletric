@@ -110,11 +110,42 @@ function moveAresta(pts, i, d) {
   const A2 = [A[0] + nn[0] * d, A[1] + nn[1] * d], B2 = [B[0] + nn[0] * d, B[1] + nn[1] * d];
   /* a ponta A desliza pela aresta anterior (de ia-1 até ia), se ela é reta */
   const ip = (ia - 1 + n) % n, inx = (ib + 1) % n;
-  let novaA = A2, novaB = B2;
-  if (arestaReta(pts, ip)) { const P = pts[ip]; const q = intersecao(A2, dir, P, [A[0] - P[0], A[1] - P[1]]); if (q) novaA = q; }
-  if (arestaReta(pts, ib)) { const N = pts[inx]; const q = intersecao(B2, dir, N, [B[0] - N[0], B[1] - N[1]]); if (q) novaB = q; }
+  const novaA = A2, novaB = B2;
+  /* 1.92.3: a ponta só desliza enquanto fica DENTRO da vizinha. Com a aresta entrando mais que um chanfro (o de 1,5 mm
+     da DMB, a aresta entrando 6 mm), a ponta passaria do outro vértice do chanfro e a borda se cruzaria: aí o chanfro
+     inteiro anda junto com a aresta (o mesmo tamanho e o mesmo ângulo), e o vértice de lá desliza pela reta seguinte */
+  const off = [nn[0] * d, nn[1] * d];
+  /* q na reta (alvo + s·dirAlvo) e na reta (far → viz), se cair dentro dela (t > 2%) */
+  const desliza = (far, viz, alvo, dirAlvo) => {
+    const q = intersecao(alvo, dirAlvo, far, [viz[0] - far[0], viz[1] - far[1]]);
+    if (!q) return null;
+    const L2 = (viz[0] - far[0]) ** 2 + (viz[1] - far[1]) ** 2;
+    if (!(L2 > 1e-12)) return null;
+    const t = ((q[0] - far[0]) * (viz[0] - far[0]) + (q[1] - far[1]) * (viz[1] - far[1])) / L2;
+    return t > 0.02 ? q : null;
+  };
+  /* o lado da ponta `iv` (vizinha reta de `iviz` até iv; `ilonge` = o vértice depois da vizinha) */
+  const lado = (iv, iviz, ilonge, alvo, vizReta, longeReta) => {
+    if (!vizReta) return;
+    const V = pts[iv], Z = pts[iviz];
+    const q = desliza(Z, V, alvo, dir);
+    if (q) { out[iv][0] = r6(q[0]); out[iv][1] = r6(q[1]); return; }
+    /* o chanfro anda inteiro: a ponta pela normal, o outro vértice dele desliza pela reta seguinte (ou anda junto) */
+    const Z2 = [Z[0] + off[0], Z[1] + off[1]];
+    const q2 = longeReta ? desliza(pts[ilonge], Z, Z2, [V[0] - Z[0], V[1] - Z[1]]) : null;
+    const nz = q2 || Z2;
+    out[iviz][0] = r6(nz[0]); out[iviz][1] = r6(nz[1]);
+  };
   out[ia][0] = r6(novaA[0]); out[ia][1] = r6(novaA[1]);
   out[ib][0] = r6(novaB[0]); out[ib][1] = r6(novaB[1]);
+  if (n >= 5) {
+    lado(ia, ip, (ip - 1 + n) % n, A2, arestaReta(pts, ip), arestaReta(pts, (ip - 1 + n) % n));
+    lado(ib, inx, (inx + 1) % n, B2, arestaReta(pts, ib), arestaReta(pts, inx));
+  } else {
+    /* triângulo/quadrilátero: só o deslizar simples */
+    if (arestaReta(pts, ip)) { const q = desliza(pts[ip], A, A2, dir); if (q) { out[ia][0] = r6(q[0]); out[ia][1] = r6(q[1]); } }
+    if (arestaReta(pts, ib)) { const q = desliza(pts[inx], B, B2, dir); if (q) { out[ib][0] = r6(q[0]); out[ib][1] = r6(q[1]); } }
+  }
   return out;
 }
 function cruza(pts) {

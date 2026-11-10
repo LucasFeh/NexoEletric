@@ -169,6 +169,45 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   await js(`HubMcpVista.comando('desfazer')`); await espera(400);
   assert.strictEqual((await js(`${P}.changes()`)).length, 0, 'Ctrl+Z volta a aresta num passo');
 
+  /* 3b. (1.92.3) o ímã e as guias de alinhamento na borda, os mesmos do arrasto de sempre ("magnetismo e alinhamento
+     com canva, igual o resto"): a aresta da direita levada até um pad gruda nele (⊙ pad); levada até a altura... a x de um
+     pad noutra altura, a guia de alinhamento aparece e prende */
+  await js(`${P}.selecionar(${P}.alvos().filter(a => a.t === 'contorno'))`); await espera(200);
+  const ar2 = (await js(`${P}.alcasBorda()`)).find(a => a.tipo === 'aresta' && a.i === iDir);
+  /* o pad mais à direita da placa (dentro dela) */
+  const pad = await js(`(() => { const eb = HubCore.effectiveBoard(window.pcbmirror, HubCore.applyPcbChanges(window.pcbmirror, ${P}.changes())); let m = null;
+    for (const c of eb.components || []) for (const p of c.pads || []) if (p && isFinite(p.x) && p.x < ${B0.caixa.x2} - 3 && (!m || p.x > m.x)) m = { x:p.x, y:p.y, ref:c.ref + '-' + p.name };
+    return m; })()`);
+  assert.ok(pad, 'um pad perto da borda da direita');
+  const h0 = await tela(ar2.x, ar2.y), hp = await tela(pad.x, pad.y);
+  arrastando = true;
+  await mouse('mousePressed', h0.x, h0.y);
+  for (let k = 1; k <= 10; k++) await mouse('mouseMoved', h0.x + (hp.x - h0.x) * k / 10, h0.y + (hp.y - h0.y) * k / 10);
+  await espera(300);
+  let ab = await js(`${P}.arrastoBorda()`);
+  assert.ok(ab && ab.ima && ab.ima.tipo === 'pad' && Math.abs(ab.ima.x - pad.x) < 1e-6, 'a aresta gruda no pad ' + pad.ref + ': ' + JSON.stringify(ab));
+  assert.ok(Math.abs(ab.d - (pad.x - B0.caixa.x2)) < 1e-6, 'a aresta foi até o centro do pad: ' + ab.d);
+  assert.ok(!ab.ruim && Math.abs(ab.dim.h - B0.caixa.h) < 1e-6, 'a borda continua válida e com a mesma altura (os chanfros não passam do vértice): ' + JSON.stringify(ab));
+  assert.ok(/⊙ pad/.test(await js(`document.getElementById('smsg').textContent`)), 'o rodapé diz o ímã');
+  await print('borda-4-ima-no-pad');
+  /* sem soltar: a mesma x do pad, mas longe dele em Y (fora do ímã) — a guia de alinhamento pega e prende */
+  const hg = await tela(pad.x + 0.04, ar2.y);
+  for (let k = 1; k <= 6; k++) await mouse('mouseMoved', hp.x + (hg.x - hp.x) * k / 6, hp.y + (hg.y - hp.y) * k / 6);
+  await espera(300);
+  ab = await js(`${P}.arrastoBorda()`);
+  assert.ok(ab && !ab.ima && ab.cena && /alinhad|vértice|pad|centro|borda/i.test(ab.guia || '') && Math.abs(ab.d - (pad.x - B0.caixa.x2)) < 1e-6,
+    'a guia de alinhamento prende a aresta na x do pad: ' + JSON.stringify(ab));
+  await print('borda-5-guia-de-alinhamento');
+  /* Ctrl solta o snap e as guias */
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hg.x, y: hg.y, button: 'none', buttons: 1, modifiers: 2 });
+  await espera(200);
+  ab = await js(`${P}.arrastoBorda()`);
+  assert.ok(ab && !ab.ima && !ab.cena, 'Ctrl: sem ímã e sem guia: ' + JSON.stringify(ab));
+  await tecla('Escape', 'Escape', 27);
+  arrastando = false;
+  await mouse('mouseReleased', hg.x, hg.y); await espera(300);
+  assert.strictEqual((await js(`${P}.changes()`)).length, 0, 'Esc desiste do arrasto');
+
   /* 4. a seta: a borda inteira anda um passo da grade */
   await js(`${P}.selecionar(${P}.alvos().filter(a => a.t === 'contorno'))`); await espera(200);
   await js(`document.getElementById('cv').focus()`);

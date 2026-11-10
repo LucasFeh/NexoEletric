@@ -4,6 +4,31 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.92.3 — 2026-11-10
+
+**A borda da placa ganha o ímã e as guias de alinhamento (estilo Canva) do resto da vista PCB.**
+Pedido do dono: "no ajuste da borda da placa, quero que tenha magnetismo e alinhamento com canva, igual o resto".
+- Arrastar o **vértice**, o **quadrado do meio de uma aresta** ou a **borda inteira** (a cruz do meio ou a própria reta
+  com a borda toda selecionada) usa o MESMO mecanismo do arrasto de componente e de arte, sem nada paralelo:
+  - o **ímã** (`snapPonto`): o ponto que se segura — o vértice, o meio da aresta ou o centro da borda — gruda no centro de
+    pad, de via e na ponta de trilha, conforme o **Snap** do painel (Todas as camadas / camada atual / desligado), com o
+    círculo do ímã na tela e "⊙ pad GND" no rodapé; sem ímã, a **grade** do painel;
+  - as **guias de alinhamento** (`hub-guias.js`, as magenta com o rótulo, a travada e o "espaço igual" que o componente já
+    tem): o vértice e a aresta alinham com os pads, as vias, as pontas de trilha, as caixas dos componentes, os centros
+    dos recortes/furos da placa e os **outros vértices da própria borda** (estes valem sempre: são o que deixa a borda em
+    esquadro); a borda inteira alinha também pela caixa dela. A aresta reta em pé ou deitada alinha no eixo da normal; a
+    inclinada fica com o ímã e a grade;
+  - o **Ctrl** solta o ímã e as guias, como no resto; a medida **largura × altura ao vivo** continua, agora com o ímã e a
+    guia que pegaram no rodapé.
+- **A aresta entrando mais que um chanfro** (a da direita da DMB entrando 6 mm, com o chanfro de 1,5 mm): antes a ponta
+  deslizava pela reta do chanfro além do vértice dele e a borda se cruzava (vermelha, não gravava). Agora o chanfro anda
+  inteiro junto com a aresta (mesmo tamanho, mesmo ângulo) e o vértice de lá desliza pela reta seguinte — a placa fica
+  6 mm mais estreita com a mesma altura.
+- As setas continuam andando a borda inteira um passo da grade (o empurrão exato, sem ímã).
+- Testes: `tests/test-pcbborda.js` (a aresta entrando mais e menos que o chanfro: válida, a mesma altura, a largura certa)
+  e o smoke `tests/smoke-borda.js` (a aresta levada até um pad gruda nele — ⊙ pad — e a borda continua válida; na mesma
+  x do pad, longe dele em Y, a guia "vértice da borda alinhado com CN4-1" prende; Ctrl solta os dois; Esc desiste).
+
 ## 1.92.2 — 2026-11-10
 
 **O botão das Artes vai para o canto de cima à direita da vista PCB; a PCB avisa quando o código da placa não está na

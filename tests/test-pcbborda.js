@@ -54,6 +54,13 @@ const ok = (c, m) => { assert.ok(c, m); n++; };
   const ip = (i - 1 + pts.length) % pts.length, inx = (i + 1) % pts.length;
   ok(Math.abs(ang(ip) - angAntes(ip)) < 1e-6 && Math.abs(ang(inx) - angAntes(inx)) < 1e-6, 'os chanfros vizinhos mantêm o ângulo');
   ok(!BD.cruza(m), 'sem cruzamento');
+  /* 1.92.3: a aresta da direita ENTRANDO 6 mm (mais que o chanfro de 1,5 mm): a ponta não desliza além do chanfro — a
+     borda continua sem cruzar e com a mesma altura */
+  const iD = pts.findIndex((p, k) => { const q = pts[(k + 1) % pts.length]; return Math.abs(p[0] - c0.x2) < 1e-6 && Math.abs(q[0] - c0.x2) < 1e-6; });
+  const mD = BD.moveAresta(pts, iD, -6), cD = BD.caixa(H.ptsToOutline(mD));
+  ok(!BD.cruza(mD) && Math.abs(cD.h - c0.h) < 1e-6 && Math.abs(cD.w - (c0.w - 6)) < 1e-6, 'entrar mais que o chanfro: válido, ' + cD.w + ' × ' + cD.h);
+  const mE = BD.moveAresta(pts, iD, -1), cE = BD.caixa(H.ptsToOutline(mE));
+  ok(Math.abs(cE.h - c0.h) < 1e-6 && Math.abs(cE.w - (c0.w - 1)) < 1e-6 && !BD.cruza(mE), 'entrar menos que o chanfro: desliza (45° fica)');
   /* o Gerber (Profile) segue a borda nova */
   const op = { op: 'outline_set', pts: m };
   const eb = H.effectiveBoard(b, H.applyPcbChanges(b, [op]));

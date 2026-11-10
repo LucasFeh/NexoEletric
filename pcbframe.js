@@ -3988,24 +3988,83 @@ function iniciaBorda(g){
   const segs = segsContorno(), pts = HC.outlineToPts(segs);
   if (!BD || !pts) { HubDialog.toast('a borda desta placa não fecha uma volta: edite pela ferramenta Contorno', 'warn'); return false; }
   arrasto = { borda:true, tipo:g.ab.tipo, i:g.ab.i, pts0:pts, w0:g.inicio, novo:null, w:g.inicio, moveu:true };
+  /* 1.92.3: o ponto que o ímã e as guias prendem — o vértice, o meio da aresta ou o centro da borda */
+  const n = pts.length;
+  if (arrasto.tipo === 'vert') arrasto.ref = [pts[arrasto.i][0], pts[arrasto.i][1]];
+  else if (arrasto.tipo === 'aresta') { const p = pts[arrasto.i], q = pts[(arrasto.i + 1) % n]; arrasto.ref = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]; arrasto.nn = BD.normalAresta(pts, arrasto.i); }
+  else { const c = BD.caixa(segs); arrasto.ref = c ? [(c.x1 + c.x2) / 2, (c.y1 + c.y2) / 2] : [g.inicio.x, g.inicio.y]; }
   return true;
+}
+/* 1.92.3 (pedido do dono: "no ajuste da borda da placa, quero que tenha magnetismo e alinhamento com canva, igual o
+   resto"): as guias do arrasto (hub-guias.js, as mesmas do componente e da arte) para a borda. O que anda: o vértice
+   (os dois eixos), a aresta (os vértices dela, só no eixo da normal — a aresta reta em pé ou deitada; a inclinada fica
+   só com o ímã e a grade) ou a borda inteira (a caixa dela e todos os vértices). O que está parado: o de sempre
+   (componentes com os pads, pads soltos, vias, pontas de trilha), os centros dos recortes/furos da placa e os outros
+   vértices da própria borda (estes sempre valem: são o que deixa a borda em esquadro). */
+function guiasDaBorda(a){
+  if (!GUIAS) return null;
+  const n = a.pts0.length, pontos = [], sempre = [];
+  let caixa = null, mexe;
+  if (a.tipo === 'vert') mexe = new Set([a.i]);
+  else if (a.tipo === 'aresta') mexe = new Set([a.i, (a.i + 1) % n]);
+  else mexe = new Set(a.pts0.map((p, i) => i));
+  let eixos = 'xy';
+  if (a.tipo === 'aresta') {
+    const nn = a.nn;
+    if (!nn) return null;
+    eixos = Math.abs(nn[0]) > 0.999 ? 'x' : Math.abs(nn[1]) > 0.999 ? 'y' : '';
+    if (!eixos) return null;
+  }
+  for (const i of mexe) pontos.push({ x:a.pts0[i][0], y:a.pts0[i][1], nome:'vértice ' + (i + 1) + ' da borda', eixos });
+  if (a.tipo === 'aresta') pontos.push({ x:a.ref[0], y:a.ref[1], nome:'aresta ' + (a.i + 1) + ' da borda', eixos });
+  if (a.tipo === 'tudo' || a.tipo === 'meio') { const c = BD.caixa(HC.ptsToOutline(a.pts0) || []); if (c) caixa = { x1:c.x1, y1:c.y1, x2:c.x2, y2:c.y2 }; }
+  const fixos = fixosDasGuias(new Set());
+  for (let i = 0; i < n; i++) if (!mexe.has(i)) sempre.push({ x:a.pts0[i][0], y:a.pts0[i][1], nome:'vértice ' + (i + 1) + ' da borda' });
+  for (const k of recortesDaTela()) { const b = bbPts(k.pts); if (b) fixos.pontos.push({ x:(b[0] + b[2]) / 2, y:(b[1] + b[3]) / 2, nome:'furo da placa' }); }
+  fixos.sempre = sempre;
+  return GUIAS.prepara({ caixa, tipoCaixa:'borda', nome:'borda', pontos }, fixos, { eps:1e-3 });
 }
 const passoGrade = (v, livre) => (livre ? v : Math.round(v / grade.mm) * grade.mm);
 function atualizaBorda(e, w){
-  const a = arrasto, livre = e && e.ctrlKey;
+  const a = arrasto, livre = !!(e && e.ctrlKey);
   a.w = w;
-  if (a.tipo === 'vert') a.novo = BD.moveVertice(a.pts0, a.i, livre ? w.x : snapV(w.x, grade.mm), livre ? w.y : snapV(w.y, grade.mm));
+  /* o mesmo do arrasto de sempre (atualizaArrasto): o ímã do snapPonto (pad, via, ponta de trilha, conforme o Snap do
+     painel) no ponto que se segura, a grade, e por cima as guias de alinhamento; o Ctrl solta tudo */
+  let dx = w.x - a.w0.x, dy = w.y - a.w0.y;
+  const rx = dx, ry = dy, ref = a.ref;
+  a.ima = null; a.cena = null;
+  if (!livre) {
+    const p = snapPonto({ x:ref[0] + dx, y:ref[1] + dy }, e, {});
+    if (p.tipo === 'pad' || p.tipo === 'via' || p.tipo === 'ponta') a.ima = p;
+    dx = p.x - ref[0]; dy = p.y - ref[1];
+  }
+  let guia = '';
+  if (GUIAS && !a.guiasFalhou) {
+    try {
+      if (a.guias === undefined) a.guias = guiasDaBorda(a);
+      if (a.guias && a.guias.box0) {
+        const passo = grade.mm;
+        const g = GUIAS.resolve(a.guias, rx, ry, { escala:view.scale, fmt:fmtGuia, desliga:livre,
+          gradeX: d => snapV(ref[0] + d, passo) - ref[0], gradeY: d => snapV(ref[1] + d, passo) - ref[1],
+          trava: a.ima ? { dx:a.ima.x - ref[0], dy:a.ima.y - ref[1] } : null });
+        if (g) { if (!livre) { dx = g.lx; dy = g.ly; } a.cena = g.cena; guia = g.rotulo || ''; }
+      }
+    } catch (err) { a.guiasFalhou = true; try { console.error('hub-guias (borda):', err); } catch (x) {} }
+  }
+  a.guia = guia;
+  if (a.tipo === 'vert') a.novo = BD.moveVertice(a.pts0, a.i, ref[0] + dx, ref[1] + dy);
   else if (a.tipo === 'aresta') {
-    const nn = BD.normalAresta(a.pts0, a.i);
-    const d = passoGrade((w.x - a.w0.x) * nn[0] + (w.y - a.w0.y) * nn[1], livre);
+    const nn = a.nn;
+    const d = r6(dx * nn[0] + dy * nn[1]);
     a.d = d; a.novo = BD.moveAresta(a.pts0, a.i, d);
-  } else a.novo = BD.transladaPts(a.pts0, passoGrade(w.x - a.w0.x, livre), passoGrade(w.y - a.w0.y, livre));
+  } else a.novo = BD.transladaPts(a.pts0, dx, dy);
   if (!a.novo) return;
   const segs = HC.ptsToOutline(a.novo);
   a.dim = segs ? BD.caixa(segs) : null;
   a.ruim = !segs || BD.cruza(a.novo) || Math.abs(BD.area(a.novo)) < 1;
   const oque = a.tipo === 'vert' ? 'vértice ' + (a.i + 1) : a.tipo === 'aresta' ? 'aresta ' + (a.i + 1) + (a.d >= 0 ? ' +' : ' ') + fmtDist(a.d) + ' ' + unidade : 'a borda inteira';
-  avisoRodape('Borda ' + (a.dim ? fmtDist(a.dim.w) + ' × ' + fmtDist(a.dim.h) + ' ' + unidade : '—') + ' · ' + oque + (a.ruim ? ' · ▲ a borda se cruzaria' : '') + ' · Ctrl solta a grade · Esc desiste');
+  const ima = a.ima ? ' · ⊙ ' + a.ima.tipo + (a.ima.net ? ' ' + a.ima.net : '') : '';
+  avisoRodape('Borda ' + (a.dim ? fmtDist(a.dim.w) + ' × ' + fmtDist(a.dim.h) + ' ' + unidade : '—') + ' · ' + oque + ima + (a.guia ? ' · ' + a.guia : '') + (a.ruim ? ' · ▲ a borda se cruzaria' : '') + ' · Ctrl solta o snap e as guias · Esc desiste');
   pede();
 }
 function desenhaBordaArrasto(){
@@ -4021,6 +4080,12 @@ function desenhaBordaArrasto(){
   }
   ctx.stroke();
   ctx.restore();
+  /* 1.92.3: as guias de alinhamento e o ímã, como no arrasto de sempre */
+  if (a.cena && GUIAS) GUIAS.desenha(ctx, a.cena, { escala:view.scale, fmt:fmtGuia });
+  if (a.ima) {
+    ctx.save(); ctx.strokeStyle = COR.snap; ctx.lineWidth = px(1.5);
+    ctx.beginPath(); ctx.arc(a.ima.x, a.ima.y, px(7), 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
+  }
   /* a medida ao vivo, ao lado do cursor (na tela) */
   if (a.dim && a.w) {
     const q = mundoParaTela(a.w.x, a.w.y), t = fmtDist(a.dim.w) + ' × ' + fmtDist(a.dim.h) + ' ' + unidade;
@@ -5566,6 +5631,15 @@ function guiasDaPlaca(a){
     else if (al.t === 'track') pontos.push({ x:g.x1, y:g.y1, nome:'ponta da trilha' }, { x:g.x2, y:g.y2, nome:'ponta da trilha' });
   }
   if (!caixa && !pontos.length) return null;
+  const fixos = fixosDasGuias(anda);
+  const bb = EB.board && EB.board.bbox;
+  if (caixa && bb && [bb.x1, bb.y1, bb.x2, bb.y2].every(isNum)) fixos.folha = { x1:bb.x1, y1:bb.y1, x2:bb.x2, y2:bb.y2, rotulo:'no centro da placa' };
+  const principal = a.principal && a.principal.t === 'comp' ? nomeComp(a.principal.m) : '';
+  return GUIAS.prepara({ caixa, tipoCaixa:'comp', nome:principal, pontos }, fixos, { eps:1e-3 });
+}
+/* o que está parado para as guias (o alinhamento estilo Canva): as caixas dos componentes com os pads, os pads soltos, as
+   vias e as pontas de trilha; `anda` = os componentes na mão (ficam de fora). 1.92.3: a borda da placa usa os mesmos */
+function fixosDasGuias(anda){
   const fixos = { caixas:[], pontos:[], sempre:[], folha:null };
   for (const m of model.comps) {
     if (anda.has(m) || m.deleted) continue;
@@ -5584,10 +5658,7 @@ function guiasDaPlaca(a){
     const n = 'trilha' + (t.net ? ' ' + t.net : '');
     fixos.pontos.push({ x:t.x1, y:t.y1, nome:n }, { x:t.x2, y:t.y2, nome:n });
   }
-  const bb = EB.board && EB.board.bbox;
-  if (caixa && bb && [bb.x1, bb.y1, bb.x2, bb.y2].every(isNum)) fixos.folha = { x1:bb.x1, y1:bb.y1, x2:bb.x2, y2:bb.y2, rotulo:'no centro da placa' };
-  const principal = a.principal && a.principal.t === 'comp' ? nomeComp(a.principal.m) : '';
-  return GUIAS.prepara({ caixa, tipoCaixa:'comp', nome:principal, pontos }, fixos, { eps:1e-3 });
+  return fixos;
 }
 const fmtGuia = v => fmtDist(v) + ' ' + unidade;
 /* o deslocamento passado pelas guias: null quando nao ha guia (o hub-guias.js nao carregou, o
@@ -8397,6 +8468,8 @@ window.__hubPcb = Object.assign(Object.create(V), {
   artes:() => ARTES, poeArte:(id, x, y, lado) => { const a = ARTES && ARTES.arte(id); return a ? poeArte(a, { x, y }, lado === 'Bottom' ? 180 : 0, lado || 'Top') : null; },
   comecaArte:id => { const a = ARTES && ARTES.arte(id); if (a) comecaArte(a); return !!a; },
   codigoNaPlaca:() => estadoCodigo(),
+  arrastoBorda:() => (arrasto && arrasto.borda ? { tipo:arrasto.tipo, ima:arrasto.ima ? { tipo:arrasto.ima.tipo, x:arrasto.ima.x, y:arrasto.ima.y } : null,
+    guia:arrasto.guia || '', cena:!!arrasto.cena, d:arrasto.d, dim:arrasto.dim, ruim:!!arrasto.ruim } : null),
   /* a borda (1.92.0): os segmentos, a caixa e as alças na tela */
   borda:() => { const s = segsContorno(); return { n:s.length, caixa:BD ? BD.caixa(s) : null, pts:HC.outlineToPts(s) }; },
   alcasBorda:() => { const B = bordaSel(); if (!B) return null; const n = B.pts.length, out = [];
