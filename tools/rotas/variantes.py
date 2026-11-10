@@ -188,7 +188,7 @@ def montada_da_variante(placa, nome):
 
 
 def codigos(schematic, v):
-    """{placa, virgem, virgemVai, montada, equipamento, equipamentoProjeto, variante} -- a regra do cabecalho"""
+    """{placa, virgem, virgemVai, montada, equipamento, equipamentoProjeto, nomeEquipamentoProjeto, variante} -- a regra do cabecalho"""
     p = params_de(schematic)
     placa = p.get('CodigoDaPlaca', '')
     if placa.upper() == 'PROJETO NÃO DEFINIDO':
@@ -197,6 +197,8 @@ def codigos(schematic, v):
     return {'placa': placa, 'nomePlaca': p.get('NomeDaPlaca', ''), 'virgem': placa, 'virgemVai': not v,
             'montada': montada_da_variante(placa, v.get('nome') or v.get('codigo')) if v else placa,
             'equipamento': (v or {}).get('codigo') or eq, 'equipamentoProjeto': eq,
+            # 1.89.3: o nome do equipamento do projeto (o dropdown da variante chama a padrao pela sigla do codigo)
+            'nomeEquipamentoProjeto': p.get('NomeDoEquipamento', ''),
             'variante': {'id': v['id'], 'nome': v.get('nome', ''), 'codigo': v.get('codigo', '')} if v else None}
 
 

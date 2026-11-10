@@ -270,6 +270,8 @@ class Variantes(unittest.TestCase):
         e = self.c.get('/api/variantes?projeto=P1').get_json()
         self.assertEqual((e['ativa'], e['codigos']['montada'], e['codigos']['virgem'], e['codigos']['virgemVai'], e['codigos']['equipamento']),
                          (v['id'], PLACA + ' SEM TIMER', PLACA, False, 'PAELST-DI261951'))
+        # 1.89.3: o dropdown chama a padrao pelo equipamento do projeto, mesmo com a variante ativa
+        self.assertEqual((e['codigos']['equipamentoProjeto'], e['codigos']['nomeEquipamentoProjeto']), ('EQ-DI261000', 'ENCODER'))
         # a ativa e desta maquina: o arquivo comeca com ponto (fora do NexoBD e do HTTP); o variantes.json viaja
         self.assertTrue(os.path.exists(os.path.join(self.pdir, '.variante-ativa.json')))
         idx = H.build_index(self.tmp)['projects'][0]

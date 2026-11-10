@@ -360,10 +360,13 @@ function pintaLista(payload, recibo){
   /* 1.89.0: com a variante, a montada é "<código da placa> <NOME DA VARIANTE>" e a virgem não vai (variantes.py » codigos) */
   if (payload && payload.pcb_montada){
     const v = payload.variante;
-    avisos.push(['ok', 'PCB montada: ' + (payload.pcb_montada.codigo || '—') + ' · PCB virgem: '
-      + (v ? 'não enviada (variante — a placa virgem é a do projeto padrão)' : (payload.codigo_placa || '—'))
-      + (v ? ' — variante "' + v.nome + '" (equipamento ' + v.codigo + ', só no quadro da folha)' : ' — variante padrão (todos montados)')
-      + ((payload._suprimidos || []).length ? '; suprimidos na variante: ' + payload._suprimidos.join(', ') : '') + '.']);
+    /* 1.89.3: com a variante, o mais curto possível (o dono): "PCB montada: <...> · Sem PCB virgem · N suprimido(s)" */
+    const sup = payload._suprimidos || [];
+    if (v) avisos.push(['ok', 'PCB montada: ' + (payload.pcb_montada.codigo || '—') + ' · Sem PCB virgem · '
+      + sup.length + (sup.length === 1 ? ' suprimido' : ' suprimidos') + (sup.length ? ': ' + sup.join(', ') : '')]);
+    else avisos.push(['ok', 'PCB montada: ' + (payload.pcb_montada.codigo || '—') + ' · PCB virgem: '
+      + (payload.codigo_placa || '—') + ' — variante padrão (todos montados)'
+      + (sup.length ? '; suprimidos na variante: ' + sup.join(', ') : '') + '.']);
   } else if (payload){
     avisos.push(['', 'Projeto sem código de placa: a PCB montada e a virgem vão sem código (o Odoo usa o nome do projeto). '
       + 'Defina a placa no esquema › Configurações › Definir projeto.']);

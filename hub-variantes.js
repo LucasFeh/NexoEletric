@@ -47,7 +47,14 @@
      "VARIANTE …" saiu: a barra da vista diz o nome); PLACA continua o código da PCB;
    - o envio da lista ao Odoo com a variante ativa (odoolista.monta_payload): a PCB MONTADA é "<código da placa> <NOME DA
      VARIANTE>" e a PCB VIRGEM não vai (a virgem é a do projeto padrão); o equipamento da variante só vai ao quadro.
-   As variantes da 1.88.0 (nome livre, código de qualquer grupo) continuam abrindo como estão. */
+   As variantes da 1.88.0 (nome livre, código de qualquer grupo) continuam abrindo como estão.
+
+   1.89.3 (pedido do dono, 2026-11-10: "Padrão poderia ser só o nome do equipamento tipo nesse caso é 'DMB' e essa parte
+   embaixo [...] pode ser bem resumido"):
+   - a opção da padrão no dropdown (e a caixa fechada) se chama pela SIGLA do equipamento do projeto (rotuloPadrao: o
+     CodigoDoEquipamento "DMB-DI231765" -> "DMB"; sem código, o NomeDoEquipamento; sem nada, "Padrão") e mostra à direita
+     o código do equipamento (sem equipamento, o da placa), como as variantes;
+   - com a variante ativa, o resumo embaixo fica "PCB montada: <...>" e "Sem PCB virgem · N suprimido(s)", sem explicação. */
 (function (root, fabrica) {
   const api = fabrica(root);
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -56,7 +63,7 @@
 'use strict';
 
 const FORMATO = 'nexoeletric-variantes-1';
-const PADRAO = 'Padrão (todos montados)';
+const PADRAO = 'Padrão';
 const TECLA = 'Shift+S';
 const normCod = s => String(s || '').replace(/\s+/g, '').toUpperCase();
 
@@ -97,6 +104,7 @@ function codigos(sch, v){
   /* 1.89.0: a variante é um equipamento: com ela ativa, o equipamento (o do quadro da folha) é o código dela */
   return { placa, nomePlaca: p.NomeDaPlaca || '', virgem: placa, virgemVai: !v, montada: v ? montadaDaVariante(placa, v.nome || v.codigo) : placa,
            equipamento: (v && v.codigo) || p.CodigoDoEquipamento || '', equipamentoProjeto: p.CodigoDoEquipamento || '',
+           nomeEquipamentoProjeto: p.NomeDoEquipamento || '',
            variante: v ? { id: v.id, nome: v.nome || '', codigo: v.codigo || '' } : null };
 }
 function proibidos(est, menosId){
@@ -114,9 +122,19 @@ function filtraPlaca(B, fora){
   if (!B || !fora || !fora.size) return B;
   return Object.assign({}, B, { components: (B.components || []).filter(c => !fora.has(String(c && (c.ref != null ? c.ref : c.designator)))) });
 }
+/* 1.89.3: o nome da padrão no dropdown = a sigla do equipamento do projeto (o pedaço antes do "-DI<número>") */
+function siglaEquipamento(cod){
+  const c = String(cod || '').replace(/\s+/g, ' ').trim();
+  if (!c) return '';
+  const m = c.match(/^(.+?)\s*-\s*DI\s*\d/i);
+  return ((m ? m[1] : c.split('-')[0]).trim()) || c;
+}
+const resumoSuprimidos = n => n + (n === 1 ? ' suprimido' : ' suprimidos');
+const rotuloPadrao = c => siglaEquipamento(c && c.equipamentoProjeto) || String((c && c.nomeEquipamentoProjeto) || '').trim() || PADRAO;
+const codigoPadrao = c => (c && (c.equipamentoProjeto || c.placa)) || '';
 const textoVariante = v => v ? 'VARIANTE ' + (v.nome || '') + (v.codigo ? ' · ' + v.codigo : '') : '';
 
-const PURO = { FORMATO, PADRAO, TECLA, SEPARADOR_MONTADA, montadaDaVariante, refs, aplica, codigos, proibidos, sufixo, filtraPlaca, params, textoVariante, normCod };
+const PURO = { FORMATO, PADRAO, TECLA, siglaEquipamento, rotuloPadrao, codigoPadrao, resumoSuprimidos, SEPARADOR_MONTADA, montadaDaVariante, refs, aplica, codigos, proibidos, sufixo, filtraPlaca, params, textoVariante, normCod };
 if (typeof document === 'undefined') return PURO;
 
 /* ============================== tela ============================== */
@@ -350,7 +368,9 @@ function monta(caixa, o){
     const e = estadoDe(P), v = ativa(P), pode = podeEditar(P);
     const semPerm = pode ? '' : ' — ' + motivo(P);
     lista.replaceChildren();
-    opcao(PADRAO, (e && e.codigos && e.codigos.placa) || '', !v ? 'on' : '', 'todos os componentes montados (a PCB do projeto)', () => troca(P, null));
+    const c0 = (e && e.codigos) || {};
+    opcao(rotuloPadrao(c0), codigoPadrao(c0), !v ? 'on' : '', 'o projeto padrão: todos os componentes montados'
+      + (c0.equipamentoProjeto ? ' (equipamento ' + c0.equipamentoProjeto + (c0.nomeEquipamentoProjeto ? ' ' + c0.nomeEquipamentoProjeto : '') + ')' : ''), () => troca(P, null));
     for (const x of (e && e.variantes) || [])
       opcao(x.nome || x.codigo, x.codigo, v && v.id === x.id ? 'on' : '', 'a variante "' + (x.nome || x.codigo) + '" (equipamento ' + x.codigo + '): ' + (x.suprimidos || []).length + ' suprimido(s)', () => troca(P, x.id));
     lista.append(el('div', 'vr-div'));
@@ -366,18 +386,18 @@ function monta(caixa, o){
   function pinta(){
     const e = estadoDe(P);
     const v = ativa(P);
-    txt.textContent = v ? (v.nome || v.codigo) : PADRAO;
-    cod.textContent = v ? v.codigo : '';
-    bt0.title = (v ? 'variante "' + v.nome + '" (' + v.codigo + ')' : PADRAO) + ' — clique para trocar, adicionar' + (v ? ', renomear, trocar o equipamento ou apagar' : '') + ' (nesta máquina)';
-    if (!lista.hidden) pintaLista();
     const c = (e && e.codigos) || {};
+    txt.textContent = v ? (v.nome || v.codigo) : rotuloPadrao(c);
+    cod.textContent = v ? v.codigo : codigoPadrao(c);
+    bt0.title = (v ? 'variante "' + v.nome + '" (' + v.codigo + ')' : 'padrão ' + rotuloPadrao(c) + (codigoPadrao(c) ? ' (' + codigoPadrao(c) + ')' : '')) + ' — clique para trocar, adicionar' + (v ? ', renomear, trocar o equipamento ou apagar' : '') + ' (nesta máquina)';
+    if (!lista.hidden) pintaLista();
     info.replaceChildren();
     const linha = (rot, val) => { const d = el('div'); d.append(rot + ' ', el('b', null, val || '—')); info.append(d); };
     linha('PCB montada:', c.montada);
-    if (v) { const d = el('div'); d.append('PCB virgem: ', el('b', null, 'não enviada'), ' (variante — a placa virgem é a do projeto padrão)'); info.append(d); }
+    /* 1.89.3: com a variante, o mais curto possível (o dono): "Sem PCB virgem · N suprimido(s)" */
+    if (v) info.append(el('div', null, 'Sem PCB virgem · ' + resumoSuprimidos((v.suprimidos || []).length)));
     else linha('PCB virgem:', c.virgem || c.placa);
-    if (v) info.append(el('div', null, (v.suprimidos || []).length + ' suprimido(s) nesta variante — a PCB, o cobre e o Gerber são os da padrão (Suprimir / Montar: a barra da vista, ' + TECLA + ')'));
-    else info.append(el('div', null, (e && e.variantes && e.variantes.length ? e.variantes.length + ' variante(s) — ' : '') + 'na padrão todos os componentes são montados'));
+    if (!v) info.append(el('div', null, (e && e.variantes && e.variantes.length ? e.variantes.length + ' variante(s) — ' : '') + 'na padrão todos os componentes são montados'));
     chips.replaceChildren();
     if (v) for (const s of v.suprimidos || []) {
       const ch = el('span', 'vr-chip' + ((v.faltando || []).indexOf(s.ref) >= 0 ? ' falta' : ''), s.ref);

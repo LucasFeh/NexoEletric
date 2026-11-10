@@ -4,6 +4,17 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.89.3 — 2026-11-10
+
+**A padrão no dropdown da variante se chama pelo equipamento; o resumo da variante fica curto.**
+- Em Configurações › Variante de projeto, a primeira opção do dropdown (e a caixa fechada) deixa de ser "Padrão (todos
+  montados)" e passa a ser a **sigla do equipamento do projeto** (o `CodigoDoEquipamento` do Definir projeto até o
+  "-DI…": `DMB-DI231765` → **DMB**), com o **código do equipamento** à direita, como as variantes (antes aparecia o
+  código da placa). Sem código de equipamento, vale o nome do equipamento e o código da placa; sem nada, "Padrão".
+- Com uma variante ativa, o resumo embaixo do dropdown fica só **"PCB montada: <código da placa> <NOME>"** e
+  **"Sem PCB virgem · N suprimido(s)"**, sem explicação. Na tela do envio ao Odoo, com a variante, a linha vira
+  "PCB montada: … · Sem PCB virgem · N suprimido(s)" (com os refs, se houver). Sem variante, nada mudou.
+
 ## 1.89.2 — 2026-11-10
 
 **A barra da variante vira só uma etiqueta no topo.**

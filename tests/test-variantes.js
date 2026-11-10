@@ -32,12 +32,26 @@ t('refs: só o que está no esquema; aplica marca todas as partes sem mexer no o
 });
 t('códigos: virgem = PCB; montada = PCB na padrão; na variante (1.89.0) montada = código da placa + nome da variante, sem virgem; o equipamento é o da variante', () => {
   assert.deepStrictEqual(V.codigos(SCH, null), { placa: 'PAEL-DI261940', nomePlaca: 'PLACA ADAPTADORA', virgem: 'PAEL-DI261940', virgemVai: true, montada: 'PAEL-DI261940',
-    equipamento: 'EQ-DI1', equipamentoProjeto: 'EQ-DI1', variante: null });
+    equipamento: 'EQ-DI1', equipamentoProjeto: 'EQ-DI1', nomeEquipamentoProjeto: 'ENCODER', variante: null });
   const c = V.codigos(SCH, VAR);
   assert.deepStrictEqual([c.virgem, c.virgemVai, c.montada, c.variante.codigo, c.equipamento, c.equipamentoProjeto],
     ['PAEL-DI261940', false, 'PAEL-DI261940 SEM TIMER', 'PAELST-DI261951', 'PAELST-DI261951', 'EQ-DI1']);
   assert.strictEqual(V.montadaDaVariante('', 'sem  timer'), 'SEM TIMER', 'sem placa definida: só o nome');
   assert.strictEqual(V.codigos({ params: 'CodigoDaPlaca=PROJETO NÃO DEFINIDO' }, null).placa, '');
+});
+t('dropdown (1.89.3): a padrão pela sigla do equipamento do projeto, com o código dele; sem equipamento, o nome ou "Padrão"', () => {
+  assert.strictEqual(V.siglaEquipamento('DMB-DI231765'), 'DMB');
+  assert.strictEqual(V.siglaEquipamento('PRJ - IT - DI221705'), 'PRJ - IT');
+  assert.strictEqual(V.siglaEquipamento('EQ-DI1'), 'EQ');
+  assert.strictEqual(V.siglaEquipamento('ABC'), 'ABC');
+  assert.strictEqual(V.siglaEquipamento(''), '');
+  const c = V.codigos({ params: 'CodigoDaPlaca=PMD-DI261946;CodigoDoEquipamento=DMB-DI231765;NomeDoEquipamento=DISPLAY ASCII PARA MARCAÇÃO DE BOBINAS' }, VAR);
+  assert.deepStrictEqual([V.rotuloPadrao(c), V.codigoPadrao(c)], ['DMB', 'DMB-DI231765'], 'a sigla e o código do equipamento (não o da placa), mesmo com a variante ativa');
+  const s = V.codigos({ params: 'CodigoDaPlaca=PMD-DI261946;NomeDoEquipamento=DISPLAY' }, null);
+  assert.deepStrictEqual([V.rotuloPadrao(s), V.codigoPadrao(s)], ['DISPLAY', 'PMD-DI261946'], 'sem código de equipamento: o nome e o código da placa');
+  const n = V.codigos({ params: '' }, null);
+  assert.deepStrictEqual([V.rotuloPadrao(n), V.codigoPadrao(n)], ['Padrão', '']);
+  assert.deepStrictEqual([V.resumoSuprimidos(0), V.resumoSuprimidos(1), V.resumoSuprimidos(3)], ['0 suprimidos', '1 suprimido', '3 suprimidos']);
 });
 t('proibidos: o código da PCB, o equipamento do projeto (1.89.0) e o das outras variantes', () => {
   const est = { placa: { codigo: 'PAEL-DI261940' }, codigos: { equipamentoProjeto: 'EQ-DI1' }, variantes: [VAR, { id: 'v1', nome: 'B', codigo: 'PB-DI2' }] };
