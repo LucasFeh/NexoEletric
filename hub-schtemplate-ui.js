@@ -87,7 +87,7 @@ function casa(){
   return root.schtemplatesCasa;
 }
 async function gravaCasa(){
-  const texto = T.serializaCasa(casa().templates);
+  const texto = T.serializaCasa(casa().templates, casa().removidos);
   const io = root.HubIO;
   if (!io){ DLG().toast('sem HubIO: o template ficou só nesta aba', 'warn', 6000); return false; }
   try {
@@ -116,6 +116,8 @@ function secao(a){
   const atual = it && it.template ? it.template : '';
   const tpl = atual ? T.acha(atual) : null;
 
+  /* 1.93.0: o seletor do template entrou no da folha (schframe.js » secFolha: "A4 + DiEletrons"); a vista pede só as
+     ações (`semSeletor`). Sem a flag, o seletor próprio continua (quem mais chamar a seção). */
   const sel = el('select');
   sel.title = 'o template da folha: moldura, zonas e carimbo (o .SchDot do Altium)';
   const o0 = el('option', null, '— sem template —'); o0.value = ''; sel.append(o0);
@@ -140,7 +142,7 @@ function secao(a){
   lin.title = 'template da folha';
   lin.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1"/><path d="M8.5 10.5h5.5 M8.5 10.5v3"/></svg>';
   lin.append(sel);
-  box.replaceChildren(lin);
+  if (a.semSeletor) box.replaceChildren(); else box.replaceChildren(lin);
   const acao = (rot, d, titulo, fn, off, perigo) => {
     const b = el('button', 'sf-acao' + (perigo ? ' perigo' : '')); b.type = 'button'; b.title = titulo;
     b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="' + d + '"/></svg>';
@@ -153,10 +155,15 @@ function secao(a){
        'abrir o editor de template' + (tpl ? '' : ' (um novo, em branco)'), () => abreEditor());
   acao('Novo template…', 'M8 3v10M3 8h10', 'criar um template da casa em branco', () => abreEditor({ novo:true }));
   acao('Remover template…', 'M3 4.5h10 M6 4.5V3h4v1.5 M4.5 4.5l.7 8.5h5.6l.7-8.5', 'tirar um template da casa da lista (o arquivo Libs/sch-templates-casa.js)',
-       () => abreRemover(), !Object.keys(casa().templates).length, true);
+       () => abreRemover(), !daCasa().length, true);
   return box;
 }
 function itemDaFolha(){ return api.item(); }
+/* os templates da casa que o seletor mostra: os do arquivo e os padrões derivados (o A3_DiEletrons, hub-schtemplate.js »
+   PADROES), que podem não estar no arquivo desta máquina */
+function daCasa(){ return T.lista().filter(t => t.origem === 'casa'); }
+const ehPadrao = id => (T.PADROES || []).some(p => p[0] === id);
+const repinta = () => { if (api && typeof api.repinta === 'function') api.repinta(); else if (api) api.redesenha(); };
 function escolhe(id){
   const it = itemDaFolha();
   const tpl = id ? T.acha(id) : null;
@@ -168,7 +175,7 @@ function escolhe(id){
     const fora = api.contaFora ? api.contaFora(nova) : 0;
     if (fora) DLG().toast(tpl.nome + ' · ' + fora + (fora > 1 ? ' itens ficaram' : ' item ficou') + ' fora da página', 'warn', 5000);
   }
-  if (tpl) DLG().toast('template ' + tpl.nome, 'ok');
+  if (tpl) DLG().toast('folha ' + T.rotulo(tpl, root.HubCore && root.HubCore.sheetMatch), 'ok');
 }
 function mudaParam(nome, v){
   const it = itemDaFolha();
@@ -251,26 +258,30 @@ function abreRemover(){
   const esc = e => { if (e.key === 'Escape'){ e.stopPropagation(); fecha(); } };
   const pinta = () => {
     lista.textContent = '';
-    const ids = Object.keys(casa().templates);
-    if (!ids.length){ lista.append(el('div', 'st-dim', 'nenhum template da casa')); return; }
+    const tpls = daCasa();
+    if (!tpls.length){ lista.append(el('div', 'st-dim', 'nenhum template da casa')); return; }
     const it = api ? itemDaFolha() : null;
-    for (const id of ids){
-      const t = casa().templates[id];
+    for (const t of tpls){
+      const id = t.id;
       const l = el('div', 'st-remlin');
       const f = t.folha || {};
       const txt = el('div', 'st-remtxt');
-      txt.append(el('div', null, t.nome || id), el('div', 'st-dim', (f.estilo || '') + (f.w ? ' · ' + Math.round(f.w) + '×' + Math.round(f.h) + ' mil' : '')
+      /* o nome como o seletor da folha o mostra ("A3 + DiEletrons"), e o do arquivo embaixo */
+      txt.append(el('div', null, T.rotulo(t, root.HubCore && root.HubCore.sheetMatch)), el('div', 'st-dim', (t.nome || id)
+        + (f.w ? ' · ' + Math.round(f.w) + '×' + Math.round(f.h) + ' mil' : '')
         + (it && it.template === id ? ' · nesta folha' : '')));
       const b = botao('Remover', 'tira este template da lista da casa', async () => {
         if (!await DLG().confirm('Remover o template "' + (t.nome || id) + '"?\nEle sai de ' + T.ARQ_CASA
             + '. A folha ativa que o usa fica sem template; as outras guardam o nome até você escolher outro.',
             { title:'Remover template', ok:'Remover', danger:true })) return;
         delete casa().templates[id];
+        /* o padrão derivado (A3_DiEletrons) voltaria no próximo acervo(): fica anotado como removido */
+        if (ehPadrao(id)) casa().removidos = Array.from(new Set((casa().removidos || []).concat(id)));
         const ok = await gravaCasa();
         if (ok && api){
           const fol = itemDaFolha();
           if (fol && fol.template === id){ T.aplica(fol, null); api.commit(); }
-          else api.redesenha();
+          else repinta();
         }
         pinta();
       });
@@ -318,9 +329,13 @@ function abreEditor(o){
   const hd = el('div', 'st-head');
   const nome = el('input'); nome.value = tpl.nome; nome.title = 'o nome do template';
   nome.style.cssText = 'background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:3px;padding:3px 6px;font:12px var(--font);width:260px';
-  nome.addEventListener('input', () => { tpl.nome = nome.value; sujo = true; });
+  /* como ele vai aparecer no seletor da folha ("A3 + <nome>"), ao vivo enquanto se digita o nome */
+  const comoFolha = el('span', 'st-dim st-comofolha');
+  const pintaRot = () => { comoFolha.textContent = 'no seletor: ' + T.rotulo(Object.assign({}, tpl, { nome: nome.value || 'Template' }), root.HubCore && root.HubCore.sheetMatch); };
+  nome.addEventListener('input', () => { tpl.nome = nome.value; sujo = true; pintaRot(); });
   const sp = el('span', 'sp');
-  hd.append(el('h2', null, 'Template de folha'), nome, el('span', 'st-dim', tpl.id), sp);
+  pintaRot();
+  hd.append(el('h2', null, 'Template de folha'), nome, comoFolha, sp);
   const corpo = el('div', 'st-body');
   const tools = el('div', 'st-tools');
   const cvw = el('div', 'st-cvw'); const cv = el('canvas'); cvw.append(cv);
@@ -346,15 +361,22 @@ function abreEditor(o){
     /* renomear cria id novo só para template NOVO; editar um da casa mantém o id (as folhas
        que o usam continuam apontando para ele) */
     const ct = casa().templates;
+    /* o template NOVO (ainda fora do acervo) ganha o id do nome com que foi salvo ("casa:Painel CLP", e não o
+       "casa:Novo template" com que o editor abriu) */
+    if (!T.acha(tpl.id)) tpl.id = T.idCasa(tpl.nome, T.acervo());
     tpl.origem = 'casa';
     ct[tpl.id] = tpl;
+    if (casa().removidos) casa().removidos = casa().removidos.filter(x => x !== tpl.id);
     const ok = await gravaCasa();
     sujo = false;
+    /* 1.93.0: o template vira uma folha do seletor, "<tamanho> + <nome>" (o tamanho é o da folha do template: a folha
+       em que ele foi criado) */
+    const rot = T.rotulo(tpl, root.HubCore && root.HubCore.sheetMatch);
     if (api){
       const it2 = itemDaFolha();
       if (it2 && it2.template !== tpl.id &&
-          await DLG().confirm('Usar “' + tpl.nome + '” nesta folha agora?', { title:'Template salvo', ok:'Usar' })) escolhe(tpl.id);
-      else api.redesenha();
+          await DLG().confirm('“' + rot + '” já está no seletor da folha. Usar nesta folha agora?', { title:'Template salvo', ok:'Usar' })) escolhe(tpl.id);
+      else repinta();
     }
     if (ok) { ov.remove(); document.removeEventListener('keydown', tecla, true); }
   };
@@ -475,9 +497,10 @@ function abreEditor(o){
       const f = tpl.folha;
       side.append(el('h3', null, 'Folha do template'));
       const pres = (root.HubCore && root.HubCore.SHEET_PRESETS) || [];
-      linha(side, 'formato', escolha([['', 'Custom']].concat(pres.map(p => [p.id, p.name + ' ' + (p.fam === 'iso' ? 'ISO' : 'legado')])), '', v => {
+      /* só a folha de verdade (1.93.0): o legado do Altium saiu do seletor da folha e daqui */
+      linha(side, 'formato', escolha([['', 'Custom']].concat(pres.filter(p => p.fam === 'iso').map(p => [p.id, p.name])), '', v => {
         const m = v && root.HubCore.sheetPreset(v, f.h > f.w);
-        if (m){ f.w = m[0]; f.h = m[1]; const p = pres.find(q => q.id === v); f.estilo = p ? p.name : 'Custom'; cam.fit({ x1:0, y1:0, x2:f.w, y2:f.h }); }
+        if (m){ f.w = m[0]; f.h = m[1]; const p = pres.find(q => q.id === v); f.estilo = p ? p.name : 'Custom'; cam.fit({ x1:0, y1:0, x2:f.w, y2:f.h }); pintaRot(); }
       }));
       linha(side, 'largura', num(f.w, v => { f.w = v; f.estilo = 'Custom'; }));
       linha(side, 'altura', num(f.h, v => { f.h = v; f.estilo = 'Custom'; }));

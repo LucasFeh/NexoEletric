@@ -145,7 +145,10 @@ class Rotas(unittest.TestCase):
     def test_template_do_esquema(self):
         t = self.c.get('/api/projeto/novo/templates').get_json()
         self.assertEqual(t['padrao'], 'casa:A4_DiEletrons')
-        self.assertEqual([x['id'] for x in t['templates']], ['casa:A4_DiEletrons'])
+        # 1.93.0: o A3 da casa (A3 + DiEletrons) tambem, com a folha A3 ISO
+        self.assertEqual([x['id'] for x in t['templates']], ['casa:A3_DiEletrons', 'casa:A4_DiEletrons'])
+        a3 = t['templates'][0]
+        self.assertEqual((round(a3['w'], 3), round(a3['h'], 3), a3['estilo']), (16535.433, 11692.913, 'A3'))
         # template que nao existe: recusa antes de registrar
         r = self.c.post('/api/projeto/novo', json={'nome': 'Placa Y', 'iniciador': 'Ana', 'template': 'casa:nao-existe'})
         self.assertEqual(r.status_code, 400)

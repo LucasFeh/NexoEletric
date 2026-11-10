@@ -4,6 +4,37 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.93.0 — 2026-11-10
+
+**A folha e o template num seletor só, só com a folha de verdade; o template DiEletrons também em A3.**
+Pedido do dono: "no menu superior esquerdo na hora de escolher a folha, quero que só tenha 'folha de verdade', Altium
+legado pode ir embora, e quero que o template fique no lugar, daí vai sair o dropbox do template e ele vai ser inserido
+lá dentro junto, e todo template novo vai ser a folha 'A3 + (nome do template)', e quero que esse template de nome padrão
+da dieletrons exista dentro da folha pra ser adicionado, igual é no A4".
+- **Um seletor só** no menu da folha (canto superior esquerdo do Esquema): o grupo **Folha** (A4, A3, A2, A1, A0 — a ISO
+  de verdade, sem template) e o grupo **Folha + template** ("A4 + DiEletrons", "A3 + DiEletrons", "A3 + <template
+  novo>"…). Escolher "A3 + DiEletrons" aplica a A3 e o template de uma vez (um Ctrl+Z); escolher "A4" numa folha com
+  template tira o template. O seletor de template separado saiu; **Editar template… / Novo template… / Remover
+  template…** continuam logo abaixo, agindo no template da folha. Deitado/Em pé continua para a folha sem template (com
+  template a folha segue a do template, e os botões dizem por quê).
+- **Sem o Altium legado:** os tamanhos do estilo antigo do Altium (A4 11500×7600, A3 15500×11000, A/B/C/D/E…) não se
+  escolhem mais — nem no seletor da folha nem no formato do editor de template. A folha que JÁ está num deles não quebra:
+  continua abrindo e desenhando igual, e o seletor mostra o tamanho dela ("A4 legado (atual) · 11500×7600",
+  "Personalizada (atual) · …" ou "— não medida —") só enquanto ela o usar; trocar oferece só as de verdade.
+- **Template novo vira folha "<tamanho> + <nome>"**: o tamanho é o da folha em que ele foi criado (uma A3 → "A3 +
+  Painel CLP"); o editor mostra ao vivo como ele vai aparecer, o id sai do nome com que foi salvo, e renomear/remover
+  aparece na hora no seletor (também no Remover template).
+- **A3 + DiEletrons** (`casa:A3_DiEletrons`, o nome do .SchDot do Altium, para a folha A3 importada casar com ele): o
+  mesmo quadro do A4_DiEletrons — ARQUIVO, R./REV., FL., EQUIPAMENTO (o código do equipamento), PLACA, DESEN., VERIF.,
+  APROV., ESCALA, datas, FORMATO e a logo DiEletrons — no mesmo tamanho físico e com as mesmas fontes, encostado no canto
+  inferior direito da A3 ISO (420×297 mm), e a régua da borda com as zonas da A3 (1..8 × A..F, ~50 mm cada, como as 6×4
+  da A4). O alinhamento dos códigos (1.90.1) e o "PROJETO NÃO DEFINIDO" valem igual. Vem no Libs/sch-templates-casa.js e,
+  numa máquina/NexoBD com o arquivo da casa de antes, aparece mesmo assim (derivado do A4 no carregamento); removido pelo
+  Remover template, fica anotado (`removidos` no arquivo da casa) e não volta. Os projetos com A4_DiEletrons não mudam.
+- Testes: `tests/test-schtemplate.js` (o A3 campo a campo, zonas, alinhamento, o derivado e o removido, os rótulos e as
+  opções do seletor sem legado) e `tests/smoke-folha.js` (a vista Esquema de verdade num Chrome headless: o seletor, A4/A3
+  DiEletrons, a folha legada e o template novo "A3 + <nome>").
+
 ## 1.92.3 — 2026-11-10
 
 **A borda da placa ganha o ímã e as guias de alinhamento (estilo Canva) do resto da vista PCB.**

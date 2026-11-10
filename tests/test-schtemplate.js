@@ -246,4 +246,89 @@ eq(T.fonteId(tf, 14, 'Arial'), 2, 'fonte nova');
   eq(N.find(p => p.origem === '=CodigoDoEquipamento').y, N.find(p => p.origem === '=CodigoDaPlaca').y, 'não definido: alinhado também');
 }
 
+/* ── 1.93.0: o A3 da casa, o seletor de folha + template, sem o legado ── */
+{
+  const a3 = A['casa:A3_DiEletrons'];
+  ok(a3, 'o A3_DiEletrons está no acervo (no arquivo da casa)');
+  eq([a3.origem, a3.nome, a3.arquivo], ['casa', 'A3_DiEletrons', 'A3_DiEletrons.SchDot'], 'é da casa, com o nome do .SchDot');
+  perto(a3.folha.w, 16535.433, 'A3 ISO de verdade'); perto(a3.folha.h, 11692.913);
+  eq([a3.folha.zonasX, a3.folha.zonasY, a3.folha.margem, a3.folha.borda], [8, 6, casa.folha.margem, true], 'zonas da A3 (8 × 6), mesma margem');
+  eq(HubCore.sheetMatch({ w:a3.folha.w, h:a3.folha.h }).id, 'iso:A3', 'o seletor reconhece a A3');
+  /* o mesmo quadro, no mesmo tamanho físico, encostado no canto inferior direito */
+  eq(a3.itens.length, casa.itens.length, 'os mesmos itens do A4');
+  const dx = a3.folha.w - casa.folha.w;
+  const cx = it => it.x != null ? [it.x, it.y] : it.x1 != null ? [it.x1, it.y1, it.x2, it.y2] : it.pts ? [].concat(...it.pts) : [];
+  a3.itens.forEach((it, i) => {
+    const b = cx(casa.itens[i]), c = cx(it);
+    c.forEach((v, k) => perto(v, b[k] + (k % 2 ? 0 : dx), 'item ' + i + ' deslocado só em x'));
+  });
+  const ret = a3.itens.find(i => i.g === 'rect');
+  perto(a3.folha.w - a3.folha.margem - ret.x2, casa.folha.w - casa.folha.margem - casa.itens.find(i => i.g === 'rect').x2, 'colado na margem direita como no A4');
+  perto(ret.y1, casa.itens.find(i => i.g === 'rect').y1, 'e na de baixo');
+  for (const campo of ['=Arquivo', '=Revisao', '=SheetNumber', '=SheetTotal', '=CodigoDoEquipamento', '=CodigoDaPlaca',
+                       '=Desenhista_DiEletrons', '=Verificador_DiEletrons', '=Aprovador_DiEletrons', '=Escala', '=Data_desenho', '=Formato'])
+    ok(a3.itens.some(i => i.s === campo), 'o A3 tem o campo ' + campo);
+  for (const rot of ['ARQUIVO:', 'R.', 'FL.', 'EQUIPAMENTO:', 'PLACA:', 'DESEN.', 'VERIF.', 'APROV.', 'ESCALA:'])
+    ok(a3.itens.some(i => i.s === rot), 'o A3 tem o rótulo ' + rot);
+  ok(a3.itens.some(i => i.g === 'image' && /^data:image\/png;base64,/.test(i.src)), 'o logo DiEletrons');
+  eq(a3.fontes, casa.fontes, 'mesmas fontes (mesmos tamanhos de texto)');
+  /* a régua da borda: 8 números e 6 letras, nos dois lados */
+  const P3 = T.primitivas(a3, null, { proj:'', projeto:'x' });
+  const zonas = P3.filter(p => p.g === 'text' && p.tam === 100 && !p.origem);
+  eq([zonas.filter(p => /^\d$/.test(p.s)).length, zonas.filter(p => /^[A-F]$/.test(p.s)).length, zonas.some(p => p.s === '8'), zonas.some(p => p.s === 'F')],
+     [16, 12, true, true], 'zonas 1..8 e A..F, em cima/embaixo e dos dois lados');
+  /* alinhaCodigos (1.90.1) e "PROJETO NÃO DEFINIDO" valem no A3 como no A4 */
+  const de = (P, o) => P.find(p => p.g === 'text' && p.origem === o);
+  eq([de(P3, '=CodigoDoEquipamento').s, de(P3, '=CodigoDaPlaca').s], [T.NAO_DEFINIDO, T.NAO_DEFINIDO], 'A3: projeto não definido');
+  const PD = T.primitivas(a3, null, { proj:'CodigoDaPlaca=PMD-DI261946;CodigoDoEquipamento=DMB-DI231765', projeto:'x' });
+  eq([de(PD, '=CodigoDoEquipamento').y, de(PD, '=CodigoDoEquipamento').tam], [de(PD, '=CodigoDaPlaca').y, de(PD, '=CodigoDaPlaca').tam], 'A3: os dois códigos alinhados');
+  eq(T.naoDefinidos(a3, null, { proj:'', projeto:'x' }).length, 2, 'A3: os dois campos clicáveis do Definir projeto');
+  perto(casa.folha.w, 11692.913, 'o A4 não mudou'); eq([casa.folha.zonasX, casa.folha.zonasY], [6, 4]);
+
+  /* o padrão nasce do A4 quando o arquivo da casa é de antes (outra máquina, NexoBD) — e o removido não volta */
+  const velho = { templates: { 'casa:A4_DiEletrons': casa } };
+  const Av = T.acervo([velho]);
+  ok(Av['casa:A3_DiEletrons'] && Av['casa:A3_DiEletrons'].itens.length === casa.itens.length, 'arquivo sem o A3: ele aparece, derivado do A4');
+  ok(T.acervo([velho])['casa:A3_DiEletrons'] === Av['casa:A3_DiEletrons'], 'derivado uma vez só (cache)');
+  ok(!T.acervo([{ templates: velho.templates, removidos:['casa:A3_DiEletrons'] }])['casa:A3_DiEletrons'], 'removido: não volta');
+  ok(!T.acervo([{ templates:{} }])['casa:A3_DiEletrons'], 'sem o A4 não há A3');
+  const txtR = T.serializaCasa(velho.templates, ['casa:A3_DiEletrons', 'casa:A4_DiEletrons']);
+  eq(new Function(txtR + ';return schtemplatesCasa;')().removidos, ['casa:A3_DiEletrons'], 'serializa os removidos (menos o que existe)');
+  ok(!/"removidos"/.test(T.serializaCasa(velho.templates)), 'sem removidos, o arquivo fica como era');
+
+  /* os rótulos "<tamanho> + <nome>" */
+  eq(T.rotulo(casa, HubCore.sheetMatch), 'A4 + DiEletrons', 'A4_DiEletrons → "A4 + DiEletrons"');
+  eq(T.rotulo(a3, HubCore.sheetMatch), 'A3 + DiEletrons', 'A3_DiEletrons → "A3 + DiEletrons"');
+  eq(T.rotulo({ nome:'Painel CLP', folha:{ w:16535.433, h:11692.913 } }, HubCore.sheetMatch), 'A3 + Painel CLP', 'template novo numa A3');
+  eq(T.rotulo({ nome:'Novo template', folha:{ w:11692.913, h:8267.717 } }, HubCore.sheetMatch), 'A4 + Novo template', 'template novo numa A4');
+  eq(T.rotulo({ nome:'A3', folha:{ w:16535.433, h:11692.913 } }, HubCore.sheetMatch), 'A3 + A3', 'nome que é só o tamanho fica');
+  eq(T.rotulo({ nome:'X', folha:{ w:1000, h:700 } }, HubCore.sheetMatch), '1000×700 + X', 'medida sem formato: os números');
+
+  /* o seletor: só a folha de verdade, e os templates dentro dele */
+  const lst = T.lista([{ templates:{ 'casa:A4_DiEletrons': casa, 'casa:A3_DiEletrons': a3,
+    'casa:Painel': { id:'casa:Painel', nome:'Painel', origem:'casa', folha:{ w:16535.433, h:11692.913 }, itens:[] } } }]);
+  const base = { presets: HubCore.SHEET_PRESETS, templates: lst, match: HubCore.sheetMatch };
+  const o1 = T.opcoesFolha(Object.assign({ item:{}, medida:[11692.913, 8267.717], medido:true }, base));
+  const todas = [].concat(...o1.grupos.map(g => g.opcoes));
+  eq(o1.grupos[0].opcoes.map(o => o.t), ['A4', 'A3', 'A2', 'A1', 'A0'], 'folha de verdade: A4..A0');
+  ok(todas.every(o => !/^leg:/.test(o.v) && !/legado/i.test(o.t)), 'nenhuma opção do Altium legado');
+  eq(o1.grupos[1].opcoes.map(o => o.t), ['A4 + DiEletrons', 'A3 + DiEletrons', 'A3 + Painel'], 'os templates como folha');
+  eq([o1.valor, o1.extra], ['iso:A4', null], 'A4 sem template: "A4"');
+  const o2 = T.opcoesFolha(Object.assign({ item:{ template:'casa:A3_DiEletrons' }, medida:[16535.433, 11692.913], medido:true }, base));
+  eq([o2.valor, o2.extra], ['tpl:casa:A3_DiEletrons', null], 'folha com o A3_DiEletrons: "A3 + DiEletrons"');
+  const o3 = T.opcoesFolha(Object.assign({ item:{}, medida:[11500, 7600], medido:true }, base));
+  eq([o3.valor, o3.extra], ['', { v:'', t:'A4 legado (atual) · 11500×7600' }], 'folha legada: o tamanho dela, só enquanto ela o usar');
+  ok([].concat(...o3.grupos.map(g => g.opcoes)).every(o => !/legado/.test(o.t)), 'e trocar oferece só a de verdade');
+  const o4 = T.opcoesFolha(Object.assign({ item:{}, medida:[31500, 22300], medido:true }, base));
+  eq(o4.extra.t, 'Personalizada (atual) · 31500×22300', 'medida de formato nenhum');
+  const o5 = T.opcoesFolha(Object.assign({ item:{}, medida:[11500, 7600], medido:false }, base));
+  eq(o5.extra.t, '— não medida: rode o ExportProject —', 'nunca medida: não finge formato');
+  const o6 = T.opcoesFolha(Object.assign({ item:{ template:'casa:Sumiu' }, medida:[11692.913, 8267.717], medido:true }, base));
+  eq(o6.grupos[1].opcoes.slice(-1)[0], { v:'tpl:casa:Sumiu', t:'casa:Sumiu (não encontrado)' }, 'template que não está aqui fica à vista');
+  /* escolher "A3 + DiEletrons" aplica o tamanho e o template de uma vez */
+  const it = { t:'sheet', name:'F', size:'A4', w:11692.913, h:8267.717 };
+  const nova = T.aplica(it, a3, HubCore.sheetMatch);
+  eq([it.template, it.size, nova], ['casa:A3_DiEletrons', 'A3', [a3.folha.w, a3.folha.h]], 'A3 + DiEletrons: A3 e o template');
+}
+
 console.log('test-schtemplate: ' + n + ' verificações ok');

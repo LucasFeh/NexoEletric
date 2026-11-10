@@ -4261,36 +4261,33 @@ function secFolha(){
   const medida = HubCore.isNum(sh.w) && sh.w > 0 && HubCore.isNum(sh.h) && sh.h > 0;
   const casa = medida ? HubCore.sheetMatch(sh) : null;
 
-  /* O NOME DE CADA OPÇÃO LEVA A MEDIDA JUNTO. Não é enfeite: "A4" quer dizer 11693×8268 no
-     template da casa e 11500×7600 no estilo legado do Altium, e sem o número na frente a
-     escolha entre os dois grupos seria adivinhação. Por isso também são dois optgroups. */
+  /* UM SELETOR SÓ, FOLHA E TEMPLATE (1.93.0, pedido do dono, 2026-11-10: "só 'folha de verdade', Altium legado pode
+     ir embora, e quero que o template fique no lugar ... ele vai ser inserido lá dentro junto, e todo template novo vai
+     ser a folha 'A3 + (nome do template)'"). As opções saem do HubSchTemplate.opcoesFolha (testado sem DOM): os
+     formatos ISO ("A4", "A3"…, a folha sem template) e cada template como "<tamanho> + <nome>" ("A4 + DiEletrons"),
+     que aplica o tamanho e o template de uma vez. O legado do Altium não se escolhe mais; a folha que já está nele
+     continua desenhando igual e o seletor mostra o tamanho dela ("A4 legado (atual)") enquanto ela o usar. */
+  const TS = typeof HubSchTemplate !== 'undefined' ? HubSchTemplate : null;
+  const itSheet = schematic.items.find(i => i && i.t === 'sheet' && i.name === sh.name) || null;
+  const tplAtual = itSheet && itSheet.template && TS ? TS.acha(itSheet.template) : null;
+  const ops = TS ? TS.opcoesFolha({ presets: HubCore.SHEET_PRESETS, templates: TS.lista(), match: HubCore.sheetMatch,
+                                    item: itSheet || {}, medida: med, medido: medida })
+    : { grupos:[{ rotulo:'Folha', opcoes: HubCore.SHEET_PRESETS.filter(p => p.fam === 'iso').map(p => ({ v:p.id, t:p.name })) }],
+        extra: casa && casa.fam === 'iso' ? null : { v:'', t:'Custom · ' + milTxt(med[0]) + '×' + milTxt(med[1]) },
+        valor: casa && casa.fam === 'iso' ? casa.id : '' };
   const selFmt = el('select');
-  selFmt.title = 'o formato da página desta folha';
-  if (!casa){
-    /* "Custom" só existe quando a medida não é de formato nenhum — que é o caso da maioria
-       das folhas reais. Ele não é escolhível para "virar custom": é onde o seletor pousa
-       enquanto a folha for a que veio do Altium. */
-    const o = el('option', null, 'Custom · ' + milTxt(med[0]) + '×' + milTxt(med[1]) + ' mil');
-    o.value = '';
-    selFmt.append(o);
-  }
-  for (const [fam, rotulo] of [['iso', 'ISO — a folha de verdade'], ['legado', 'Altium legado']]){
+  selFmt.title = 'a folha: o formato (A4, A3…) ou o formato com um template ("A4 + DiEletrons")';
+  if (ops.extra){ const o = el('option', null, ops.extra.t); o.value = ops.extra.v; selFmt.append(o); }
+  for (const gr of ops.grupos){
+    if (!gr.opcoes.length) continue;
     const g = document.createElement('optgroup');
-    g.label = rotulo;
-    for (const p of HubCore.SHEET_PRESETS.filter(p => p.fam === fam)){
-      const o = el('option', null, p.name + ' · ' + milTxt(p.size[0]) + '×' + milTxt(p.size[1]));
-      o.value = p.id;
-      g.append(o);
-    }
+    g.label = gr.rotulo;
+    for (const op of gr.opcoes){ const o = el('option', null, op.t); o.value = op.v; g.append(o); }
     selFmt.append(g);
   }
-  selFmt.value = casa ? casa.id : '';
-  if (!medida){
-    /* a opcao vazia existe e e a selecionada: ela diz o que esta acontecendo em vez de
-       deixar o seletor mostrando um formato que ninguem mediu */
-    const o0 = selFmt.querySelector('option[value=""]');
-    if (o0) o0.textContent = '— não medida: rode o ExportProject —';
-  }
+  selFmt.value = ops.valor;
+  /* o template com folha própria decide a medida (ele é desenhado deitado): girar não vale com ele */
+  const tplFixo = Boolean(tplAtual && !tplAtual.interno && tplAtual.folha && tplAtual.folha.w > 0);
 
   /* RETRATO NÃO É UM CAMPO DO ESPELHO: é a mesma medida com h > w (ver hub-core » SHEET_ISO).
      Por isso o seletor de orientação escreve w/h trocados em vez de uma propriedade nova que
@@ -4314,11 +4311,22 @@ function secFolha(){
     selOri.disabled = true;
     selOri.title = 'esta folha nunca foi medida: o tamanho que aparece e um palpite. '
                  + 'Rode o ExportProject, ou escolha um formato aqui para afirmar qual e.';
+  } else if (tplFixo){
+    selOri.disabled = true;
+    selOri.title = 'a folha segue o template (' + TS.rotulo(tplAtual, HubCore.sheetMatch) + '): '
+                 + 'para girar, escolha a folha sem template';
   }
 
   const aplica = () => {
     const id = selFmt.value, retrato = selOri.value === '1';
+    /* um template: o tamanho e o template de uma vez (o HubSchTemplateUI.escolhe grava, enquadra e avisa) */
+    if (id.startsWith('tpl:')){
+      if (typeof HubSchTemplateUI !== 'undefined') HubSchTemplateUI.escolhe(id.slice(4));
+      return;
+    }
     const atual = HubCore.sheetSize(sh);
+    /* a folha sem template: escolher "A4" com um template na folha tira o template (num commit só, com o tamanho) */
+    const tirou = Boolean(id && itSheet && itSheet.template);
     let nova;
     if (id) nova = HubCore.sheetPreset(id, retrato);
     else if (!medida) return;     /* ver o comentario do selOri: palpite nao vira medida */
@@ -4329,10 +4337,11 @@ function secFolha(){
     if (!nova) return;
     /* trocar pela mesma medida não é edição: acender o "Salvar *" e empilhar um undo por um
        select que voltou ao que já estava seria ruído */
-    if (HubCore.near(nova[0], atual[0], 1e-3) && HubCore.near(nova[1], atual[1], 1e-3)) return;
+    if (!tirou && HubCore.near(nova[0], atual[0], 1e-3) && HubCore.near(nova[1], atual[1], 1e-3)) return;
     const preset = id ? HubCore.SHEET_PRESETS.find(p => p.id === id) : null;
     const fora = contaFora(sheetIdx, nova);
     const it = itemFolha(sh.name);
+    if (tirou) delete it.template;
     if (preset) it.size = preset.name;          /* folha Custom conserva o nome que já tinha */
     it.w = nova[0]; it.h = nova[1];
     const nome = HubCore.sheetLabel({ size:it.size, w:it.w, h:it.h });
@@ -4378,7 +4387,7 @@ function secFolha(){
      de template e a gravação moram no hub-schtemplate-ui.js; daqui ele só recebe as alças */
   if (typeof HubSchTemplateUI !== 'undefined') s.append(HubSchTemplateUI.secao({
     schematic, nome: sh.name, indice: sheetIdx, total: model.sheets.length,
-    item: () => itemFolha(sh.name), medida: () => HubCore.sheetSize(sh),
+    item: () => itemFolha(sh.name), medida: () => HubCore.sheetSize(sh), semSeletor: true, repinta: renderProps,
     commit, sujo: () => setSchDirty(true), redesenha: () => { cam.draw(); pintaMiniaturas(); },
     enquadra: () => cam.fit(fitBBox()), contaFora: med => contaFora(sheetIdx, med) }));
   return s;

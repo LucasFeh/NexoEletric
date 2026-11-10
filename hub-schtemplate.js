@@ -161,6 +161,7 @@ function globais(){
    (`img` -> `src`). `fontes` = lista de objetos no formato do Libs (para o teste injetar). */
 function acervo(fontes){
   const fora = {};
+  const removidos = new Set();
   for (const f of (fontes || globais())){
     if (!f || !f.templates) continue;
     const imgs = f.imagens || {};
@@ -170,8 +171,105 @@ function acervo(fontes){
         if (it.g === 'image' && !it.src && it.img && imgs[it.img]) it.src = imgs[it.img];
       fora[id] = t;
     }
+    for (const id of (Array.isArray(f.removidos) ? f.removidos : [])) removidos.add(String(id));
   }
+  /* os padrões da casa que nascem de outro (o A3 do A4): o arquivo da casa de uma máquina, ou o do NexoBD, pode ser de
+     antes deles — eles aparecem mesmo assim, iguais ao que o Libs/sch-templates-casa.js do instalador traz. Quem os
+     removeu (Remover template…) fica sem: o id vai para a lista `removidos` do arquivo da casa. */
+  for (const [id, de, gera] of PADROES)
+    if (!fora[id] && fora[de] && !removidos.has(id)) fora[id] = derivado(id, fora[de], gera);
   return fora;
+}
+
+/* ─── os padrões derivados (1.93.0) ───
+   Pedido do dono (2026-11-10): "quero que esse template de nome padrão da dieletrons exista dentro da folha pra ser
+   adicionado, igual é no A4" — o A3_DiEletrons é o A4_DiEletrons numa folha A3 ISO (420×297 mm): o MESMO quadro, no
+   mesmo tamanho físico e com as mesmas fontes (como em folha técnica: o carimbo não cresce com a folha), encostado no
+   canto inferior direito, e a régua da borda com as zonas da A3 (ISO 5457: 8 × 6, cada uma ~50 mm, como as 6 × 4 da
+   A4). O nome é o do .SchDot do Altium (A3_DiEletrons.SchDot), para o schdoc2sch casar a folha importada com ele. */
+const A3_ISO = [16535.433, 11692.913];
+function emOutraFolha(base, id, nome, w, h, zonasX, zonasY, formato){
+  const t = JSON.parse(JSON.stringify(base));
+  const f0 = base.folha || {};
+  const dx = w - (f0.w || w), dy = 0;      /* o quadro fica no canto inferior direito: só anda para a direita */
+  t.id = id; t.nome = nome; t.origem = 'casa'; t.arquivo = nome + '.SchDot';
+  t.folha = Object.assign({}, f0, { w, h, zonasX, zonasY, estilo: formato });
+  t.params = Object.assign({}, base.params || {}, { Formato: formato });
+  for (const it of (t.itens || [])) moveItem(it, dx, dy);
+  return t;
+}
+const a3DiEletrons = a4 => emOutraFolha(a4, 'casa:A3_DiEletrons', 'A3_DiEletrons', A3_ISO[0], A3_ISO[1], 8, 6, 'A3');
+const PADROES = [['casa:A3_DiEletrons', 'casa:A4_DiEletrons', a3DiEletrons]];
+/* cache por objeto de origem: o acervo() roda a cada desenho, e copiar o logo (38 kB) a cada quadro não compensa */
+const _derivados = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+function derivado(id, base, gera){
+  let m = _derivados && _derivados.get(base);
+  if (!m){ m = {}; if (_derivados) _derivados.set(base, m); }
+  return m[id] || (m[id] = gera(base));
+}
+
+/* ─── o rótulo do template no seletor da folha (1.93.0) ───
+   "o template fica no lugar [da folha], e todo template novo vai ser a folha 'A3 + (nome do template)'": cada template
+   é uma opção do seletor de folha, "<tamanho> + <nome>". O tamanho sai da MEDIDA do template (`match` = o
+   HubCore.sheetMatch; sem ele, ou medida de formato nenhum, os números), e o nome perde o prefixo do tamanho que a casa
+   costuma pôr ("A4_DiEletrons" → "DiEletrons"). O sem arquivo (Standard/ANSI) acompanha a folha: só o nome. */
+function tamanhoDe(tpl, match){
+  const f = (tpl && tpl.folha) || {};
+  if (!(f.w > 0 && f.h > 0)) return '';
+  const m = match ? match({ w:f.w, h:f.h }) : null;
+  if (m) return m.name + (m.retrato ? ' em pé' : '') + (m.fam === 'legado' ? ' legado' : '');
+  return Math.round(f.w) + '×' + Math.round(f.h);
+}
+function nomeCurto(tpl, tamanho){
+  const nome = String((tpl && tpl.nome) || (tpl && tpl.id) || '').trim();
+  const base = String(tamanho || '').split(' ')[0];
+  if (!base) return nome;
+  const esc = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sem = nome.replace(new RegExp('^' + esc + '(?:[\\s_\\-+·]+|$)', 'i'), '').trim();
+  return sem || nome;
+}
+function rotulo(tpl, match){
+  if (!tpl) return '';
+  if (tpl.interno) return String(tpl.nome || tpl.id) + ' (na folha atual)';
+  const tam = tamanhoDe(tpl, match);
+  return tam ? tam + ' + ' + nomeCurto(tpl, tam) : String(tpl.nome || tpl.id);
+}
+/* As opções do seletor da folha (o menu do canto do Esquema), num lugar que se testa sem DOM:
+     {grupos:[{rotulo, opcoes:[{v, t}]}], extra:{v, t}|null, valor}
+   `v` é o id do formato ('iso:A3', a folha sem template) ou 'tpl:<id do template>' (o template, com a folha dele).
+   SÓ A FOLHA DE VERDADE (pedido do dono, 2026-11-10: "só 'folha de verdade', Altium legado pode ir embora"): os
+   formatos são os ISO do HubCore; o legado do Altium não se escolhe mais. A folha que JÁ ESTÁ num tamanho legado (ou
+   custom, ou nunca medida) não quebra: o `extra` mostra o tamanho dela ("A4 legado (atual) · 11500×7600") e só existe
+   enquanto ela o usar — trocar oferece só os de verdade.
+     o.presets    HubCore.SHEET_PRESETS      o.templates  lista()      o.match  HubCore.sheetMatch
+     o.item       a folha ({template, w, h}) o.medida     [w, h] (HubCore.sheetSize)
+     o.medido     a folha tem w/h de verdade (sem eles a medida é o palpite da tabela legado) */
+function opcoesFolha(o){
+  o = o || {};
+  const match = o.match || null;
+  const area = s => s[0] * s[1];
+  const reais = (o.presets || []).filter(p => p.fam === 'iso').slice().sort((a, b) => area(a.size) - area(b.size));
+  const g1 = { rotulo:'Folha', opcoes: reais.map(p => ({ v:p.id, t:p.name })) };
+  const med = t => (t.folha && t.folha.w > 0 && t.folha.h > 0) ? area([t.folha.w, t.folha.h]) : Infinity;
+  const tpls = (o.templates || []).slice()
+    .sort((a, b) => (med(a) - med(b)) || rotulo(a, match).localeCompare(rotulo(b, match)));
+  const g2 = { rotulo:'Folha + template', opcoes: tpls.map(t => ({ v:'tpl:' + t.id, t:rotulo(t, match) })) };
+  const it = o.item || {};
+  let valor = '', extra = null;
+  if (it.template){
+    valor = 'tpl:' + it.template;
+    /* template que este acervo não tem (outro computador, arquivo da casa não carregado): o nome fica à vista */
+    if (!tpls.some(t => t.id === it.template)) g2.opcoes.push({ v:valor, t:it.template + ' (não encontrado)' });
+  } else {
+    const m = o.medido && match ? match({ w:(o.medida || [])[0], h:(o.medida || [])[1] }) : null;
+    if (m && m.fam === 'iso') valor = m.id;
+    else {
+      const w = Math.round((o.medida || [0])[0]), h = Math.round((o.medida || [0, 0])[1]);
+      extra = { v:'', t: !o.medido ? '— não medida: rode o ExportProject —'
+        : (m ? m.name + (m.retrato ? ' em pé' : '') + ' legado (atual)' : 'Personalizada (atual)') + ' · ' + w + '×' + h };
+    }
+  }
+  return { grupos:[g1, g2], extra, valor };
 }
 function lista(fontes){
   const a = acervo(fontes);
@@ -654,10 +752,14 @@ function idCasa(nome, existentes){
 }
 /* o texto do arquivo: um template por linha, imagens embutidas no próprio item (o arquivo da
    casa é pequeno e editado à mão de vez em quando: a tabela comum não compensa) */
-function serializaCasa(templates){
+function serializaCasa(templates, removidos){
   const ids = Object.keys(templates || {});
   const L = ['var schtemplatesCasa = {', '"format":"schtemplate-v1",', '"title":"Templates de folha da casa",',
-             '"generated":' + JSON.stringify(new Date().toISOString()) + ',', '"templates":{'];
+             '"generated":' + JSON.stringify(new Date().toISOString()) + ','];
+  /* os padrões derivados que alguém removeu (ver PADROES): sem esta lista eles voltariam no próximo acervo() */
+  const rem = Array.from(new Set((removidos || []).map(String))).filter(id => !(templates || {})[id]);
+  if (rem.length) L.push('"removidos":' + JSON.stringify(rem) + ',');
+  L.push('"templates":{');
   ids.forEach((id, i) => L.push(JSON.stringify(id) + ':' + JSON.stringify(templates[id]) + (i < ids.length - 1 ? ',' : '')));
   L.push('}};');
   return L.join('\n') + '\n';
@@ -690,7 +792,7 @@ const API = { ESTILOS, CARIMBOS, APELIDOS, CAMPOS_PADRAO, ARQ_CASA, AUTOMATICOS,
               folhaDe, estiloPorMedida, primitivas, desenha, itemFolha, daFolha,
               caixaItem, moveItem, fonteId, aplica,
               NAO_DEFINIDO, CAMPOS_DEFINIR, ehNaoDefinido, setVariante, textoVariante, naoDefinidos, camposNaoDefinidos, caixaTexto,
-              idCasa, serializaCasa, copia };
+              idCasa, serializaCasa, copia, PADROES, a3DiEletrons, emOutraFolha, rotulo, tamanhoDe, nomeCurto, opcoesFolha };
 root.HubSchTemplate = API;
 if (typeof module === 'object' && module.exports) module.exports = API;
 })(typeof self !== 'undefined' ? self : this);
