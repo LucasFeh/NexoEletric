@@ -24,8 +24,8 @@ const comNote = (op, a) => { if (a.note) op.note = String(a.note).replace(/":/g,
 
 /* ---------- consulta ---------- */
 const TIPOS = {
-  componentes: eb => (eb.components || []).map(c => ({ ref: c.ref, footprint: c.footprint, comment: c.comment, layer: c.layer, x: c.x, y: c.y, rot: c.rot, bbox: c.bbox,
-    pads: (c.pads || []).length, nets: [...new Set((c.pads || []).map(p => p.net).filter(Boolean))] })),
+  componentes: eb => (eb.components || []).map(c => Object.assign({ ref: c.ref, footprint: c.footprint, comment: c.comment, layer: c.layer, x: c.x, y: c.y, rot: c.rot, bbox: c.bbox,
+    pads: (c.pads || []).length, nets: [...new Set((c.pads || []).map(p => p.net).filter(Boolean))] }, c.arte ? { arte: c.arte } : {})),
   pads: eb => [].concat(...(eb.components || []).map(c => (c.pads || []).map(p => ({ ref: c.ref, name: p.name, id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, rot: p.rot, shape: p.shape, layer: p.layer, type: p.type, drill: p.drill, plated: p.drill > 0 ? p.plated !== false : undefined, net: p.net || '' }))),
     (eb.freepads || []).map(p => ({ ref: '', name: p.name, id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, rot: p.rot, shape: p.shape, layer: p.layer, type: p.type, drill: p.drill, plated: p.drill > 0 ? p.plated !== false : undefined, net: p.net || '' }))),
   trilhas: eb => eb.tracks || [],

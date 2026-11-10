@@ -503,11 +503,58 @@ const OPC_COMUNS = {
   ignorar_trilha: { type: 'boolean', description: 'true = texto pode passar por cima de trilha (só nesta chamada; para o projeto, regras_casa_definir)' },
 };
 
+/* ── as ARTES DE OVERLAY (1.91.0): a logo DiEletrons + QR, o código da placa + revisão e as artes do Studio ──
+   A biblioteca: as da casa (hub-pcbartes.js » PADRAO) + Libs/pcb-artes.json (a da rede, pelo NexoBD). Pôr na placa é
+   o mesmo comp_add com o desenho que a vista escreve (HubPcbArtes.opColocar): um objeto só, que pcb_mover move, gira e
+   vira de face (Bottom = Bottom Overlay espelhada). */
+function bibliotecaArtes(ctx) {
+  const A = ctx.exige('hub-pcbartes.js', 'HubPcbArtes');
+  let lib = null;
+  try { lib = JSON.parse(fs.readFileSync(path.join(ctx.root, 'Libs', 'pcb-artes.json'), 'utf8')); } catch (_) { lib = null; }
+  return { A, artes: A.lista(lib) };
+}
+function artesListar(ctx, a) {
+  const { A, artes } = bibliotecaArtes(ctx);
+  const out = { artes: artes.map(x => {
+    const c = A.compila(x), b = c.caixa;
+    return { id: x.id, nome: x.nome, padrao: !!x.padrao, versao: x.versao || 0, descricao: x.descricao || undefined,
+      tamanho_mm: b ? [r3(b.x2 - b.x1), r3(b.y2 - b.y1)] : null,
+      elementos: (x.elementos || []).map(e => e.tipo + (e.tipo === 'texto' || e.tipo === 'qr' ? ': ' + e.texto : '')),
+      campos: [...new Set([].concat(...(x.elementos || []).filter(e => e.tipo === 'texto').map(e => A.camposDe(e.texto))))],
+      avisos: c.avisos.length ? c.avisos : undefined };
+  }), campos: A.CAMPOS.map(c => '=' + c.nome + ' (' + c.rot + ')') };
+  if (a.projeto) {
+    const p = ctx.projeto(a.projeto);
+    const { eb } = ctx.placa(p);
+    const hc = ctx.hc;
+    out.na_placa = (eb.components || []).filter(c => c && c.arte).map(c => ({ ref: c.ref, arte: c.arte.id, nome: c.arte.nome, escala: c.arte.escala,
+      x: c.x, y: c.y, rot: c.rot, layer: c.layer, face: c.layer === 'Bottom' ? 'BottomOverlay' : 'TopOverlay',
+      textos: (eb.texts || []).filter(t => t.owner === c.ref && !t.designator).map(t => hc.resolveEspeciais(t.text)) }));
+  }
+  return out;
+}
+async function arteColocar(ctx, a) {
+  const p = ctx.projeto(a.projeto);
+  const { A, artes } = bibliotecaArtes(ctx);
+  const arte = artes.find(x => x.id === a.arte) || artes.find(x => String(x.nome).toLowerCase() === String(a.arte || '').toLowerCase());
+  if (!arte) throw new ErroMcp(`arte "${a.arte}" não está na biblioteca. Existem: ${artes.map(x => x.id).join(', ')}`);
+  const { eb } = ctx.placa(p);
+  const usados = (eb.components || []).map(c => c.ref);
+  if (a.ref && usados.includes(a.ref)) throw new ErroMcp(`a placa já tem um ${a.ref}`);
+  const lado = a.layer === 'Bottom' ? 'Bottom' : 'Top';
+  const op = A.opColocar(arte, { ref: a.ref || A.proximoRef(usados), x: a.x, y: a.y, rot: isNum(a.rot) ? a.rot : (lado === 'Bottom' ? 180 : 0), layer: lado, escala: a.escala });
+  if (a.note) op.note = String(a.note).replace(/":/g, '" :');
+  const est = await ops.transacao(ctx, p, arq => [ops.mescla(arq, op).obj], { simular: !a.gravar, forcar: a.forcar, ferramenta: 'pcb_arte_colocar' });
+  const av = A.confere(op.arte.fp, op.arte.escala);
+  return Object.assign({ ref: op.ref, arte: arte.id, face: lado === 'Bottom' ? 'BottomOverlay (espelhada)' : 'TopOverlay', avisos_jlc: av.length ? av : undefined,
+    gravado: !!(est && est.gravado), dica: a.gravar ? undefined : 'simulado: gravar:true grava' }, est || {});
+}
+
 module.exports = {
   grupo: 'serigrafia',
   ordem: 46,
-  titulo: 'Serigrafia — conferir um lugar candidato, posicionar designadores pelas regras da casa e converter imagem (PNG) ou texto (fonte TrueType) em serigrafia',
-  modulos: ['hub-clipper.js', 'hub-gerber.js', 'hub-silkgen.js', 'vendor/opentype.min.js'],
+  titulo: 'Serigrafia — conferir um lugar candidato, posicionar designadores pelas regras da casa, converter imagem (PNG) ou texto (fonte TrueType) em serigrafia e as artes de overlay (logo + QR, código + revisão)',
+  modulos: ['hub-clipper.js', 'hub-gerber.js', 'hub-silkgen.js', 'vendor/opentype.min.js', 'hub-pcbartes.js'],
   ferramentas: [
     {
       nome: 'serigrafia_checar', titulo: 'Conferir lugar de texto', leitura: true, modulo: 'hub-clipper.js',
@@ -564,6 +611,21 @@ module.exports = {
       }, OPC_SILK), required: ['projeto', 'texto', 'x', 'y', 'h'] },
       executa: async (a, ctx) => silkTexto(ctx, a),
     },
+    {
+      nome: 'pcb_artes', titulo: 'Listar artes de overlay', leitura: true, modulo: 'hub-pcbartes.js',
+      descricao: 'As ARTES DE OVERLAY da biblioteca da rede (o botão "Artes" da vista PCB): as da casa — "dieletrons-logo-qr" (a logo DiEletrons com o QR de www.dieletrons.com) e "codigo-revisao" (=CodigoDaPlaca e =Revisao, automáticos) — e as criadas no Studio, com tamanho, elementos, campos e avisos do mínimo da JLC. Com projeto, também as que já estão na placa (ref, posição, face e os textos já resolvidos).',
+      entrada: { type: 'object', properties: { projeto: Object.assign({}, PROJETO, { description: 'opcional: lista também as artes postas nesta placa' }) } },
+      executa: async (a, ctx) => artesListar(ctx, a),
+    },
+    {
+      nome: 'pcb_arte_colocar', titulo: 'Colocar arte de overlay na placa', modulo: 'hub-pcbartes.js',
+      descricao: 'Põe uma arte de overlay da biblioteca na placa (pcb_artes lista): um objeto só (comp_add com o desenho, ref ARTE1, ARTE2...), centrado em x, y; layer Bottom = Bottom Overlay espelhada; rot em graus; escala multiplica tudo (traço e texto juntos). Os campos (=CodigoDaPlaca, =Revisao...) saem com o projeto na tela, no Gerber e no PDF. Depois, pcb_mover move/gira/vira e apagar é comp_del. Não pode com a variante de projeto ativa (a PCB é a da padrão). Padrão SIMULA; gravar:true grava.',
+      entrada: { type: 'object', properties: { projeto: PROJETO, arte: { type: 'string', description: 'id (ou nome) da arte' },
+        x: { type: 'number' }, y: { type: 'number' }, rot: { type: 'number' }, layer: { type: 'string', enum: ['Top', 'Bottom'] },
+        escala: { type: 'number', exclusiveMinimum: 0, maximum: 50 }, ref: { type: 'string', description: 'designador (padrão: o próximo ARTEn livre)' },
+        gravar: { type: 'boolean' }, forcar: { type: 'boolean' }, note: { type: 'string' } }, required: ['projeto', 'arte', 'x', 'y'] },
+      executa: async (a, ctx) => arteColocar(ctx, a),
+    },
   ],
-  _interno: { checar, posicionar, silkImagem, silkTexto, arquivoDaFonte },
+  _interno: { checar, posicionar, silkImagem, silkTexto, arquivoDaFonte, artesListar, arteColocar },
 };

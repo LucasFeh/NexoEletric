@@ -625,10 +625,14 @@ function linhaDeTexto(F, txt, h) {
    ponto no comeco de palavra seguido de um nome, a regra do leitor de .PcbDoc
    (pcbdoc_leitor._RX_ESPECIAL). O ExportBoard ja grava o texto convertido pelo Altium. */
 const RE_ESPECIAL = /(^|[^A-Za-z0-9_.\u00C0-\u024F])(\.[A-Za-z_][A-Za-z0-9_]*)/g;
+/* 1.91.0: os campos das artes de overlay ("=Revisao" que o projeto ainda não tem) também são string sem valor */
+const RE_CAMPO_ARTE = /(^|[^A-Za-z0-9_À-ɏ])(=(?:CodigoDaPlaca|Revisao|NomeDaPlaca|CodigoDoEquipamento|NomeDoEquipamento|Cliente|Data|Data_desenho|Projeto))(?![A-Za-z0-9_])/gi;
 function especiaisCrus(txt) {
   const out = [];
   RE_ESPECIAL.lastIndex = 0;
   for (let m; (m = RE_ESPECIAL.exec(txt));) out.push(m[2]);
+  RE_CAMPO_ARTE.lastIndex = 0;
+  for (let m; (m = RE_CAMPO_ARTE.exec(txt));) out.push(m[2]);
   return out;
 }
 

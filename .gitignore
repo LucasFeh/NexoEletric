@@ -16,6 +16,8 @@ Libs/almox-especiais.js
 Libs/almox-index.js
 # os componentes criados localmente (tools/rotas/componentes_locais.py): dado da biblioteca, viaja pelo NexoBD
 Libs/almox-locais.js*
+# as artes de overlay da PCB (tools/rotas/pcb_artes.py, 1.91.0): dado da biblioteca, viaja pelo NexoBD
+Libs/pcb-artes.json*
 Libs/almox-sync.js
 # resumo do guardiao (tools/symbols/guardiao.py o reescreve a cada sincronismo)
 Libs/almox-guardiao.js

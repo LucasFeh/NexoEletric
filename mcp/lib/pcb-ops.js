@@ -407,7 +407,7 @@ const CAMPOS_OP = {
   comment_move: 'ref x y h w rot hidden',
   comp_attr: 'ref designator comment',
   comp_del: 'ref',
-  comp_add: 'ref footprint x y rot layer comment nets des_x des_y des_h des_w des_rot des_hidden',
+  comp_add: 'ref footprint x y rot layer comment nets des_x des_y des_h des_w des_rot des_hidden arte',
   track_add: 'layer x1 y1 x2 y2 w net keepout', track_edit: 'id layer x1 y1 x2 y2 w net', track_del: 'id',
   arc_add: 'layer cx cy r sa ea w net keepout', arc_edit: 'id layer cx cy r sa ea w net', arc_del: 'id',
   via_add: 'x y size drill net from to', via_edit: 'id x y size drill net from to', via_del: 'id',

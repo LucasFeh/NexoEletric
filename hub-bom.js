@@ -147,6 +147,8 @@ function model(board, opts){
   /* ── componentes e grupos ── */
   const comps = [];
   (B.components || []).forEach(c => {
+    /* a arte de overlay (1.91.0) é desenho, não peça: fora da lista (o desenho dela vem na serigrafia) */
+    if (c && c.arte && typeof c.arte === 'object') return;
     const s = ladoDe(c.layer);
     if (s === null){ avisos.push('componente ' + (c.ref || '?') + ' em camada inesperada: ' + c.layer); return; }
     const o = { ref: c.ref || '?', val: c.comment || '', fp: c.footprint || '',

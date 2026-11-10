@@ -4,6 +4,75 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.91.0 — 2026-11-10
+
+**Artes de overlay na PCB: a logo DiEletrons com o QR do site e o código da placa + revisão viram artes padrão que se
+puxam para a placa, e o Studio de artes (ferramenta da vista PCB) cria e edita artes novas.**
+Pedido do dono: "nas PCBs a gente sempre coloca o código da placa com revisão, e sempre a logo com o QR CODE pro site da
+dieletrons, eu queria que isso virasse uma logo overlay padrão, onde a gente só puxa e já vem com o código da placa + a
+revisão automática, e a logo fica lá adicionada por padrão, mas pode adicionar novas, criar, é um studio pra criação desse
+tipo de arte" — e "é como se fosse uma ferramenta mesmo, na área de PCB".
+- **Botão "Artes" na barra da vista PCB** (ao lado de Imagem → serigrafia): abre a lista das artes da biblioteca, cada
+  uma com a miniatura desenhada pela mesma geometria do Gerber (os campos já com o código e a revisão do projeto aberto).
+  **Arrastar** a arte para a placa a larga onde soltou; **clicar** pega a arte na mão (Espaço gira, L troca a face, clique
+  larga, Esc desiste). A arte entra como **um objeto só** (um `comp_add` com o desenho na própria linha, ref ARTE1,
+  ARTE2…): move, gira, troca de face (Bottom = Bottom Overlay espelhada, lida por baixo) e tem **escala** no painel.
+  Selecionada, a ficha "Arte de overlay" mostra X | Y, Rotação | Face, Escala, onde sai no Gerber, os avisos da JLC e os
+  botões **Editar no Studio…** e **Atualizar da biblioteca** (a placa guarda a foto da arte: mudar a arte na biblioteca não
+  mexe em placa nenhuma sozinho; o botão marca ● quando a biblioteca tem versão mais nova). Nada entra sozinho em placa
+  nova nem em projeto existente: só puxando.
+- **As duas artes padrão da casa:**
+  - **Logo DiEletrons + QR** — o desenho medido na DMB - DI231765_P2 (a placa do print do dono): a logo era um bitmap do
+    Altium (1.392 traços de 0,0508 mm na Top Overlay, 24,0 × 8,1 mm, com "dieletrons.com" embaixo do traço) e virou 28
+    regiões de serigrafia com os miolos vazados; o QR era feito de 196 fills e **decodifica para `www.dieletrons.com`**
+    (nível L, versão 2, invertido: a serigrafia é a parte clara, com 2 módulos de borda, 10 mm de lado). Aqui o QR é
+    **gerado de verdade** a partir desse texto (`hub-qr.js`, ISO 18004, modo byte), com a mesma medida; os módulos viram
+    regiões retangulares de serigrafia. 34,9 × 10,1 mm no total, como a da placa.
+  - **Código da placa + revisão** — `=CodigoDaPlaca` e `=Revisao` (1,524 mm, traço 0,254, o bloco que a casa digitava à
+    mão): o código da placa do Definir projeto (ex.: PMD-DI261946) e a revisão do projeto, a mesma do quadro da folha
+    (REV. C). **Mudam sozinhos** quando o código ou a revisão mudam (a aprovação nova troca a revisão sem mexer na PCB).
+    Sem placa definida: **PROJETO NÃO DEFINIDO** (a regra do quadro da 1.86.0/1.90.1). Com a variante de projeto ativa a
+    PCB é a mesma da padrão (e não se edita, regra da 1.88.0): o código continua o **da placa**, não o da variante.
+- **Studio de artes** (botão "Studio…" da lista, ou Editar no Studio… da arte selecionada): a biblioteca à esquerda (Nova,
+  Duplicar, Apagar, Restaurar), a arte no meio (arrastar move o elemento com passo de 0,05 mm — Shift livre —, roda dá zoom,
+  arrastar no vazio anda, Delete apaga, setas empurram 0,1 mm / Shift 1 mm, F enquadra, Ctrl+S salva) e à direita
+  Adicionar / Elementos / Propriedades:
+  - **Texto** com os campos automáticos em botões: =CodigoDaPlaca, =Revisao, =NomeDaPlaca, =CodigoDoEquipamento,
+    =NomeDoEquipamento, =Cliente, =Data (hoje), =Data_desenho, =Projeto — em qualquer lugar do texto ("REV. =Revisao");
+  - **Linha, Retângulo e Círculo** (contorno com traço, ou cheio);
+  - **QR code** de uma URL/texto: nível de correção L/M/Q/H, lado em mm, borda em módulos, invertido (placa escura);
+    mostra a versão e o tamanho do módulo, e avisa módulo abaixo de 0,3 mm;
+  - **Imagem…**: PNG, JPG, SVG, BMP… ou texto em qualquer fonte do Windows convertido em regiões de serigrafia com limiar,
+    inverter e simplificação — o diálogo da ferramenta Imagem ou texto → serigrafia (1.60.0), agora também dentro do Studio;
+  - embaixo, os **avisos do mínimo da serigrafia da JLC** (traço ≥ 0,15 mm, texto ≥ 0,8 mm de altura, região mais fina que
+    0,15 mm) e o tamanho da arte; **Salvar** grava na biblioteca da rede; **Colocar na placa** pega a arte como está.
+- **A biblioteca mora no NexoBD**: `Libs/pcb-artes.json`, que viaja com o resto da Libs/ pelo item "Biblioteca do
+  NexoEletric" — todo NexoEletric ligado ao mesmo NexoBD vê as mesmas artes. As duas da casa vêm no programa (o arquivo só
+  as guarda se o administrador as mudar); o arquivo nasce na primeira gravação feita pelo programa. Rotas novas
+  (`tools/rotas/pcb_artes.py`): `GET /api/pcb-artes`, `POST /api/pcb-artes/salvar {arte, base}` (a versão sobe; quem
+  editou a versão velha leva 409 com quem gravou antes), `/apagar {id}` e `/restaurar {id}`.
+- **Permissões:** visualizador não grava (403 `sem_permissao`, como as outras edições) e não põe arte na placa; quem não é
+  da equipe do projeto também não põe; com a variante ativa a lista avisa e não deixa. **Apagar** arte e **mudar ou
+  restaurar as artes da casa** são só do administrador do Nexo Hub (como as exclusões da biblioteca da 1.89.0): para os
+  outros o Salvar de uma arte padrão fica desligado com o motivo ("use Duplicar para fazer a sua").
+- **Fabricação:** a arte é serigrafia comum na placa efetiva: sai no **Gerber** na legenda certa (GTO na Top Overlay, GBO
+  espelhada na Bottom Overlay), no **PDF da PCB**, no laser e no **Enviar pra JLC** (que manda o mesmo Gerber da tela).
+  Testado: o QR lido de volta do Gerber gerado (GTO e GBO virada) decodifica `www.dieletrons.com` no zxing. Campo sem
+  valor (ex.: projeto sem revisão) sai cru e o Gerber avisa, como as strings especiais do Altium.
+- **Arte não é peça:** fica fora da lista do BOM, do ECO (o Update PCB não propõe tirá-la), da folga entre componentes do
+  DRC e dos corpos/designators do PDF de montagem. A logo DiEletrons do Definir projeto (1.77.0) passa a contar como arte
+  também.
+- **MCP:** `pcb_artes` (lista as artes, com tamanho, campos e avisos; com o projeto, as que estão na placa e os textos já
+  resolvidos) e `pcb_arte_colocar` (simula por padrão; `gravar:true` grava; x, y, rot, layer, escala). `pcb_mover` move,
+  gira e vira a arte; o `pcb_consultar` de componentes marca `arte`.
+- Testes novos: `tests/test-pcbartes.js` (QR: versão, localizadores e a tinta do invertido; os campos e o PROJETO NÃO
+  DEFINIDO; as artes da casa no mínimo da JLC; a arte na placa como um objeto, na Top Overlay, virada para a Bottom
+  Overlay espelhada, escala, giro; o Gerber GTO/GBO com a arte; ECO e BOM sem a arte), `tests/test_pcbartes_qr.py` (o QR
+  decodificado do Gerber gerado, nas duas faces, e um QR do Studio), `tests/test_pcb_artes.py` (a biblioteca: primeira
+  gravação, versão, conflito 409, visualizador, arte da casa e apagar só o admin), `tests/test-mcp-artes.js` e o smoke
+  `tests/smoke-artes.js` (a vista PCB de verdade num Chrome headless: a lista, pegar e largar, arrastar e soltar, a ficha,
+  o Studio criando e salvando, numa cópia da placa).
+
 ## 1.90.1 — 2026-11-10
 
 **A ficha do componente no Esquema na ordem que o dono pediu, e sem o "Ver em 3D".**

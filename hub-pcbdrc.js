@@ -1181,7 +1181,8 @@ function rodar(eb, regras, opts){
     const cs = [];
     for (const c of eb.components || []) {
       const b = c && c.bbox;
-      if (!b || ![b.x1, b.y1, b.x2, b.y2].every(isNum)) continue;
+      /* a arte de overlay (1.91.0) não é peça: a serigrafia dela entra nas regras de silk, não na folga de componente */
+      if (!b || ![b.x1, b.y1, b.x2, b.y2].every(isNum) || (c.arte && typeof c.arte === 'object')) continue;
       const p = primCaixa((b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2, Math.abs(b.x2 - b.x1) / 2, Math.abs(b.y2 - b.y1) / 2, 0, 0);
       if (!p) continue;
       cs.push({ id:c.id, ref:c.ref, layer:c.layer, prims:[p], bb:p.bb.slice(), nome:'Component ' + c.ref + '-' + (c.footprint || ''),

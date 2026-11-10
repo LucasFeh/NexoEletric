@@ -116,7 +116,8 @@ function compara(schematic, board, opts){
 
   /* ---- placa ---- */
   const pcb = new Map();
-  for (const c of (eb.components || [])) if (c && c.ref) pcb.set(c.ref, c);
+  /* a arte de overlay (1.91.0: o desenho que se puxa na placa) não é peça do esquema: o ECO não a tira */
+  for (const c of (eb.components || [])) if (c && c.ref && !(c.arte && typeof c.arte === 'object')) pcb.set(c.ref, c);
   const netPcbPins = new Map();
   const listaPcb = Array.isArray(eb.nets) ? eb.nets.filter(n => typeof n === 'string' && n) : [];
   for (const n of listaPcb) netPcbPins.set(n, new Set());

@@ -401,29 +401,104 @@ const FOOTPRINTS_DA_CASA = {
   [LOGO_FP]: { name: LOGO_FP, description: 'Logo DiEletrons com o código da placa e a revisão (automáticos)', pads: [],
     silk: [[12.0904,3.7084,12.5984,4.1148,0.254],[0.508,0.508,3.4544,0.508,1.016],[3.6322,2.0574,3.7084,2.0574,1.016],[0.7874,2.0574,2.3876,2.0574,1.016],[1.0414,3.7084,3.9878,3.7084,1.016],[4.8006,0.2032,20.066,0.2032,0.4064],[20.574,2.9972,20.6248,3.2766,0.4064],[19.685,3.2766,20.6248,3.2766,0.4064],[19.4818,2.159,19.685,3.2766,0.4064],[19.4818,2.159,20.4216,2.159,0.4064],[20.2184,1.016,20.4216,2.159,0.4064],[19.2786,1.016,20.2184,1.016,0.4064],[19.2786,1.016,19.3294,1.2954,0.4064],[17.6022,1.016,17.9832,3.2766,0.4064],[18.542,1.016,18.923,3.2766,0.4064],[17.9832,3.2766,18.923,3.2766,0.4064],[16.3068,3.2766,17.2466,3.2766,0.4064],[16.8656,1.016,17.2466,3.2766,0.4064],[15.9258,1.016,16.8656,1.016,0.4064],[15.9258,1.016,16.3068,3.2766,0.4064],[15.5448,2.9972,15.5956,3.2766,0.4064],[14.6558,3.2766,15.5956,3.2766,0.4064],[14.2748,1.016,14.6558,3.2766,0.4064],[13.1064,3.2512,14.0462,3.2512,0.4064],[13.1826,1.016,13.6906,4.0132,0.4064],[10.3886,1.016,10.8966,4.0132,0.4064],[11.2268,1.016,11.6078,3.2766,0.4064],[11.2268,1.016,12.1666,1.016,0.4064],[12.1666,1.016,12.2174,1.2954,0.4064],[11.6078,3.2766,12.5476,3.2766,0.4064],[12.3444,2.0574,12.5476,3.2766,0.4064],[11.4554,2.0574,12.3444,2.0574,0.4064],[8.9154,2.0574,9.8044,2.0574,0.4064],[9.8044,2.0574,10.0076,3.2766,0.4064],[9.0678,3.2766,10.0076,3.2766,0.4064],[9.6266,1.016,9.6774,1.2954,0.4064],[8.6868,1.016,9.6266,1.016,0.4064],[8.6868,1.016,9.0678,3.2766,0.4064],[7.7978,2.0574,8.255,2.0574,0.4064],[7.0358,1.016,7.4168,3.2766,0.4064],[7.5184,3.8608,7.5438,4.0132,0.4064],[4.9276,1.016,5.4356,4.0132,0.4064],[4.9276,1.016,5.8674,1.016,0.4064],[5.8674,1.016,6.2484,1.3208,0.4064],[6.2484,1.3208,6.6294,3.5814,0.4064],[6.3754,4.0132,6.6294,3.5814,0.4064],[5.4356,4.0132,6.3754,4.0132,0.4064]].map(l => ({ kind:'line', x1:l[0], y1:l[1], x2:l[2], y2:l[3], w:l[4], layer:'TopOverlay' })),
     texts: [{ x:10.414, y:-1.2, text:'.CodigoDaPlaca', h:1.2, w:0.18 }, { x:10.414, y:-2.9, text:'.Revisao', h:1.2, w:0.18 }],
-    bbox: { x1:0, y1:-3.7, x2:20.83, y2:4.25 } },
+    bbox: { x1:0, y1:-3.7, x2:20.83, y2:4.25 },
+    /* 1.91.0: a logo da casa e uma ARTE de overlay (fora do BOM, do ECO e da folga entre componentes) */
+    arte: { id:'logo-dieletrons-1-77', nome:'Logo DiEletrons (1.77)' } },
 };
+/* ── AS ARTES DE OVERLAY (1.91.0, pedido do dono: "a logo com o QR CODE pro site da dieletrons [...] uma logo overlay
+   padrão, onde a gente só puxa e já vem com o código da placa + a revisão automática") ──
+   A arte entra na placa como um comp_add com o desenho JÁ COMPILADO na própria linha (`arte`: hub-pcbartes.js »
+   opColocar): {id, nome, versao, escala, fp:{l:[[x1,y1,x2,y2,w]], a:[[cx,cy,r,sa,ea,w]], r:[{pts, holes}], t:[{x,y,
+   text,h,w,rot}]}}, em mm em torno da origem da arte, na face de cima. Um objeto só na tela (move, gira, troca de face
+   = espelha para a Bottom Overlay), e o Gerber, o PDF e o laser veem serigrafia comum. A placa guarda a FOTO da arte:
+   mudar a arte na biblioteca não mexe numa placa que já a tem (o painel oferece "Atualizar da biblioteca"). A escala
+   multiplica tudo (traço e altura de texto também). O componente sai com `arte:{id, nome, escala}`, e quem lista peça
+   (BOM, ECO, folga entre componentes, PDF de montagem) o pula: arte não é peça. */
+function arteGeom(arte){
+  if (!arte || typeof arte !== 'object' || !arte.fp || typeof arte.fp !== 'object') return null;
+  const s = isNum(arte.escala) && arte.escala > 0 ? arte.escala : 1, f = arte.fp, k = v => r6(v * s);
+  const silk = [];
+  for (const l of (Array.isArray(f.l) ? f.l : [])) if (Array.isArray(l) && l.length >= 5 && l.slice(0, 5).every(isNum))
+    silk.push({ kind:'line', x1:k(l[0]), y1:k(l[1]), x2:k(l[2]), y2:k(l[3]), w:k(l[4]), layer:'TopOverlay' });
+  for (const a of (Array.isArray(f.a) ? f.a : [])) if (Array.isArray(a) && a.length >= 6 && a.slice(0, 6).every(isNum))
+    silk.push({ kind:'arc', cx:k(a[0]), cy:k(a[1]), r:k(a[2]), sa:a[3], ea:a[4], w:k(a[5]), layer:'TopOverlay' });
+  const pt = p => [k(p[0]), k(p[1])];
+  const regions = [];
+  for (const g of (Array.isArray(f.r) ? f.r : [])) {
+    if (!g || !ptsValid(g.pts, 3)) continue;
+    const o = { pts:g.pts.map(pt) };
+    if (Array.isArray(g.holes) && g.holes.length) o.holes = g.holes.filter(h => ptsValid(h, 3)).map(h => h.map(pt));
+    regions.push(o);
+  }
+  const texts = [];
+  for (const t of (Array.isArray(f.t) ? f.t : [])) if (t && typeof t.text === 'string' && isNum(t.x) && isNum(t.y) && t.h > 0)
+    texts.push({ x:k(t.x), y:k(t.y), text:t.text, h:k(t.h), w:k(isNum(t.w) && t.w > 0 ? t.w : t.h / 10), rot:isNum(t.rot) ? t.rot : 0 });
+  if (!silk.length && !regions.length && !texts.length) return null;
+  let bbox = null;
+  const poe = (x, y) => { if (!bbox) bbox = { x1:x, y1:y, x2:x, y2:y }; else { bbox.x1 = Math.min(bbox.x1, x); bbox.y1 = Math.min(bbox.y1, y); bbox.x2 = Math.max(bbox.x2, x); bbox.y2 = Math.max(bbox.y2, y); } };
+  for (const o of silk) if (o.kind === 'arc') { poe(o.cx - o.r - o.w / 2, o.cy - o.r - o.w / 2); poe(o.cx + o.r + o.w / 2, o.cy + o.r + o.w / 2); }
+                        else { poe(Math.min(o.x1, o.x2) - o.w / 2, Math.min(o.y1, o.y2) - o.w / 2); poe(Math.max(o.x1, o.x2) + o.w / 2, Math.max(o.y1, o.y2) + o.w / 2); }
+  for (const g of regions) for (const p of g.pts) poe(p[0], p[1]);
+  /* o texto: a largura de verdade so se sabe com o valor do campo; a caixa usa ~0,8 h por letra do que esta escrito */
+  for (const t of texts) {
+    const linhas = t.text.split(/\r?\n/), larg = Math.max(...linhas.map(x => x.length)) * t.h * 0.8, alt = linhas.length * t.h * 1.4;
+    const vert = Math.abs(Math.sin(t.rot * Math.PI / 180)) > 0.7;
+    const hx = (vert ? alt : larg) / 2, hy = (vert ? larg : alt) / 2;
+    poe(t.x - hx, t.y - hy); poe(t.x + hx, t.y + hy);
+  }
+  const nome = typeof arte.nome === 'string' ? arte.nome : '';
+  return { name:'ARTE ' + (arte.id || ''), description:'Arte de overlay: ' + nome, pads:[], silk, regions, texts,
+           bbox:bbox ? { x1:r6(bbox.x1), y1:r6(bbox.y1), x2:r6(bbox.x2), y2:r6(bbox.y2) } : null,
+           arte:{ id:String(arte.id || ''), nome, escala:s, versao:isNum(arte.versao) ? arte.versao : 0 } };
+}
+const ehArte = c => !!(c && c.arte && typeof c.arte === 'object');
 /* As STRINGS ESPECIAIS da placa (".Revisao", ".CodigoDaPlaca": o "." + o nome do parâmetro do projeto, como no Altium).
    Os parâmetros são os do cabeçalho do schematic.js, que a vista dá ao abrir o projeto. O código da placa, sem o
-   Definir projeto, sai do nome do projeto ("PDCD-DI261939 (PTYPE)"). O que não resolve fica como está (o Gerber avisa). */
+   Definir projeto, sai do nome do projeto ("PDCD-DI261939 (PTYPE)"). O que não resolve fica como está (o Gerber avisa).
+   1.91.0: os CAMPOS das artes de overlay ("=CodigoDaPlaca", "=Revisao"... a grafia do quadro da folha, em qualquer
+   lugar do texto: "REV. =Revisao") resolvem pela mesma tabela, só os nomes de CAMPOS_ARTE. Código da placa ou do
+   equipamento que ninguém deu vira "PROJETO NÃO DEFINIDO" (a regra do quadro da folha, 1.86.0); a variante de projeto
+   não entra: a PCB é a mesma, o código é o da placa. "=Data" é o dia de hoje e "=Projeto" o nome da pasta. */
+const NAO_DEFINIDO = 'PROJETO NÃO DEFINIDO';
+const CAMPOS_ARTE = ['CodigoDaPlaca', 'Revisao', 'NomeDaPlaca', 'CodigoDoEquipamento', 'NomeDoEquipamento', 'Cliente', 'Data', 'Data_desenho', 'Projeto'];
+const _camposArte = new Map(CAMPOS_ARTE.map(n => [n.toLowerCase(), n]));
 const _G = typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : {});
 function setParamsProjeto(params, projeto){
   const o = {};
   if (typeof params === 'string') for (const par of params.split(';')){ const i = par.indexOf('='); if (i > 0) o[par.slice(0, i).trim().toLowerCase()] = par.slice(i + 1); }
   else if (params && typeof params === 'object') for (const k of Object.keys(params)) o[k.toLowerCase()] = String(params[k]);
+  for (const k of Object.keys(o)) if (o[k] === '*' || String(o[k]).trim().toUpperCase() === NAO_DEFINIDO) delete o[k];
   const m = /([A-Za-z][A-Za-z0-9]*)\s*-\s*(DI\d{4,8})/.exec(String(projeto || ''));
   if (!o.codigodaplaca && m) o.codigodaplaca = (m[1] + '-' + m[2]).toUpperCase();
   if (!o.codigodaplaca && o.desenho_linha_unica) o.codigodaplaca = o.desenho_linha_unica;
+  Object.defineProperty(o, '__projeto', { value:String(projeto || ''), enumerable:false });
   _G.__nexoParamsProjeto = o;
   return o;
 }
+/* o valor de um campo de arte (nome sem caixa) com os parâmetros de agora; undefined = sem valor */
+function valorCampoArte(nome, P){
+  P = P || _G.__nexoParamsProjeto || {};
+  const k = String(nome || '').toLowerCase();
+  if (!_camposArte.has(k)) return undefined;
+  if (k === 'data') { const d = new Date(), z = n => (n < 10 ? '0' : '') + n; return z(d.getDate()) + '/' + z(d.getMonth() + 1) + '/' + d.getFullYear(); }
+  if (k === 'projeto') return P.__projeto || undefined;
+  const v = P[k];
+  if (v != null && String(v).trim() !== '') return String(v);
+  if (k === 'codigodaplaca' || k === 'codigodoequipamento') return NAO_DEFINIDO;
+  return undefined;
+}
 function resolveEspeciais(txt){
   const P = _G.__nexoParamsProjeto;
-  if (!P || typeof txt !== 'string' || txt.indexOf('.') < 0) return txt;
-  return txt.replace(/(^|[^A-Za-z0-9_.\u00C0-\u024F])\.([A-Za-z_][A-Za-z0-9_]*)/g, (s, a, n) => {
+  if (!P || typeof txt !== 'string' || (txt.indexOf('.') < 0 && txt.indexOf('=') < 0)) return txt;
+  let r = txt.replace(/(^|[^A-Za-z0-9_.\u00C0-\u024F])\.([A-Za-z_][A-Za-z0-9_]*)/g, (s, a, n) => {
     const v = P[n.toLowerCase()];
     return v != null && v !== '' ? a + v : s;
   });
+  if (r.indexOf('=') >= 0) r = r.replace(/(^|[^A-Za-z0-9_\u00C0-\u024F])=([A-Za-z_][A-Za-z0-9_]*)/g, (s, a, n) => {
+    const v = valorCampoArte(n, P);
+    return v !== undefined ? a + v : s;
+  });
+  return r;
 }
 _G.__nexoResolveEspeciais = resolveEspeciais;
 function footprintGeom(nome, board, opts){
@@ -584,7 +659,18 @@ function sintetizaComp(fp, a, cid){
                    x:r6(isNum(des.x) ? des.x : (bx.x1 + bx.x2) / 2), y:r6(isNum(des.y) ? des.y : bx.y2 + DESIG_FOLGA + h / 2),
                    text:a.ref, h, rot:isNum(des.rot) ? normAng(des.rot) : 0,
                    mirror:a.layer === 'Bottom', designator:true, comment:false, owner:a.ref, w:isNum(des.w) ? des.w : DESIG_W, kind:'stroke' }];
-  if (des.hidden === true) texts[0].hidden = true;
+  /* a arte de overlay (1.91.0) nao mostra o designator: e um desenho, nao uma peca */
+  if (des.hidden === true || fp.arte) texts[0].hidden = true;
+  if (fp.arte) comp.arte = Object.assign({}, fp.arte);
+  /* as regioes do footprint (a arte: o QR, a logo em regioes), com o componente */
+  const regions = [];
+  (fp.regions || []).forEach((g, i) => {
+    if (!g || !ptsValid(g.pts, 3)) return;
+    const o = { id:cid + 'r' + (i + 1), layer:'TopOverlay', points:g.pts.map(p => [p[0], p[1]]), owner:a.ref };
+    if (Array.isArray(g.holes) && g.holes.length) o.holes = g.holes.map(h => h.map(p => [p[0], p[1]]));
+    xfRegionObj(d, o);
+    regions.push(o);
+  });
   /* os textos do proprio footprint (a logo da casa: o codigo e a revisao), com o componente */
   (fp.texts || []).forEach((t, i) => {
     if (!t || typeof t.text !== 'string' || !isNum(t.x) || !isNum(t.y) || !(t.h > 0)) return;
@@ -593,7 +679,7 @@ function sintetizaComp(fp, a, cid){
     xfTextObj(d, o);
     texts.push(o);
   });
-  return { comp, silk, texts };
+  return { comp, silk, texts, regions };
 }
 
 /* Pad solto (pad_add / pad_edit): valida a op e devolve os campos do pad no formato do
@@ -870,7 +956,7 @@ function applyPcbChanges(board, changes, opts){
   oculto(model, 'board', board);
   oculto(model, 'pares', pares);
   /* o que o comp_add sintetizou: {silk:[], texts:[]} e, por objeto, o componente dono */
-  oculto(model, 'extra', { silk:[], texts:[], dono:new Map() });
+  oculto(model, 'extra', { silk:[], texts:[], regions:[], dono:new Map() });
   for (const c of (B.components || [])) {
     const m = { kind:'comp', src:c, eff:{ x:c.x, y:c.y, rot:c.rot, layer:c.layer }, changed:false, attrChanged:false };
     oculto(m, 'pares', pares);
@@ -1448,7 +1534,9 @@ function applyPcbChanges(board, changes, opts){
         if (model.comps.some(o => o.eff.designator === ch.ref)) return bad(`designator "${ch.ref}" já é o nome novo de outro componente`);
         const nets = parseNetsCampo(ch.nets);
         if (nets === null) return bad('campo "nets" mal formado — use "pad=net;pad=net" (texto plano)');
-        const g = footprintGeom(ch.footprint, B, opts);
+        /* 1.91.0: a arte de overlay leva o desenho na propria linha (arteGeom) */
+        if (ch.arte !== undefined && !arteGeom(ch.arte)) return bad('campo "arte" sem desenho (fp vazio ou mal formado)');
+        const g = ch.arte !== undefined ? { fp:arteGeom(ch.arte), fonte:'arte de overlay' } : footprintGeom(ch.footprint, B, opts);
         if (!g) return bad(`footprint "${ch.footprint}" não encontrado — nem na pcblib (${((opts && opts.pcblib) || PCBLIB) ? 'carregada' : 'não carregada: HubCore.setPcbLib'}), nem embutido no board.js (footprints), nem em componente da placa`);
         const lado = ch.layer === 'Bottom' ? 'Bottom' : 'Top', rot = isNum(ch.rot) ? normAng(ch.rot) : 0;
         const cid = nid('c', ch);
@@ -1461,12 +1549,13 @@ function applyPcbChanges(board, changes, opts){
         model.comps.push(m); model.compByRef[ch.ref] = m; item.target = m;
         quemPos.set(m, idx);
         for (const s of sc.silk) { model.extra.silk.push(s); model.extra.dono.set(s, m); indexa({ kind:s.kind === 'arc' ? 'arc' : 'track', src:s, fora:'owner' }); }
+        for (const r of sc.regions) { model.extra.regions.push(r); model.extra.dono.set(r, m); indexa({ kind:'region', src:r, fora:'owner' }); }
         for (const t of sc.texts) {
           model.extra.texts.push(t); model.extra.dono.set(t, m);
           const mt = { kind:'text', src:t, eff:copiaEff(t), changed:false, deleted:false };
           model.texts.push(mt); indexa(mt);
         }
-        if (!sc.comp.pads.length) warn(`footprint "${ch.footprint}" sem pad nenhum`);
+        if (!sc.comp.pads.length && !sc.comp.arte) warn(`footprint "${ch.footprint}" sem pad nenhum`);
         const nomes = new Set(sc.comp.pads.map(p => String(p.name)));
         const sobra = Object.keys(nets).filter(k => !nomes.has(k));
         if (sobra.length) warn(`nets: pad(s) ${sobra.join(', ')} não existe(m) no footprint ${ch.footprint}`);
@@ -1915,7 +2004,7 @@ function effectiveBoard(board, model){
   const removidos = new Set();
   for (const m of (M.compsRemovidos || [])) if (!m.added && m.src) removidos.add(m.src.ref);
   const morto = o => !!(o && typeof o.owner === 'string' && removidos.has(o.owner));
-  const EX = M.extra || { silk:[], texts:[], dono:new Map() };
+  const EX = M.extra || { silk:[], texts:[], regions:[], dono:new Map() };
   const extraVivo = list => (list || []).filter(o => { const d = EX.dono.get(o); return !(d && d.deleted); });
 
   /* componentes */
@@ -2055,6 +2144,13 @@ function effectiveBoard(board, model){
     const m = mOf.get(g);
     if (m && m.deleted) continue;
     const o = dcopy(m ? m.eff : g);
+    const d = g.owner ? deltaOf(g.owner) : null;
+    if (d) xfRegionObj(d, o);
+    regions.push(dono(o));
+  }
+  /* as regioes que o comp_add sintetizou (a arte de overlay): andam com o componente */
+  for (const g of extraVivo(EX.regions)) {
+    const o = dcopy(g);
     const d = g.owner ? deltaOf(g.owner) : null;
     if (d) xfRegionObj(d, o);
     regions.push(dono(o));
@@ -3365,6 +3461,7 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          symbolOf, partOf, footprintOf, pinHot, rotEfetiva, compTransform, compPinsWorld,
          CONECTOR_VIA, moldeConectorVia, ehConector, partesPorVia, simboloPorVia, migraConectoresPorVia,
          LOGO_FP, FOOTPRINTS_DA_CASA, setParamsProjeto, resolveEspeciais,
+         arteGeom, ehArte, CAMPOS_ARTE, valorCampoArte, NAO_DEFINIDO_ARTE:NAO_DEFINIDO,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp, assinaturaPinos, simbolosDoDocumento,
          suggestSym,
          buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp,

@@ -305,7 +305,7 @@ function pintaMontagem(pg, eb, lado, bb, s, px, py, o, avisos) {
     if (usaCaixa) {
       let n = 0;
       for (const c of (eb.components || [])) {
-        if (!c || ladoDe(c.layer) !== lado || !c.bbox) continue;
+        if (!c || ladoDe(c.layer) !== lado || !c.bbox || c.arte) continue;
         const b = c.bbox;
         if (![b.x1, b.y1, b.x2, b.y2].every(isNum)) continue;
         pg.retangulo(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1); n++;
@@ -352,7 +352,7 @@ function pintaMontagem(pg, eb, lado, bb, s, px, py, o, avisos) {
   /* designator no centro do componente, sempre legivel (fora da matriz espelhada) */
   if (o.designators === 'centro') {
     for (const c of (eb.components || [])) {
-      if (!c || !c.ref || ladoDe(c.layer) !== lado) continue;
+      if (!c || !c.ref || ladoDe(c.layer) !== lado || c.arte) continue;
       const b = c.bbox, cx = b ? (b.x1 + b.x2) / 2 : c.x, cy = b ? (b.y1 + b.y2) / 2 : c.y;
       if (!isNum(cx) || !isNum(cy)) continue;
       const q = aplica(M, cx, cy);

@@ -2519,6 +2519,146 @@ function desenhaPreviaAuto(){
   ctx.restore();
 }
 
+/* ============================== ARTES DE OVERLAY (1.91.0) ==============================
+   Pedido do dono (2026-11-10): "uma logo overlay padrão, onde a gente só puxa e já vem com o código da placa + a
+   revisão automática [...] é como se fosse uma ferramenta mesmo, na área de PCB". A lista e o Studio moram no
+   hub-pcbartes-ui.js e o desenho no hub-pcbartes.js; aqui o elo com a placa: a arte entra como UM comp_add com o desenho
+   na própria linha (HubCore.arteGeom), ref ARTE1, ARTE2... Assim ela é um objeto só: move, gira (Espaço), troca de face
+   (L: espelha para a Bottom Overlay), escala no painel. Não pode quem não edita a placa (visualizador, fora da equipe)
+   nem com a variante de projeto ativa (1.88.0: a PCB é a da padrão). */
+let ARTES = null;
+function instalaArtes(){
+  if (ARTES || LEAN || typeof HubPcbArtesUi === 'undefined' || typeof HubPcbArtes === 'undefined') return;
+  ARTES = HubPcbArtesUi.instala({
+    wrap:$('cvwrap'), canvas:cv,
+    podeEditar:motivoNaoPoeArte,
+    comeca:comecaArte,
+    poeEm:(arte, sx, sy) => { const w = telaParaMundo(sx, sy); poeArte(arte, snapPonto(w, null, { soGrade:true }), 0, ladoDaArte()); },
+    cor:() => (LBYK.TopOverlay && LBYK.TopOverlay.color) || '#ffff00',
+    toast:(t, tipo, ms) => HubDialog.toast(t, tipo || 'info', ms),
+  });
+}
+function motivoNaoPoeArte(){
+  if (LEAN) return 'esta vista não edita';
+  if (VAR.on) return MSG_VAR();
+  const eq = typeof HubEquipe !== 'undefined' && HubEquipe.bloqueia ? HubEquipe.bloqueia(CH_REL) : null;
+  if (eq) return typeof eq === 'string' ? eq : 'você não edita este projeto';
+  return '';
+}
+const ladoDaArte = () => (/^Bottom/.test(cur) ? 'Bottom' : 'Top');
+function abreArtes(studio, id){
+  instalaArtes();
+  if (!ARTES) { HubDialog.toast('as artes de overlay (hub-pcbartes-ui.js) não carregaram nesta página — atualize com F5', 'warn'); return; }
+  if (studio) ARTES.abreStudio(id || undefined); else ARTES.alterna();
+}
+function refsUsados(){
+  const u = new Set(model.comps.map(m => m.eff.designator || m.src.ref));
+  for (const o of CH) if (o && o.op === 'comp_add') u.add(o.ref);
+  return u;
+}
+function comecaArte(arte){
+  const motivo = motivoNaoPoeArte();
+  if (motivo) { HubDialog.toast(motivo, 'warn', 6000); return; }
+  if (!garanteEdicao()) return;
+  setTool('arte');
+  const lado = ladoDaArte();
+  draft = { tipo:'arte', arte, rot:lado === 'Bottom' ? 180 : 0, layer:lado, cache:null };
+  avisoRodape(rodapeArte());
+  pede();
+}
+const rodapeArte = () => draft && draft.tipo === 'arte' ? 'Arte "' + draft.arte.nome + '": clique para largar (' + (draft.layer === 'Bottom' ? 'Bottom Overlay, espelhada' : 'Top Overlay') + ') — Espaço gira, L troca a face, Esc desiste' : '';
+/* a linha comp_add da arte num ponto; null (com o aviso) se a arte não tem desenho */
+function opDaArte(arte, p, rot, lado, escala){
+  let op;
+  try { op = HubPcbArtes.opColocar(arte, { ref:HubPcbArtes.proximoRef(refsUsados()), x:r6(p.x), y:r6(p.y), rot, layer:lado, escala }); }
+  catch (e) { HubDialog.toast(String(e && e.message || e), 'warn', 5000); return null; }
+  return op;
+}
+function poeArte(arte, p, rot, lado){
+  const motivo = motivoNaoPoeArte();
+  if (motivo) { HubDialog.toast(motivo, 'warn', 6000); return null; }
+  if (!garanteEdicao()) return null;
+  const op = opDaArte(arte, p, isNum(rot) ? rot : (lado === 'Bottom' ? 180 : 0), lado);
+  if (!op) return null;
+  CH.push(op); selDepois = [op];
+  /* a camada da arte à vista: nascer numa camada escondida pareceria que nada aconteceu */
+  const k = lado === 'Bottom' ? 'BottomOverlay' : 'TopOverlay';
+  if (show.layers[k] === false) show.layers[k] = true;
+  commit();
+  const av = HubPcbArtes.confere(op.arte.fp, op.arte.escala);
+  HubDialog.toast('arte "' + arte.nome + '" na placa (' + op.ref + ')' + (av.length ? ' — ▲ ' + av.join(' · ') : ''), av.length ? 'warn' : 'ok', av.length ? 7000 : 2200);
+  return op;
+}
+function poeArteNoPonto(w, ev){
+  if (!draft || draft.tipo !== 'arte') { setTool('select'); return; }
+  const d = draft;
+  const op = poeArte(d.arte, snapPonto(w, ev, { soGrade:true }), d.rot, d.layer);
+  if (op) { setTool('select'); avisoRodape(''); }
+}
+/* o fantasma na mão: o desenho montado uma vez (na origem) por giro/face, deslocado até o cursor */
+function desenhaArteNaMao(c){
+  const d = draft;
+  if (!d || d.tipo !== 'arte') return;
+  if (!d.cache || d.cache.rot !== d.rot || d.cache.layer !== d.layer) {
+    const op = opDaArte(d.arte, { x:0, y:0 }, d.rot, d.layer);
+    if (!op) { setTool('select'); return; }
+    const B0 = { components:[], tracks:[], arcs:[], vias:[], texts:[], silk:[], regions:[], fills:[], nets:[], board:{ outline:[] } };
+    const eb = HC.effectiveBoard(B0, HC.applyPcbChanges(B0, [op]));
+    const itens = [];
+    for (const s of eb.silk || []) itens.push({ kind:s.kind === 'arc' ? 'arc' : 'track', o:s });
+    for (const g of eb.regions || []) itens.push({ kind:'region', o:g });
+    for (const t of eb.texts || []) if (!t.hidden) itens.push({ kind:'text', o:t });
+    d.cache = { rot:d.rot, layer:d.layer, itens, bbox:(eb.components[0] || {}).bbox };
+  }
+  ctx.save(); ctx.translate(c.x, c.y);
+  const k = d.layer === 'Bottom' ? 'BottomOverlay' : 'TopOverlay';
+  for (const { kind, o } of d.cache.itens) desenhaObj(kind, o, corDe(k), { alpha:0.75 });
+  const b = d.cache.bbox;
+  if (b) { ctx.strokeStyle = COR.seta; ctx.globalAlpha = 0.6; ctx.lineWidth = px(1); ctx.setLineDash([px(4), px(3)]); ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1); }
+  ctx.restore();
+  ctx.save(); ctx.strokeStyle = COR.seta; ctx.lineWidth = px(1); ctx.beginPath();
+  ctx.moveTo(c.x - px(8), c.y); ctx.lineTo(c.x + px(8), c.y); ctx.moveTo(c.x, c.y - px(8)); ctx.lineTo(c.x, c.y + px(8)); ctx.stroke(); ctx.restore();
+}
+/* a linha comp_add de uma arte da placa (a que a pôs) */
+const opDaArteNaPlaca = m => { const ref = m && m.src && m.src.ref; for (let i = CH.length - 1; i >= 0; i--) if (CH[i] && CH[i].op === 'comp_add' && CH[i].ref === ref && CH[i].arte) return CH[i]; return null; };
+function fichaArte(a){
+  const m = a.m, e = m.eff, s = m.src, info = s.arte || {}, op = opDaArteNaPlaca(m);
+  const lib = ARTES ? ARTES.arte(info.id) : null;
+  const velha = lib && op && isNum(lib.versao) && isNum(op.arte.versao) && lib.versao > op.arte.versao;
+  const av = op ? HubPcbArtes.confere(op.arte.fp, op.arte.escala) : [];
+  const fabrica = e.layer === 'Bottom' ? 'Bottom Overlay (espelhada: lida por baixo)' : 'Top Overlay';
+  return { titulo:'Arte de overlay', sub:(info.nome || s.footprint) + ' · ' + (e.designator || s.ref), campos:[
+    { grade:[{ k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }] },
+    { grade:[{ k:'rot', rot:'Rotation', tipo:'ang', v:e.rot },
+             { k:'layer', rot:'Face', tipo:'enum', v:e.layer, opc:opcFaces(), dica:'Bottom: a arte vai para a Bottom Overlay espelhada (lida olhando a placa por baixo)' }] },
+    { grade:[{ k:'escala', rot:'Escala', tipo:'num', v:op ? op.arte.escala : (info.escala || 1), dica:'multiplica tudo: tamanho, traço e altura do texto (1 = o tamanho do Studio)' }] },
+    { nota:'Sai no Gerber na ' + fabrica + '. Os campos (=CodigoDaPlaca, =Revisao…) se preenchem com o projeto, na tela, no Gerber e no PDF.' +
+           (velha ? ' A biblioteca tem uma versão mais nova desta arte (' + lib.versao + ' > ' + op.arte.versao + ').' : '') +
+           (av.length ? ' ▲ ' + av.join(' · ') : '') },
+    { botoes:[{ id:'arteStudio', rot:'Editar no Studio…', dica:'abre a arte no Studio de artes (a placa só muda com "Atualizar da biblioteca")' },
+              { id:'arteAtualizar', rot:velha ? 'Atualizar da biblioteca ●' : 'Atualizar da biblioteca', dica:'troca o desenho desta arte pelo da biblioteca, no mesmo lugar' }] },
+    { botoes:[{ id:'girar', rot:'Rotate 90°' }, { id:'virar', rot:'Flip' }, { id:'enquadrar', rot:'Zoom' }] },
+  ] };
+}
+function escalaArte(m, v){
+  if (!isNum(v) || !(v > 0) || v > 50) { HubDialog.toast('escala entre 0,01 e 50', 'warn'); return false; }
+  const op = opDaArteNaPlaca(m);
+  if (!op || !garanteEdicao()) return false;
+  op.arte.escala = r6(v);
+  return true;
+}
+function atualizaArte(m){
+  const op = opDaArteNaPlaca(m);
+  if (!op || !ARTES || !garanteEdicao()) return;
+  const lib = ARTES.arte(op.arte.id);
+  if (!lib) { HubDialog.toast('a arte "' + op.arte.nome + '" não está mais na biblioteca', 'warn'); return; }
+  let novo;
+  try { novo = HubPcbArtes.opColocar(lib, { ref:op.ref, x:op.x, y:op.y, rot:op.rot, layer:op.layer, escala:op.arte.escala }); } catch (e) { HubDialog.toast(String(e.message || e), 'warn'); return; }
+  op.arte = novo.arte; op.comment = novo.comment; op.footprint = novo.footprint;
+  commit();
+  HubDialog.toast('arte atualizada com a versão ' + (lib.versao || 0) + ' da biblioteca', 'ok', 2200);
+}
+
 /* ============================== PDF de layout ==============================
    O dialogo (hub-pcbpdfui.js) recebe a placa EFETIVA de agora -- a mesma da tela e do Gerber,
    com as mudancas nao salvas e os teardrops refeitos -- e grava em Projects/<p>/PDF/ (/api/pdf). */
@@ -3600,6 +3740,7 @@ function vaoTexto(e){
 }
 function cliqueFerramenta(w, ev){
   if (tool === 'colar') { colaNoPonto(w, ev); return; }
+  if (tool === 'arte') { poeArteNoPonto(w, ev); return; }
   if (tool === 'pad') { poePad(w, ev); return; }
   if (tool === 'trilha' || tool === 'linha') { rotaClique(w, ev); return; }
   if (tool === 'medir') { cliqueMedida(w, ev); return; }
@@ -3898,6 +4039,7 @@ function desenhaFerramenta(){
     return;
   }
   if (tool === 'colar') { desenhaColagem(c); return; }
+  if (tool === 'arte') { desenhaArteNaMao(c); return; }
   ctx.save();
   ctx.strokeStyle = cor; ctx.fillStyle = cor; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const wl = Math.max(CFG.wLinha, px(1));
@@ -4395,6 +4537,9 @@ const BARRA = [
   /* 2026-11-03: imagem ou texto -> serigrafia (hub-pcbsilkgen.js; pedido do dono: "falta uma ferramenta que converta
      imagem ou texto em serigrafia") */
   { id:'serigrafia', ic:'serigrafia', acao:'serigrafia', titulo:'Imagem ou texto → serigrafia — um logo (PNG, JPG, SVG) ou um texto em qualquer fonte do Windows vira regiões de serigrafia, com os miolos vazados' },
+  /* 1.91.0: as artes de overlay (hub-pcbartes-ui.js; pedido do dono: "uma logo overlay padrão, onde a gente só puxa"):
+     a lista de onde se arrasta a logo + QR, o código + revisão e as artes do Studio */
+  { id:'artes', ic:'artes', acao:'artes', rotulo:'Artes', titulo:'Artes de overlay — a logo DiEletrons + QR, o código da placa + revisão (automáticos) e as artes do Studio: arraste para a placa ou clique e largue; o Studio cria e edita' },
   { id:'preencher', ic:'preencher', acao:'preencher', at:'preencher', titulo:'Preencher — ligado: círculo, triângulo e polígono viram região cheia e o retângulo vira fill; desligado: contorno de trilhas' }, '|',
   { id:'furo', ic:'furo', tool:'furo', titulo:'Furo de fixação — Board Cutout redondo (diâmetro no painel)' },
   { id:'contorno', ic:'contorno', tool:'contorno', titulo:'Contorno da placa — polígono que substitui o contorno (pergunta antes)' },
@@ -5621,6 +5766,10 @@ window.addEventListener('keydown', e => {
     if (k === 'X') { giraNoArrasto('x'); return; }
     if (k === 'Y') { giraNoArrasto('y'); return; }
   }
+  if (tool === 'arte' && draft && draft.tipo === 'arte') {
+    if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); draft.rot = normAng((draft.rot || 0) + 90); draft.cache = null; pede(); return; }
+    if (k === 'L') { e.preventDefault(); draft.layer = draft.layer === 'Bottom' ? 'Top' : 'Bottom'; draft.rot = normAng(180 - (draft.rot || 0)); draft.cache = null; avisoRodape(rodapeArte()); pede(); return; }
+  }
   if (tool === 'trilha' || tool === 'linha') {
     if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); rotaEspaco(e.shiftKey); return; }
     if (e.key === 'Backspace') { e.preventDefault(); rotaBackspace(); return; }
@@ -5685,7 +5834,7 @@ const v3Mostra = h => { h.hidden = false; h.style.visibility = ''; h.style.point
 const SO_2D = new Set(['trilha', 'via', 'linha', 'arco', 'circulo', 'retangulo', 'poligono', 'texto', 'triangulo', 'furo',
   'contorno', 'medir', 'sinalizar', 'pad', 'pour', 'fill', 'solidRegion', 'retanguloContorno', 'colar', 'duplicar',
   'espelhoX', 'espelhoY', 'camadaUnica', 'proxCamada', 'antCamada', 'outraFace', 'grade', 'diff', 'gradeId', 'zoomIn', 'zoomOut',
-  'enquadrarSel', 'painelGrade', 'autorotear', 'autorotearNets', 'serigrafia']);
+  'enquadrarSel', 'painelGrade', 'autorotear', 'autorotearNets', 'serigrafia', 'artes', 'arteStudio']);
 function hubLib(){
   if (HUBLIB) return HUBLIB;
   if (typeof HubFpLib === 'undefined') return null;
@@ -6300,6 +6449,8 @@ function fazAcao(id, arg){
     case 'autorotear': abreAutorotear('todas'); return;
     case 'autorotearNets': abreAutorotear(netsDaSel().length ? 'sel' : 'todas'); return;
     case 'serigrafia': abreSerigrafia(); return;
+    case 'artes': abreArtes(); return;
+    case 'arteStudio': abreArtes(true); return;
     case 'copiar': copiaSelecao(false); return;
     case 'recortar': if (!SEL.length) return; copiaSelecao(true); return;
     case 'colar': comecaColar(false); return;
@@ -6586,6 +6737,7 @@ function fichaDe(a){
          modal Parâmetros (abreParametrosComp), que abre para todos; o "Não montar" foi para o botão direito
          (extrasDoHub » itemNaoMontar). O que é problema vira o ponto no botão Parâmetros (avisosDoComp). */
       const m = a.m, e = m.eff, s = m.src;
+      if (s.arte) return fichaArte(a);
       const est = [m.changed ? 'movido' : '', m.attrChanged ? 'atributos mudados' : ''].filter(Boolean).join(' · ');
       const av = avisosDoComp(m);
       const mostra = camposMostra(m);
@@ -6982,6 +7134,7 @@ function campoNoAlvo(a, k, v){
       const g = geoDe(a);
       if (k === 'layer') { if ((v !== 'Top' && v !== 'Bottom') || v === g.layer) return false; moveComp(a.m, viraGeo(g, [g.x, g.y])); return true; }
       if (k === 'x' || k === 'y' || k === 'rot') { if (!isNum(v)) return false; g[k] = k === 'rot' ? normAng(v) : v; moveComp(a.m, g); return true; }
+      if (k === 'escala') return escalaArte(a.m, v);
       if (k === 'designator' || k === 'comment') { attrComp(a.m, k, v); return true; }
       if (k === 'naoMontar') { if (VAR.on) HubVariantes.alterna(PROJ, [refDnp(a.m)]); else marcaNaoMontar(refDnp(a.m), !!v); return false; }
       if (k === 'mostraDes' || k === 'mostraCom') {
@@ -7097,6 +7250,8 @@ function acaoPainel(id){
     case 'fpPadsTodos': { const a = SEL[0]; if (a && a.t === 'pad' && a.comp) padNoFootprint(a, camadasDoPad(a.eb, IDX.ebComp.get(a.comp)), true); return; }
     case 'selComp': { const cs = compsDaSel(); if (cs.length) { selSo(cs.map(m => ALVO_COMP.get(m)).filter(Boolean)); aoMudarSel(); pede(); } return; }
     case 'parametros': { const L = compsDaSel(); if (L.length) abreParametrosComp(L[0]); return; }
+    case 'arteStudio': { const a = SEL[0]; abreArtes(true, a && a.m && a.m.src && a.m.src.arte ? a.m.src.arte.id : null); return; }
+    case 'arteAtualizar': { const a = SEL[0]; if (a && a.t === 'comp') atualizaArte(a.m); return; }
   }
   fazAcao(id);
 }
@@ -7941,6 +8096,7 @@ function inicia(){
     }
     if (typeof HubPcbPainel !== 'undefined') painel = HubPcbPainel.instala($('props'), V);
     else { const p = $('props'); if (p) p.textContent = 'O painel (hub-pcbpainel.js) não carregou — atualize a página.'; }
+    instalaArtes();
   }
   if (CW && CHH) enquadra(); else enquadrarPendente = 'placa';
   ligaVariante();
@@ -7999,6 +8155,9 @@ window.__hubPcb = Object.assign(Object.create(V), {
   /* o smoke do painel de propriedades (pad, furo, cores): os alvos e as fichas sem clicar na tela */
   alvos:() => [...PORCHAVE.values()], selecionar(lista){ selSo(lista); aoMudarSel(); }, fichaDe, arcoCheio, circuloDePts,
   changes:() => CH, fazAcao, destravar(){ editOn = true; pintaBarra(); },
+  /* as artes de overlay (1.91.0): o controle da lista/Studio, pôr uma arte num ponto, a arte na mão */
+  artes:() => ARTES, poeArte:(id, x, y, lado) => { const a = ARTES && ARTES.arte(id); return a ? poeArte(a, { x, y }, lado === 'Bottom' ? 180 : 0, lado || 'Top') : null; },
+  comecaArte:id => { const a = ARTES && ARTES.arte(id); if (a) comecaArte(a); return !!a; },
   historico:() => ({ desfazer:undoStack.length > 1, refazer:redoStack.length > 0 }),
   valida:() => HC.applyPcbChanges(B, CH).changeItems.map(i => ({ op:i.ch.op, status:i.status, msg:i.msg || '' })),
   /* o Auto-rotear: abrir (com o worker ou, worker:null, em fatias), o controle aberto e a prévia na placa */

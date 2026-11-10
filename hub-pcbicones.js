@@ -37,6 +37,8 @@ const ICONES = {
   poligono:   'M8 2 L14 6.5 L11.7 13.5 L4.3 13.5 L2 6.5 Z',
   gaveta:     'M4 6 L8 10 L12 6',
   texto:      'M3 3.5 H13 M8 3.5 V13',
+  /* 1.91.0: as artes de overlay (hub-pcbartes-ui.js): um QR (os tres localizadores) */
+  artes:      'r:1.5,1.5,5,5|r:9.5,1.5,5,5|r:1.5,9.5,5,5|M10 10 H11.5 M13.5 10 H14.5 M10 12.5 H12 M14 12.5 V14.5 M10 14.5 H12',
   /* imagem ou texto -> serigrafia (hub-pcbsilkgen.js): o quadro com a montanha e um T */
   serigrafia: 'r:1.5,2,9.5,8|M1.5 8.5 L4.5 5.5 L7 8 L8.5 6.5 L11 9|c:8.3,4.4,0.9|M10 12 H15 M12.5 12 V15',
   preencher:  'r:2.5,4,11,8|M2.5 9.5 L8 4 M6.5 12 L13.5 5 M11 12 L13.5 9.5',

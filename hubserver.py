@@ -2354,6 +2354,16 @@ try:
 except Exception as _e:            # noqa: BLE001
     print('AVISO: componentes locais desligados (%s) — falta tools/rotas/componentes_locais.py.' % _e)
 
+# ─────────────────── as artes de overlay da PCB (tools/rotas/pcb_artes.py, 1.91.0) ───────────────────
+# /api/pcb-artes*: a biblioteca de artes (Libs/pcb-artes.json, viaja pelo NexoBD); o desenho e o Studio sao da vista PCB
+# (hub-pcbartes.js, hub-pcbartes-ui.js). Apagar e mudar as artes da casa: so o administrador.
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import pcb_artes as _pcb_artes   # noqa: E402
+    _pcb_artes.registra(app, ROOT)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: artes de overlay desligadas (%s) — falta tools/rotas/pcb_artes.py.' % _e)
+
 # ─────────────────── aprovacao do projeto e revisoes (tools/rotas/aprovacao.py) ───────────────────
 # /api/aprovacao*: a aprovacao no cabecalho do schematic.js (quem aprova e quem esta logado no Nexo Hub, com a marca de
 # aprovador), que cai sozinha quando o projeto muda; /api/revisoes*: a copia do projeto a cada aprovacao. Ate a 1.83.0 era
