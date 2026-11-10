@@ -90,6 +90,23 @@ log.length = 0;
 E.foraDoAlmox(ctx, { x1:0, y1:0, x2:500, y2:200 }, 2);
 ok(log.some(l => l[0] === 'srect' && l[1] === '#ef4444') && log.some(l => l[0] === 'text' && l[1] === 'fora do almoxarifado'), 'o contorno vermelho e a etiqueta');
 
+/* ── 8b. 1.95.1: a caixa do contorno é o corpo + pinos — sem os textos do desenho e com o arco só no pedaço desenhado ── */
+{
+  const D = require('../hub-draw.js');
+  /* o eletrolítico da casa: a placa curva é um arco de 58° (151°→209°) de raio 160 centrado em x=235 */
+  const capEl = { pins:[{ num:'1', x:10, y:0, len:100, orient:180 }, { num:'2', x:110, y:0, len:100, orient:0 }],
+    graphics:[{ g:'line', x1:35, y1:-80, x2:35, y2:80 }, { g:'arc', cx:235, cy:0, r:160, sa:151, ea:180 }, { g:'arc', cx:235, cy:0, r:160, sa:179.988, ea:209 },
+              { g:'label', x:-20, y:60, s:'+' }] };
+  const b = D.symCorpoBBox(capEl), velho = D.symBBox(capEl);
+  eq([b.x1, b.x2], [-90, 210], 'o corpo vai do fim do pino 1 ao fim do pino 2 (o arco não estica até 395)');
+  ok(Math.abs(b.y1 + 80) < 1e-9 && Math.abs(b.y2 - 80) < 1e-9, 'e a altura é a da placa: ' + JSON.stringify(b));
+  ok(velho.x2 === 395 && velho.y2 === 160, 'a caixa antiga (seleção, designador) continua a mesma');
+  const circ = D.symCorpoBBox({ graphics:[{ g:'arc', cx:0, cy:0, r:50, sa:0, ea:360 }] });
+  eq([circ.x1, circ.y1, circ.x2, circ.y2], [-50, -50, 50, 50], 'o círculo inteiro continua inteiro');
+  const quarto = D.symCorpoBBox({ graphics:[{ g:'arc', cx:0, cy:0, r:100, sa:0, ea:90 }] });
+  ok(Math.abs(quarto.x1) < 1e-9 && Math.abs(quarto.y1) < 1e-9 && quarto.x2 === 100 && quarto.y2 === 100, 'um quarto de arco: ' + JSON.stringify(quarto));
+}
+
 /* ── 9. o MCP sch_erc ── */
 (async () => {
   const PROJ = 'LM555 astável';

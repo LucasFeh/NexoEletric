@@ -136,6 +136,14 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
     await js(`HubMcpVista.focar(3027, 5336, 900)`);
     await espera(500);
     await print('erc-3-c3-fora-do-almoxarifado');
+    /* 1.95.1: os contornos certos — a CN2 (vias dos dois lados da folha) não vira um retângulo atravessando a folha, e o
+       do C3 é o corpo + pinos (não desce até o "10uF") */
+    const cs = await js(`HubMcpVista.contornosErc()`);
+    const cn2 = cs.find(c => c.ref === 'CN2'), c3 = cs.find(c => c.ref === 'C3');
+    assert.ok(cn2 && cn2.contornos.length > 1 && cn2.contornos.every(b => b.x2 - b.x1 < 2000), 'a CN2 em grupos separados: ' + JSON.stringify(cn2 && cn2.contornos));
+    const k = c3.caixas[0], q = c3.contornos[0];
+    assert.ok(q.y2 - q.y1 < k.y2 - k.y1 && q.y1 > k.y1, 'o contorno do C3 sem o texto do desenho: ' + JSON.stringify([k, q]));
+    await print('erc-5-contornos-corrigidos');
     /* esconder as marcas */
     await js(`document.getElementById('btnErcMarcas').click()`);
     assert.strictEqual(await js(`document.getElementById('btnErcMarcas').getAttribute('aria-pressed')`), 'false', 'as marcas escondidas');

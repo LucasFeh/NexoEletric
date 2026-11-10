@@ -4,6 +4,25 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.95.1 — 2026-11-10
+
+**DRC do esquema: o contorno de "fora do almoxarifado" do tamanho do componente.**
+- O retângulo vermelho que atravessava a folha inteira na DMB era o da **CN2**: o conector de uma parte por via tem 6
+  vias, umas no lado esquerdo e outras no direito da folha, e a 1.95.0 juntava todas as partes do designador numa caixa
+  só (604→11248 mil). Agora as partes vizinhas (até 250 mil) viram um contorno só (o conector em coluna continua um
+  retângulo) e as distantes ficam cada uma no seu; a etiqueta sai uma vez, no primeiro.
+- O contorno do **C3** descia até o "10uF": o contorno usava a caixa de seleção do símbolo, que conta o ARCO pelo
+  círculo inteiro — a placa curva do eletrolítico é um arco de 58° de raio 160, e o círculo cheio esticava a caixa 300
+  mil para fora do corpo. O contorno passa a usar só o corpo + pinos (`HubDraw.symCorpoBBox`: o arco pelo pedaço
+  desenhado, sem os textos do desenho; designador, comment e parâmetros nunca entraram), com limite de sanidade (caixa
+  com mais de 12000 mil de lado ou 40× a área dos pinos cai para a dos pinos). A caixa de seleção e a posição do
+  designador não mudam.
+- O triângulo amarelo não usa caixa nenhuma: fica na ponta do pino (a coordenada do pino solto), e não mudou.
+- Medido nas cópias de todos os projetos (32, 2218 contornos, `tests/smoke-contornos.js`): os maiores eram uniões de
+  partes distantes (SHP2 CN1 16520×30810 mil, CN2/CN3/CN4 ~21670×5900, PRJ-UR CN1 14247×9277, DMB CN2 10643×1502);
+  agora os maiores são símbolos altos de verdade (o PIC18F4620 1200×6900, o ESP32 1350×6650) e colunas de conector
+  (CN5 226×4806).
+
 ## 1.95.0 — 2026-11-10
 
 **DRC do esquema: o triângulo amarelo no pino desconectado, o vermelho no fora do almoxarifado e a lista de tudo.**

@@ -1671,6 +1671,52 @@ function compBBox(c){
   }
   return { x1, y1, x2, y2 };
 }
+/* 1.95.1: a caixa do CONTORNO do DRC (o "fora do almoxarifado"): só o corpo do símbolo + os pinos (D.symCorpoBBox, sem
+   os textos do desenho; designador, comment e parâmetros nunca entraram), na folha (compTransform). Limite de sanidade:
+   uma caixa absurda (mais de 12000 mil de lado — meia folha A1 —, ou 40× a área da caixa dos pinos) cai para a dos
+   pinos, com folga. (Símbolo alto de verdade, como o PIC18F4620 de 7 polegadas, fica com a caixa dele.) */
+function caixaDoContorno(c){
+  const sym = HubCore.symbolOf(SLIB, c.sym), part = HubCore.partOf(sym, c.part);
+  const emg = part ? null : desenhoDeEmergencia(c);
+  const pt = part || (emg && emg.part) || null;
+  const tf = HubCore.compTransform(c);
+  const mundo = bb => {
+    let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+    for (const [lx, ly] of [[bb.x1, bb.y1], [bb.x2, bb.y1], [bb.x2, bb.y2], [bb.x1, bb.y2]]){
+      const w = tf.map(lx, ly);
+      if (w.x < x1) x1 = w.x; if (w.x > x2) x2 = w.x; if (w.y < y1) y1 = w.y; if (w.y > y2) y2 = w.y;
+    }
+    return { x1, y1, x2, y2 };
+  };
+  if (!pt) return mundo({ x1:-100, y1:-100, x2:100, y2:100 });
+  const b = mundo(D.symCorpoBBox(pt));
+  const pins = pt.pins || [];
+  if (pins.length){
+    const pb = mundo(D.symCorpoBBox({ pins }));
+    const area = q => Math.max(1, (q.x2 - q.x1)) * Math.max(1, (q.y2 - q.y1));
+    if (b.x2 - b.x1 > 12000 || b.y2 - b.y1 > 12000 || area(b) > 40 * Math.max(area(pb), 200 * 200))
+      return { x1:pb.x1 - 100, y1:pb.y1 - 100, x2:pb.x2 + 100, y2:pb.y2 + 100 };
+  }
+  return b;
+}
+/* as caixas das partes de um componente juntadas só quando estão perto (o conector de N vias em coluna vira um
+   contorno só), e as partes LONGE (a CN2 da DMB tem vias na esquerda e na direita da folha) ficam cada uma no seu —
+   juntar tudo traçava um retângulo atravessando a folha inteira */
+function agrupaCaixas(bs, folga){
+  const g = bs.map(b => Object.assign({}, b));
+  let mudou = true;
+  while (mudou){
+    mudou = false;
+    for (let i = 0; i < g.length && !mudou; i++) for (let j = i + 1; j < g.length && !mudou; j++){
+      const a = g[i], b = g[j];
+      if (a.x1 - folga <= b.x2 && b.x1 - folga <= a.x2 && a.y1 - folga <= b.y2 && b.y1 - folga <= a.y2){
+        g[i] = { x1:Math.min(a.x1, b.x1), y1:Math.min(a.y1, b.y1), x2:Math.max(a.x2, b.x2), y2:Math.max(a.y2, b.y2) };
+        g.splice(j, 1); mudou = true;
+      }
+    }
+  }
+  return g;
+}
 /* ------- o designador e o comment na folha -------
    ONDE ELES POUSAM, e por que a conta mudou. Ate 2026-09-16 a ancora saia do bbox LOCAL do
    simbolo e usava `max(|y1|,|y2|)`, duas coisas erradas ao mesmo tempo:
@@ -5461,7 +5507,7 @@ function ercRoda(){
     const av = c => { if (!cacheAv.has(c)) cacheAv.set(c, avisosDoComp(c)); return cacheAv.get(c); };
     ERC_RES = ERC.rodar({
       hc: HubCore, schematic, nets, slib: SLIB, plib: PLIB, suprimidos: supr,
-      caixaDoComp: c => compBBox(c),
+      caixaDoComp: c => caixaDoContorno(c),
       footprintExiste: nome => !!HubCore.footprintOf(PLIB, nome),
       foraDoAlmox: c => av(c).fora,
       /* os avisos do botão Parâmetros, menos os que já têm regra própria (o sem ficha = fora do almoxarifado; o
@@ -5516,6 +5562,9 @@ function ercIrPara(v){
   cam.draw();
 }
 var ercFoco = null;
+function contornosDoRef(sh, ref){
+  return agrupaCaixas(sh.comps.filter(c => String(c.ref) === String(ref)).map(caixaDoContorno), 250);
+}
 /* as marcas do DRC na folha ativa (só na tela) */
 function desenhaErcNaTela(ctx, cam){
   if (!ERC || !ERC_RES) return;
@@ -5528,13 +5577,10 @@ function desenhaErcNaTela(ctx, cam){
       if (v.sheet !== sh.name) continue;
       if (v.regra === 'fora-almox' && !feitos.has(v.ref)){
         feitos.add(v.ref);
-        /* um contorno só em volta de todas as partes do componente nesta folha (o conector de N vias é um componente) */
-        let u = null;
-        for (const c of sh.comps) if (String(c.ref) === String(v.ref)){
-          const b = compBBox(c);
-          u = u ? { x1:Math.min(u.x1, b.x1), y1:Math.min(u.y1, b.y1), x2:Math.max(u.x2, b.x2), y2:Math.max(u.y2, b.y2) } : b;
-        }
-        if (u) ERC.foraDoAlmox(ctx, u, px);
+        /* as partes do componente nesta folha: as vizinhas num contorno só, as distantes cada uma no seu; a etiqueta
+           só no primeiro grupo (1.95.1) */
+        const gs = contornosDoRef(sh, v.ref);
+        gs.forEach((b, i) => ERC.foraDoAlmox(ctx, b, px, i ? '' : undefined));
       }
     }
     for (const v of ERC_RES.violacoes)
@@ -7488,6 +7534,14 @@ window.HubMcpVista = {
   },
   comando(nome){ if (typeof nome !== 'string' || !nome) return false; return fazAcao(nome) !== false; },
   captura(){ return cv; },
+  /* 1.95.1 (conferência, só leitura): os contornos de "fora do almoxarifado" da folha ativa como a tela os desenha, e a
+     caixa de seleção de cada componente — para o teste medir que nenhum contorno fica desproporcional */
+  contornosErc(){
+    const sh = model.sheets[sheetIdx];
+    if (!sh) return [];
+    const refs = [...new Set(sh.comps.map(c => String(c.ref)))];
+    return refs.map(r => ({ ref:r, caixas:sh.comps.filter(c => String(c.ref) === r).map(compBBox), contornos:contornosDoRef(sh, r) }));
+  },
 };
 window.addEventListener('beforeunload', e => { if (schDirty){ e.preventDefault(); e.returnValue = ''; } });
 

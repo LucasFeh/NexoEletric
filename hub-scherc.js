@@ -250,8 +250,8 @@ function foraDoAlmox(ctx, b, px, texto){
   ctx.strokeRect(b.x1 - m, b.y1 - m, b.x2 - b.x1 + 2 * m, b.y2 - b.y1 + 2 * m);
   ctx.setLineDash([]);
   const h = 38;
-  if (h / px >= 6) {                          /* a letra com menos de 6 px não se lê: fica só o contorno */
-    const t = texto || 'fora do almoxarifado';
+  const t = texto === undefined ? 'fora do almoxarifado' : String(texto || '');   /* '' = só o contorno (as outras partes) */
+  if (t && h / px >= 6) {                     /* a letra com menos de 6 px não se lê: fica só o contorno */
     ctx.translate(b.x1 - m, b.y2 + m);
     ctx.scale(1, -1);
     ctx.font = '600 ' + h + 'px "Segoe UI", sans-serif';

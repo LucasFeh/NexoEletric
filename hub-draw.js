@@ -171,6 +171,35 @@ function symBBox(part){
   return { x1, y1, x2, y2 };
 }
 
+/* 1.95.1: a caixa do CORPO do símbolo + pinos, sem os textos (`label`: o "+" do eletrolítico, nomes soltos), que o
+   symBBox engorda em ±100×±50 cada — é a que o contorno do DRC do esquema usa (o "fora do almoxarifado" do C3 descia até
+   o "10uF"). O ARCO entra só pelo pedaço desenhado (sa→ea), não pelo círculo inteiro: a placa curva do eletrolítico é
+   um arco de 58° de raio 160, e o círculo cheio esticava a caixa 300 mil para fora do corpo. Sem gráfico nem pino, a
+   de sempre. */
+function arcoExt(g, ext){
+  const sa = isFinite(g.sa) ? +g.sa : 0, ea0 = isFinite(g.ea) ? +g.ea : 360;
+  let ea = ea0; while (ea <= sa) ea += 360;
+  if (ea - sa >= 360) { ext(g.cx-g.r,g.cy-g.r); ext(g.cx+g.r,g.cy+g.r); return; }
+  const pt = a => { const r = a * Math.PI / 180; ext(g.cx + g.r * Math.cos(r), g.cy + g.r * Math.sin(r)); };
+  pt(sa); pt(ea);
+  for (let a = Math.ceil(sa / 90) * 90; a < ea; a += 90) pt(a);
+}
+function symCorpoBBox(part){
+  let x1=1e9, y1=1e9, x2=-1e9, y2=-1e9;
+  const ext=(x,y)=>{ if(x<x1)x1=x; if(x>x2)x2=x; if(y<y1)y1=y; if(y>y2)y2=y; };
+  for (const g of (part.graphics || [])) {
+    if (g.g==='rect'||g.g==='line'){ ext(g.x1,g.y1); ext(g.x2,g.y2); }
+    else if (g.g==='arc'){ arcoExt(g, ext); }
+    else if (g.g==='ellipse'){ ext(g.cx-g.rx,g.cy-g.ry); ext(g.cx+g.rx,g.cy+g.ry); }
+    else if (g.g==='poly'||g.g==='polyline'){ (g.pts||[]).forEach(p=>ext(p[0],p[1])); }
+  }
+  for (const p of (part.pins || [])) {
+    const d = OD[((p.orient%360)+360)%360] || [1,0];
+    ext(p.x,p.y); ext(p.x+d[0]*p.len, p.y+d[1]*p.len);
+  }
+  return x1 > x2 ? symBBox(part) : { x1, y1, x2, y2 };
+}
+
 /* ---------- footprint (coords locais, mm) ---------- */
 function drawFootprint(ctx, fp, opts){
   for (const s of (fp.silk || [])) {
@@ -691,7 +720,7 @@ function formaBBox(it){
 }
 
 return { SCH, PCB, OD, worldText, roundRect, dePe, drawSymbolPart, mirrorPart, symBBox, drawFootprint,
-         drawPowerPort, powerBBox, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, drawNoERC, mkCamera,
+         symCorpoBBox, drawPowerPort, powerBBox, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, drawNoERC, mkCamera,
          PORT_SETAS, PORT_ALINHA, PORT_FONTES, PORT_IO, PORT_PADRAO, PORT_CAMPOS, portLargura, portEstiloAltium, portEmPe,
          portAcerta, portNova, portEstilo,
          FORMAS, FORMA_NOME, FORMA_COR, FORMA_LARG, formaLarg, formaCaixa, formaContorno, drawForma, formaPerto, formaBBox };
