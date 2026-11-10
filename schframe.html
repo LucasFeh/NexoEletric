@@ -177,6 +177,18 @@
   .pr-cor-x{width:15px; height:15px; line-height:1; padding:0; font-size:12px; cursor:pointer;
     color:var(--fg-dim); background:none; border:1px solid var(--border); border-radius:3px;}
   .pr-cor-x:disabled{opacity:.25; cursor:default;}
+  /* a ficha da port (1.94.0): a grade compacta da ficha, dois controles por linha quando cabem */
+  .pr-port{display:grid; grid-template-columns:64px minmax(0,1fr); gap:4px 8px; font-size:12px; align-items:center; margin-top:4px;}
+  .pr-port .k{color:var(--fg-dim);}
+  .pr-port-v{display:flex; align-items:center; gap:6px; min-width:0;}
+  .pr-port-v select{flex:1 1 0; min-width:0;}
+  .pr-port-v .pr-port-num{width:58px; flex:none;}
+  .pr-port-un{color:var(--fg-dim); font-size:11px;}
+  .pr-port-cor{width:30px; height:20px; padding:0; border:1px solid var(--border); background:none; cursor:pointer; flex:none;}
+  .pr-port-cor.padrao{opacity:.5;}
+  .pr-port-chk{display:inline-flex; align-items:center; gap:4px; color:var(--fg-dim); font-size:11px; white-space:nowrap;}
+  .pr-port-bts{display:flex; gap:6px; margin-top:8px;}
+  .pr-port-bts button{flex:1; height:24px; font-size:11px;}
   .pr-tab{width:100%; border-collapse:collapse; font:11px var(--mono);}
   .pr-tab th{font:10px var(--font); text-transform:uppercase; letter-spacing:.06em;
     color:var(--fg-dim); font-weight:400; text-align:left; padding:2px 4px; border-bottom:1px solid var(--border);}
@@ -657,10 +669,10 @@
            A face e a setinha NAO levam class="pw" nem ficam dentro da lista, pelo mesmo
            motivo do #btnAdd abaixo. -->
       <span class="gaveta" id="gavPouso">
-        <button id="tbPouso" aria-pressed="false" title="Pousos: GND, 3V3, 5V5, VIN, net e No ERC">
+        <button id="tbPouso" aria-pressed="false" title="Pousos: GND, 3V3, 5V5, VIN, net, port e No ERC">
           <svg viewBox="0 0 24 24"><path d="M12 4v7M5 11h14M8 15h8M10.5 19h3"/></svg><span class="lb">GND</span></button>
         <button class="gav-seta" id="tbPousoSeta" aria-expanded="false" aria-controls="gavPousoLista"
-                aria-label="Abrir a gaveta dos pousos" title="Outros pousos: GND, 3V3, 5V5, VIN, net e No ERC">
+                aria-label="Abrir a gaveta dos pousos" title="Outros pousos: GND, 3V3, 5V5, VIN, net, port e No ERC">
           <svg viewBox="0 0 8 5"><path d="M0 0h8L4 5z"/></svg></button>
         <div class="gav-lista" id="gavPousoLista" role="group" aria-label="Pousos" hidden>
           <button class="pw" data-net="GND" data-style="GndPower" aria-pressed="false" title="Terra (GND)">
@@ -674,6 +686,9 @@
           <span class="gav-sep"></span>
           <button id="tbNet" aria-pressed="false" title="Rótulo de net (L) — uma palavra; dois rótulos com o mesmo nome viram a mesma net, como no Altium">
             <svg viewBox="0 0 24 24"><path d="M3 16h5l3-8 3 8h5"/><path d="M4 20h16"/></svg><span class="lb">net</span></button>
+          <!-- 1.94.0: a Port do Altium (o mesmo objeto da port importada), estilizável na ficha -->
+          <button id="tbPort" aria-pressed="false" title="Port — o nome liga as nets como no Altium (mesmo nome = mesma net); borda, fundo, texto, fonte e seta na ficha">
+            <svg viewBox="0 0 24 24"><path d="M3 8h13l5 4-5 4H3z"/></svg><span class="lb">port</span></button>
           <span class="gav-sep"></span>
           <button id="tbNoErc" aria-pressed="false" title="No ERC — marca um pino como sem ligação DE PROPÓSITO; o X viaja para o Altium como a diretiva No ERC">
             <svg viewBox="0 0 24 24" stroke="#cc0000"><path d="M6 6l12 12M18 6L6 18"/></svg><span class="lb">No ERC</span></button>
@@ -743,7 +758,7 @@
          pergunta e este campo no tema da pagina -->
     <div id="netform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
          background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;">
-      <div style="font:11px var(--font); color:var(--fg2); margin-bottom:5px;">
+      <div id="netformTit" style="font:11px var(--font); color:var(--fg2); margin-bottom:5px;">
         nome da net — pouse o mesmo nome em dois pontos e eles viram a mesma rede</div>
       <input id="nettext" type="text" placeholder="ex: SDA" autocomplete="off" spellcheck="false"
         style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);

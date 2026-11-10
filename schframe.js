@@ -2082,8 +2082,11 @@ function giraFormaETexto(itens){
 }
 function rotateSel(){
   const comps = selItens().filter(it => it.t === 'comp');
+  /* a port gira fora do arrasto, como a forma e o texto (1.94.0) */
+  const ports = mouse && mouse.mode === 'move' ? [] : selItens().filter(it => it.t === 'port');
+  for (const p of ports) giraPort(p);
   if (!comps.length){
-    if (!(mouse && mouse.mode === 'move') && giraFormaETexto(selItens())) commit();
+    if ((!(mouse && mouse.mode === 'move') && giraFormaETexto(selItens())) || ports.length) commit();
     return;
   }
   if (!(mouse && mouse.mode === 'move')) giraFormaETexto(selItens());
@@ -2136,7 +2139,10 @@ function mirrorSel(eixo){
       if (vira) it.rot = (r + 180) % 360;
     }
   }
-  if (!comps.length){ if (formas.length) commit(); return; }
+  let portsMudaram = false;
+  if (!(mouse && mouse.mode === 'move'))
+    for (const p of selItens().filter(it => it.t === 'port')) if (espelhaPort(p, eixo === 'y' ? 'y' : 'x')) portsMudaram = true;
+  if (!comps.length){ if (formas.length || portsMudaram) commit(); return; }
   retratoDoGiro(comps);
   for (const c of comps){
     const r = espelha(c.rot, !!c.mirror, eixo === 'y' ? 'y' : 'x');
@@ -2792,6 +2798,55 @@ function placeLabel(w){
                          x: hs ? hs.x : snapG(w.x), y: hs ? hs.y : snapG(w.y), rot:0 });
   commit();
 }
+/* ── A PORT (1.94.0, pedido do dono: "em 'net' adiciona 'port' também pra adicionar esse tipo de porta, e quero que
+   seja completamente estilizável") ──
+   O MESMO objeto `port` da port importada do Altium (hub-draw.js » portNova): conecta pelo nome como o rótulo (o
+   extractNets já a trata como nomeador) e a âncora — a ponta da esquerda, onde o fio encosta — vai no ímã do pino ou
+   do fio. O estilo é o padrão da casa (o da imagem do dono) ou o "Usar como padrão" deste projeto (portPadrao). */
+const PORT_PADRAO_KEY = () => 'schframe.portPadrao.' + (SCH_P || '');
+function portPadrao(){
+  try { const j = JSON.parse(localStorage.getItem(PORT_PADRAO_KEY()) || 'null'); return j && typeof j === 'object' ? j : null; }
+  catch (e) { return null; }
+}
+function guardaPortPadrao(p){
+  const est = {};
+  for (const k of D.PORT_CAMPOS) if (p[k] !== undefined && k !== 'w') est[k] = p[k];
+  if (p.larguraAuto === false && p.w) est.w = p.w;
+  try { localStorage.setItem(PORT_PADRAO_KEY(), JSON.stringify(est)); } catch (e) { /* sem storage */ }
+}
+/* quem não edita o projeto (visualizador, fora da equipe) não pousa — a mensagem é a do HubEquipe */
+function bloqueioDeEdicao(){
+  return typeof HubEquipe !== 'undefined' && HubEquipe.bloqueia ? HubEquipe.bloqueia(SCH_REL) : null;
+}
+function portEmMao(w){
+  const x = snapHit ? snapHit.x : snapG(w.x), y = snapHit ? snapHit.y : snapG(w.y);
+  return D.portNova({ sheet:model.sheets[sheetIdx].name, net:toolNet, x, y, estilo:portPadrao() });
+}
+function placePort(w){
+  if (!toolNet) return;
+  const nao = bloqueioDeEdicao();
+  if (nao){ HubDialog.toast(nao, 'warn', 6000); setTool('select'); return; }
+  const hs = snapPoint(w, true);
+  const p = D.portNova({ sheet:model.sheets[sheetIdx].name, net:toolNet,
+                         x: hs ? hs.x : snapG(w.x), y: hs ? hs.y : snapG(w.y), estilo:portPadrao() });
+  schematic.items.push(p);
+  commit();
+}
+/* girar a port: deitada ↔ em pé, como o Altium (a âncora fica; o 180° troca a ponta de lado) */
+function giraPort(p){
+  if (D.portEmPe(p)){
+    if (p.seta === 'esquerda') p.seta = 'direita'; else if (p.seta === 'direita') p.seta = 'esquerda';
+    D.portAcerta(p, false);
+  } else D.portAcerta(p, true);
+}
+/* espelhar a port no eixo dela troca a ponta de lado (a barra fica onde está) */
+function espelhaPort(p, eixo){
+  const emPe = D.portEmPe(p);
+  if ((eixo === 'x') === emPe) return false;
+  if (p.seta === 'esquerda') p.seta = 'direita'; else if (p.seta === 'direita') p.seta = 'esquerda'; else return false;
+  D.portAcerta(p, emPe);
+  return true;
+}
 /* ------- a gaveta dos pousos -------
    GND, 3V3, 5V5, VIN, o rotulo de net e o No ERC moram num botao so, como na Active Bar do
    Altium: a FACE e o ultimo pouso usado — clicar nela usa de novo —, e a setinha no canto (ou
@@ -2815,6 +2870,7 @@ function gavAbre(sim){
 function gavDaFerramenta(t, pw){
   if (t === 'power' && pw) return gavItens().find(b => b.dataset.net === pw.net) || null;
   if (t === 'label') return $('tbNet');
+  if (t === 'port') return $('tbPort');
   if (t === 'noerc') return $('tbNoErc');
   return null;
 }
@@ -2874,12 +2930,13 @@ function setTool(t, pw){
   if (tool === 'wire' && t !== 'wire') $('shover').textContent = '';
   tool = t; toolPower = pw || null; wireDraw = null; snapHit = null; fioCursor = null;
   soFio = false;        /* toda troca de ferramenta larga o "so fios" — quem o quer liga depois (setSoFio) */
-  if (t !== 'label') toolNet = '';
+  if (t !== 'label' && t !== 'port') toolNet = '';
   if (t !== 'texto') hideTxtForm();
   pintaFormas();
   pintaSelecao();
   $('tbWire').setAttribute('aria-pressed', String(t === 'wire'));
   $('tbNet').setAttribute('aria-pressed', String(t === 'label'));
+  $('tbPort').setAttribute('aria-pressed', String(t === 'port'));
   $('tbNoErc').setAttribute('aria-pressed', String(t === 'noerc'));
   for (const b of document.querySelectorAll('#schtb .pw'))
     b.setAttribute('aria-pressed', String(t === 'power' && !!pw && b.dataset.net === pw.net));
@@ -3413,6 +3470,7 @@ function leftClick(e){
   if (tool === 'wire'){ wireClick(w); return; }
   if (tool === 'power'){ placePower(w); return; }
   if (tool === 'label'){ placeLabel(w); return; }
+  if (tool === 'port'){ placePort(w); return; }
   if (tool === 'noerc'){ placeNoERC(w); return; }
   if (tool === 'forma'){ formaPadrao(w); return; }
   if (tool === 'texto'){ openTxtForm({ x:snapG(w.x), y:snapG(w.y) }); return; }
@@ -4392,6 +4450,94 @@ function secFolha(){
     enquadra: () => cam.fit(fitBBox()), contaFora: med => contaFora(sheetIdx, med) }));
   return s;
 }
+/* ── A FICHA DA PORT (1.94.0): nome, seta, tipo, largura, borda, fundo e texto — para uma port ou várias ──
+   Cada troca é um commit (Ctrl+Z desfaz) e vale para todas as marcadas; o campo que difere entre elas fica em branco
+   ("—"). "Usar como padrão" guarda o estilo da primeira para as próximas ports deste projeto (nesta máquina). */
+function secPortEstilo(s, ports){
+  const nao = bloqueioDeEdicao() || (VAR.on ? MSG_VAR() : null);
+  const p0 = ports[0];
+  const igual = k => ports.every(p => p[k] === p0[k]);
+  const val = (k, padrao) => igual(k) ? (p0[k] !== undefined ? p0[k] : padrao) : undefined;
+  const aplica = (est, aviso) => {
+    if (nao){ HubDialog.toast(nao, 'warn', 5000); renderProps(); return; }
+    for (const p of ports) D.portEstilo(p, est);
+    commit();
+    if (aviso) HubDialog.toast(aviso, 'ok');
+  };
+  const grade = el('div', 'pr-port');
+  s.append(grade);
+  const rot = (txt) => el('span', 'k', txt);
+  const lin = (k, ...nodes) => { const v = el('span', 'v pr-port-v'); v.append(...nodes); grade.append(rot(k), v); return v; };
+  const escolha = (ops, atual, fn, titulo) => {
+    const x = el('select', 'pr-inp'); if (titulo) x.title = titulo;
+    if (atual === undefined){ const o = el('option', null, '—'); o.value = ''; x.append(o); }
+    for (const [v, t] of ops){ const o = el('option', null, t); o.value = String(v); x.append(o); }
+    x.value = atual === undefined ? '' : String(atual);
+    x.addEventListener('change', () => { if (x.value !== '') fn(x.value); });
+    x.disabled = Boolean(nao);
+    return x;
+  };
+  const cor = (atual, padrao, fn, titulo) => {
+    const c = el('input', 'pr-port-cor'); c.type = 'color'; c.title = titulo;
+    c.value = /^#[0-9a-f]{6}$/i.test(atual || '') ? atual : padrao;
+    if (atual === undefined) c.classList.add('padrao');
+    c.addEventListener('change', () => fn(String(c.value).toLowerCase()));
+    c.disabled = Boolean(nao);
+    return c;
+  };
+  if (ports.length === 1){
+    const n = prCampo(p0.net || '', 'o nome da port (Enter grava): o mesmo nome liga as nets', i => {
+      const v = i.value.trim().replace(/"/g, "'");
+      if (!v){ i.value = p0.net || ''; HubDialog.toast('a port precisa de nome', 'warn'); return; }
+      if (nao){ i.value = p0.net || ''; HubDialog.toast(nao, 'warn', 5000); return; }
+      if (v !== p0.net){ p0.net = v; D.portAcerta(p0); commit(); }
+    });
+    n.dataset.campo = 'port-nome'; n.disabled = Boolean(nao);
+    lin('Nome', n);
+  }
+  lin('Seta', escolha([['nenhuma', 'nenhuma'], ['esquerda', '◁ esquerda'], ['direita', 'direita ▷'], ['ambos', '◁ ambos ▷']],
+    igual('seta') ? (p0.seta || 'ambos') : undefined, v => aplica({ seta:v }), 'onde vai a ponta (esquerda = a ponta que liga)'));
+  lin('Tipo', escolha(D.PORT_IO, val('io', 0), v => aplica({ io:+v }), 'o tipo de E/S do Altium (I/O Type)'));
+  const auto = ports.every(p => p.larguraAuto), fixa = ports.every(p => !p.larguraAuto);
+  const wIn = prCampo(fixa && igual('w') ? Math.round(p0.w || 400) : '', 'largura fixa, em mil (Enter grava)', i => {
+    const v = parseFloat(String(i.value).replace(',', '.'));
+    if (!(v >= 100 && v <= 5000)){ HubDialog.toast('largura entre 100 e 5000 mil', 'warn'); renderProps(); return; }
+    aplica({ larguraAuto:false, w:Math.round(v) });
+  }, { cls:'pr-port-num' });
+  wIn.disabled = Boolean(nao) || auto;
+  lin('Largura', escolha([['auto', 'automática'], ['fixa', 'fixa']], auto ? 'auto' : fixa ? 'fixa' : undefined,
+    v => aplica(v === 'auto' ? { larguraAuto:true } : { larguraAuto:false, w:Math.round(D.portGeom(p0).w) }), 'automática acompanha o nome'), wIn,
+    el('span', 'pr-port-un', 'mil'));
+  lin('Borda', cor(val('color'), D.SCH.port, v => aplica({ color:v }), 'cor da borda'),
+    escolha([[2, 'fina'], [4, 'normal'], [6, 'média'], [10, 'grossa'], [16, 'muito grossa']].concat(
+      igual('bordaW') && p0.bordaW && ![2, 4, 6, 10, 16].includes(p0.bordaW) ? [[p0.bordaW, p0.bordaW + ' mil']] : []),
+      val('bordaW', 4), v => aplica({ bordaW:+v }), 'espessura da borda'));
+  const transp = ports.every(p => p.fill === 'none');
+  const tCx = el('input'); tCx.type = 'checkbox'; tCx.checked = transp; tCx.disabled = Boolean(nao);
+  tCx.addEventListener('change', () => aplica({ fill: tCx.checked ? 'none' : '#ffffff' }));
+  const tLb = el('label', 'pr-port-chk'); tLb.append(tCx, document.createTextNode('transparente'));
+  const fCor = cor(transp ? undefined : val('fill'), D.SCH.portFill, v => aplica({ fill:v }), 'cor do fundo');
+  fCor.disabled = Boolean(nao) || transp;
+  lin('Fundo', fCor, tLb);
+  lin('Texto', escolha([['esquerda', 'à esquerda'], ['centro', 'centro'], ['direita', 'à direita']], val('alinha', 'centro'),
+    v => aplica({ alinha:v }), 'posição do texto na barra'),
+    escolha([[30, '30'], [38, '38'], [45, '45'], [55, '55'], [70, '70'], [90, '90']].concat(
+      igual('txtH') && p0.txtH && ![30, 38, 45, 55, 70, 90].includes(p0.txtH) ? [[p0.txtH, String(p0.txtH)]] : []),
+      val('txtH', 45), v => aplica({ txtH:+v }), 'tamanho do texto, em mil'));
+  lin('Fonte', escolha(D.PORT_FONTES.map(f => [f, f]), val('fonte', 'Segoe UI'), v => aplica({ fonte:v }), 'a fonte do nome'),
+    cor(val('textColor'), D.SCH.portText, v => aplica({ textColor:v }), 'cor do texto'));
+  const bts = el('div', 'pr-port-bts');
+  const bPad = el('button', null, 'Usar como padrão'); bPad.type = 'button';
+  bPad.title = 'as próximas ports deste projeto (nesta máquina) nascem com este estilo';
+  bPad.addEventListener('click', () => { guardaPortPadrao(p0); HubDialog.toast('as próximas ports nascem com este estilo', 'ok'); });
+  const bCasa = el('button', null, 'Estilo da casa'); bCasa.type = 'button';
+  bCasa.title = 'volta ao estilo padrão (borda azul, fundo branco, texto azul centralizado, ponta à direita)';
+  bCasa.disabled = Boolean(nao);
+  bCasa.addEventListener('click', () => aplica(Object.assign({}, D.PORT_PADRAO), 'estilo da casa'));
+  bts.append(bPad, bCasa);
+  s.append(bts);
+  if (nao) s.append(el('p', 'pr-empty', nao));
+}
 /* ── A FICHA DA FORMA E DO TEXTO LIVRE (1.82.0) ──
    Diferente do resto da ficha, aqui tudo e editavel: e desenho, nao eletrica. Cada troca e um commit (Ctrl+Z desfaz). */
 function prEscolha(box, rotulo, opcoes, atual, aplica){
@@ -4477,8 +4623,16 @@ function renderProps(){
   if (!itens.length){
     const s = prSec(null);
     s.append(el('p', 'pr-empty', 'Clique num componente, fio ou pouso de alimentação para ver a ficha dele. '
-      + 'Aqui se olha e se posiciona; a única propriedade editável de um item é a cor da port. Valor, '
+      + 'Aqui se olha e se posiciona; a port tem o estilo dela aqui (borda, fundo, texto, fonte, seta). Valor, '
       + 'footprint e parâmetro são editados pela IA, no schematic.js.'));
+    body.append(s);
+    return prPreview(false, null, null);
+  }
+  /* VÁRIAS PORTS: o estilo vale para todas de uma vez (1.94.0) */
+  if (itens.length > 1 && itens.every(it => it.t === 'port')){
+    const s = prSec('ports');
+    s.append(el('div', 'pr-title', itens.length + ' ports'));
+    secPortEstilo(s, itens);
     body.append(s);
     return prPreview(false, null, null);
   }
@@ -4562,19 +4716,14 @@ function renderProps(){
       s.append(el('div', 'pr-title', it.net || it.s || (NOME[it.t] || it.t)));
       /* `!= null` e nao `if (it.style)`: estilo 0 e um estilo, e e o de TODA port dos
          espelhos reais — o teste de verdade escondia o campo justamente onde ele existe */
-      if (it.style != null) prKv(s, 'Estilo', it.style);
-      if (it.t === 'port' && it.w != null) prKv(s, 'Largura', Math.round(it.w) + ' mil');
+      if (it.style != null && it.t !== 'port') prKv(s, 'Estilo', it.style);
       if (it.t === 'text') prKv(s, 'Altura', (it.h || 10) + ' mil');
       prKv(s, 'Posição', it.x + ' , ' + it.y + ' mil', 'mono');
       if (it.rot != null) prKv(s, 'Rotação', (((it.rot % 360) + 360) % 360) + '°');
       /* As unicas propriedades EDITAVEIS da ficha. Cor de port e coisa de desenho, nao de
          eletrica: mudar aqui nao mexe em net nenhuma, e e o mesmo ajuste que se faz no
          Altium. O resto da ficha continua so de leitura. */
-      if (it.t === 'port'){
-        prCor(s, 'Preenchimento', it, 'fill',      D.SCH.portFill);
-        prCor(s, 'Texto',         it, 'textColor', D.SCH.portText);
-        prCor(s, 'Borda',         it, 'color',     D.SCH.port);
-      }
+      if (it.t === 'port') secPortEstilo(s, [it]);
     }
     prKv(s, 'Folha', it.sheet);
     body.append(s);
@@ -5305,6 +5454,11 @@ function drawFerramenta(ctx, cam){
     D.drawNetLabel(ctx, { x, y, net:toolNet, rot:0 });
     ctx.restore();
   }
+  if (tool === 'port' && toolNet && hoverW){
+    ctx.save(); ctx.globalAlpha = 0.6;
+    D.drawPort(ctx, portEmMao(hoverW));
+    ctx.restore();
+  }
   /* as guias do arrasto, por baixo do alvo do ima */
   if (GUIAS && mouse && mouse.mode === 'move' && mouse.moved && mouse.cena)
     GUIAS.desenha(ctx, mouse.cena, { escala:cam.scale, fmt:fmtMedida });
@@ -5516,6 +5670,7 @@ const cam = D.mkCamera(cv, drawWorld, {
       else $('shover').textContent = snapHit ? '⊙ ' + snapHit.label
         : (tool === 'wire' ? (wireDraw ? 'clique para o próximo ponto · botão direito encerra' : 'clique para começar o fio')
         :  tool === 'label' ? 'clique para pousar o rótulo ' + toolNet
+        :  tool === 'port' ? 'clique para pousar a port ' + toolNet + ' (a ponta da esquerda é a que liga)'
         :  tool === 'noerc' ? 'clique no pino que fica sem ligar de propósito'
                            : 'clique para pousar ' + (toolPower ? toolPower.net : ''));
       cam.draw();
@@ -5636,7 +5791,12 @@ function nowStr(){
    A ferramenta so e armada DEPOIS que a palavra existe: um netlabel com net vazio e erro
    de validacao (hub-core.js) e travaria o Salvar do arquivo inteiro. */
 function hideNetForm(){ $('netform').style.display = 'none'; }
-function openNetForm(){
+let netFormModo = 'label';
+function openNetForm(modo){
+  netFormModo = modo === 'port' ? 'port' : 'label';
+  $('netformTit').textContent = netFormModo === 'port'
+    ? 'nome da port — o mesmo nome numa port, num rótulo ou noutra port vira a mesma net'
+    : 'nome da net — pouse o mesmo nome em dois pontos e eles viram a mesma rede';
   $('nettext').value = toolNet || '';
   $('netform').style.display = 'block';
   $('nettext').focus(); $('nettext').select();
@@ -5646,8 +5806,8 @@ function confirmaNetForm(){
   const nome = $('nettext').value.trim().replace(/"/g, "'");
   if (!nome){ HubDialog.toast('dê um nome à net', 'warn'); $('nettext').focus(); return; }
   hideNetForm();
-  toolNet = nome;          /* antes do setTool: ele so zera a palavra ao SAIR de 'label' */
-  setTool('label');
+  toolNet = nome;          /* antes do setTool: ele so zera a palavra ao SAIR de 'label' (ou 'port') */
+  setTool(netFormModo === 'port' ? 'port' : 'label');
 }
 $('netok').addEventListener('click', confirmaNetForm);
 $('netcancel').addEventListener('click', () => { hideNetForm(); setTool('select'); });
@@ -5660,6 +5820,13 @@ $('nettext').addEventListener('keydown', e => {
 $('tbNet').addEventListener('click', () => {
   if (tool === 'label'){ setTool('select'); hideNetForm(); return; }
   openNetForm();
+});
+$('tbPort').addEventListener('click', () => {
+  if (tool === 'port'){ setTool('select'); hideNetForm(); return; }
+  if (VAR.on){ HubDialog.toast(MSG_VAR(), 'warn', 5000); return; }
+  const nao = bloqueioDeEdicao();
+  if (nao){ HubDialog.toast(nao, 'warn', 6000); return; }
+  openNetForm('port');
 });
 /* ═══ Escolher um simbolo para um componente que nao foi identificado ═══
    37% dos componentes dos projetos reais chegam do Altium com um `sym` que nenhuma

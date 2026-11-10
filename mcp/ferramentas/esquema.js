@@ -5,6 +5,8 @@
 const { ArquivoLinhas } = require('../lib/arquivo-linhas.js');
 const { ErroMcp } = require('../lib/contexto.js');
 const { PROJETO, isNum } = require('../lib/util.js');
+/* a port estilizável (1.94.0): o mesmo motor da vista (hub-draw.js » portNova/portEstilo) */
+const HubDraw = require('../../hub-draw.js');
 
 const COMUNS = {
   simular: { type: 'boolean', description: 'true = só valida, não grava' },
@@ -364,8 +366,25 @@ function completa(it, arq, L, hc) {
   }
   if ((o.t === 'netlabel' || o.t === 'power') && o.rot == null) o.rot = 0;
   if (o.t === 'power' && !o.style) o.style = /gnd|terra|0v/i.test(o.net || '') ? 'GndPower' : 'Bar';
+  /* a port nova (1.94.0): sem nada de estilo, nasce como a da barra da vista (borda azul, fundo branco, ponta à
+     direita, largura pelo nome); com `estilo`, ele por cima. Port com os campos do Altium (style/io/w/cores) fica
+     como veio. */
+  if (o.t === 'port') {
+    if (!o.net || !String(o.net).trim()) throw new ErroMcp('port sem nome (net): o nome é o que liga as nets');
+    const doAltium = ['style', 'io', 'w', 'color', 'fill', 'textColor'].some(k => o[k] !== undefined);
+    if (!doAltium) {
+      const est = o.estilo;
+      const n = HubDraw.portNova({ sheet: o.sheet, net: o.net, x: o.x, y: o.y, emPe: o.em_pe === true });
+      if (est) { const ruins = HubDraw.portEstilo(n, est); if (ruins.length) throw new ErroMcp('estilo da port: ' + ruins.join(', ') + ' inválido(s) — ' + DICA_ESTILO_PORT); }
+      return n;
+    }
+    delete o.estilo;
+  }
   return o;
 }
+const DICA_ESTILO_PORT = 'seta: nenhuma|esquerda|direita|ambos; io: 0 não especificado|1 saída|2 entrada|3 bidirecional; '
+  + 'larguraAuto: true|false; w: 100..5000 mil; color/textColor: "#rrggbb"; fill: "#rrggbb" ou "none"; bordaW: 1..40 mil; '
+  + 'alinha: esquerda|centro|direita; txtH: 15..200 mil; fonte: ' + HubDraw.PORT_FONTES.join('|');
 
 /* "R1.2" (ref.pino) ou [x,y] -> {x, y, sheet} */
 function pontoSch(ctx, itens, L, v, nome) {
@@ -485,7 +504,7 @@ module.exports = {
     },
     {
       nome: 'sch_adicionar', titulo: 'Adicionar itens ao esquema',
-      descricao: 'Acrescenta itens ao schematic.js (um por linha, formato schmirror-v2): comp {sym, x, y, rot?, mirror?, ref? (sem ref ou "R?" = próximo livre), footprint? (padrão: o do símbolo), comment?, part?} — conector do almoxarifado (uma parte por via) sem part entra inteiro: as N vias numa coluna com o mesmo ref, wire {pts:[[x,y],...]}, netlabel {net,x,y}, power {net, style?, x, y, rot?}, port {net,x,y,io?,style?,w?}, junction {x,y}, noerc {x,y}, text {s,x,y}, sheet {name,size}. sheet padrão = a primeira folha. Coordenadas em mil, grade de 100. Valida (símbolo, footprint, pinos x pads, grade) antes de gravar.',
+      descricao: 'Acrescenta itens ao schematic.js (um por linha, formato schmirror-v2): comp {sym, x, y, rot?, mirror?, ref? (sem ref ou "R?" = próximo livre), footprint? (padrão: o do símbolo), comment?, part?} — conector do almoxarifado (uma parte por via) sem part entra inteiro: as N vias numa coluna com o mesmo ref, wire {pts:[[x,y],...]}, netlabel {net,x,y}, power {net, style?, x, y, rot?}, port {net,x,y,em_pe?,estilo?} (nasce no estilo da casa: borda azul, fundo branco, ponta à direita; estilo como no sch_port_estilo), junction {x,y}, noerc {x,y}, text {s,x,y}, sheet {name,size}. sheet padrão = a primeira folha. Coordenadas em mil, grade de 100. Valida (símbolo, footprint, pinos x pads, grade) antes de gravar.',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO,
         itens: { type: 'array', minItems: 1, items: { type: 'object', properties: { t: { type: 'string', enum: TIPOS_ITEM } }, required: ['t'], additionalProperties: true } } }, COMUNS),
         required: ['projeto', 'itens'] },
@@ -530,6 +549,44 @@ module.exports = {
           arq.substitui(i, n);
           return [n];
         }, { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_editar' });
+      },
+    },
+    {
+      nome: 'sch_port_estilo', titulo: 'Estilizar ports do esquema',
+      descricao: 'Muda o estilo de ports (o objeto port, o mesmo do Altium) de uma vez: as achadas por nome (nets) e/ou por '
+        + 'índice (sch_ler). Sem nets nem indices: todas as ports da folha (ou do esquema). Campos do estilo — ' + DICA_ESTILO_PORT
+        + '. A port continua ligando pelo nome; só o desenho muda (e o style/w que vão ao Altium).',
+      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO,
+        nets: { type: 'array', items: { type: 'string' }, description: 'os nomes das ports' },
+        indices: { type: 'array', items: { type: 'integer', minimum: 0 } },
+        folha: { type: 'string' },
+        estilo: { type: 'object', additionalProperties: true,
+          properties: { seta: { type: 'string', enum: HubDraw.PORT_SETAS }, io: { type: 'integer', enum: [0, 1, 2, 3] },
+            larguraAuto: { type: 'boolean' }, w: { type: 'number' }, color: { type: 'string' }, fill: { type: 'string' },
+            bordaW: { type: 'number' }, alinha: { type: 'string', enum: HubDraw.PORT_ALINHA }, txtH: { type: 'number' },
+            fonte: { type: 'string', enum: HubDraw.PORT_FONTES }, textColor: { type: 'string' } } } }, COMUNS),
+        required: ['projeto', 'estilo'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        return transacao(ctx, p, arq => {
+          const nets = new Set((a.nets || []).map(String));
+          const idx = new Set(a.indices || []);
+          const alvos = [];
+          arq.itens.forEach((it, i) => {
+            if (!it || it.t !== 'port') return;
+            if (a.folha && it.sheet !== a.folha) return;
+            if ((nets.size || idx.size) && !nets.has(String(it.net)) && !idx.has(i)) return;
+            alvos.push(i);
+          });
+          if (!alvos.length) throw new ErroMcp('nenhuma port achada' + (nets.size ? ' com os nomes ' + [...nets].join(', ') : ''));
+          return alvos.map(i => {
+            const n = Object.assign({}, arq.itens[i]);
+            const ruins = HubDraw.portEstilo(n, a.estilo || {});
+            if (ruins.length) throw new ErroMcp('estilo da port: ' + ruins.join(', ') + ' inválido(s) — ' + DICA_ESTILO_PORT);
+            arq.substitui(i, n);
+            return n;
+          });
+        }, { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_port_estilo' });
       },
     },
     {

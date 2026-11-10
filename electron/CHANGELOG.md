@@ -4,6 +4,33 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.94.0 — 2026-11-10
+
+**Port na barra do Esquema, totalmente estilizável.**
+Pedido do dono: "na barra de ferramentas, em 'net' adiciona 'port' também pra adicionar esse tipo de porta, e quero que
+seja completamente estilizável, podendo alterar borda, background, posição do texto, size do texto, fonte e cor do texto".
+- **Ferramenta Port** na gaveta dos pousos (GND, 3V3, 5V5, VIN, net, **port**, No ERC): pede o nome, mostra a port no
+  cursor e pousa a cada clique (o ímã gruda a ponta de ligação no pino/fio); Esc larga. É o MESMO objeto `port` da port
+  importada do Altium — o mesmo desenho, a mesma conexão pelo nome (port, rótulo ou outra port com o mesmo nome = a
+  mesma net, inclusive entre folhas), o mesmo PDF do esquema e o mesmo BuildSchematic. Espaço gira (deitada ↔ em pé, a
+  ponta acompanha), X/Y espelham (a ponta troca de lado), Ctrl+Z desfaz.
+- **O estilo na ficha** (Propriedades), numa grade compacta, para uma port ou **várias marcadas de uma vez**: Nome; Seta
+  (nenhuma, esquerda, direita, ambos); Tipo de E/S (não especificado, saída, entrada, bidirecional — o I/O Type do
+  Altium); Largura (automática pelo nome, ou fixa em mil); Borda (cor e espessura); Fundo (cor ou transparente); Texto
+  (posição esquerda/centro/direita e tamanho); Fonte (Segoe UI, Arial, Arial Narrow, Times New Roman) e cor do texto.
+  **Usar como padrão** guarda o estilo para as próximas ports do projeto (nesta máquina); **Estilo da casa** volta ao
+  padrão — o da imagem do dono: borda azul escura, fundo branco, texto azul centralizado, ponta à direita.
+- Port importada do Altium sem os campos novos desenha exatamente como antes (amarela, os dois bicos). Para o Altium vão
+  o `style` (0..7 do TPortArrowStyle, a partir da seta e do eixo), o `w`, o `io` e as cores; borda, fonte, tamanho e
+  alinhamento são do desenho do NexoEletric.
+- Visualizador / fora da equipe não pousa nem estiliza (a ficha diz por quê); com a variante ativa a barra e a ficha
+  ficam travadas, como o resto da edição do esquema.
+- MCP: `sch_adicionar` com port nasce no estilo da casa (`estilo` e `em_pe` opcionais), e o novo **`sch_port_estilo`**
+  estiliza várias ports de uma vez (por nome, índice ou folha). AI-GUIDE com os campos novos.
+- Testes: `tests/test-port-estilo.js` (port nova, estilo conferido, geometria, desenho, schematic.js, conectividade por
+  nome, PDF e o MCP) e `tests/smoke-port.js` (a vista de verdade: a Port na gaveta, 11 ports empilhadas, a ficha para
+  todas, uma estilizada diferente, Espaço/Ctrl+Z).
+
 ## 1.93.0 — 2026-11-10
 
 **A folha e o template num seletor só, só com a folha de verdade; o template DiEletrons também em A3.**

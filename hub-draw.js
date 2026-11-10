@@ -29,7 +29,8 @@ function worldText(ctx, txt, x, y, h, rot, color, align, opts){
   ctx.translate(x, y);
   ctx.rotate(((rot || 0) * Math.PI) / 180);
   ctx.scale(1, -1);
-  ctx.font = h + 'px "Segoe UI", sans-serif';
+  /* 1.94.0: opts.fonte (a port estilizável escolhe a fonte); sem ela, a de sempre */
+  ctx.font = h + 'px "' + (opts && opts.fonte ? opts.fonte : 'Segoe UI') + '", ' + (opts && /times/i.test(opts.fonte || '') ? 'serif' : 'sans-serif');
   ctx.fillStyle = color;
   ctx.textAlign = align || 'center';
   ctx.textBaseline = 'middle';
@@ -277,6 +278,11 @@ const ESTILO_POR_NUM = {
   /* num: [bicoEsquerdo, bicoDireito, vertical] */
   0: [true, true, false],
   4: [true, true, true],
+  /* 1.94.0: os outros números do TPortArrowStyle do Altium (ePortLeft=1, ePortRight=2, ePortLeftRight=3,
+     ePortTop=5, ePortBottom=6, ePortTopBottom=7) — nenhum apareceu nos projetos medidos; são os que a port NOVA (a
+     ferramenta Port da barra) grava para o Altium a partir da `seta`. Esquerda/baixo = a ponta da âncora. */
+  1: [true, false, false], 2: [false, true, false], 3: [true, true, false],
+  5: [false, true, true],  6: [true, false, true],  7: [true, true, true],
 };
 
 /* Medidas da barra, num lugar so. Encolhidas a pedido: a port ocupava 120 mil de altura
@@ -289,6 +295,95 @@ const PORT_TXT  = 45;      /* corpo da letra do nome        */
    (inteiro cru do Altium, 'rgb(...)') tem que cair no padrao em vez de sujar o canvas. */
 const corDePort = c => (typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c)) ? c : null;
 
+/* ── A PORT ESTILIZÁVEL (1.94.0) ──
+   Pedido do dono (2026-11-10): "na barra de ferramentas, em 'net' adiciona 'port' também pra adicionar esse tipo de
+   porta, e quero que seja completamente estilizável, podendo alterar borda, background, posição do texto, size do
+   texto, fonte e cor do texto". É o MESMO objeto `port` que vem do Altium (o mesmo desenho, a mesma conexão pelo
+   nome); os campos novos são todos opcionais — a port importada sem eles desenha exatamente como antes:
+     seta         'nenhuma' | 'esquerda' | 'direita' | 'ambos'   onde vai a ponta (esquerda = a ponta da âncora; na port
+                  em pé, embaixo). Ausente: o `style` do Altium decide (ESTILO_POR_NUM).
+     larguraAuto  true: a largura acompanha o nome (e o `w` gravado é recalculado, para o Altium receber a mesma)
+     bordaW       espessura da borda, em mil (padrão 4)
+     fill         a cor do fundo, ou 'none' (transparente)
+     alinha       'esquerda' | 'centro' | 'direita'          o texto dentro da barra
+     txtH         tamanho do texto, em mil (padrão 45); a barra engorda se a letra pedir
+     fonte        uma das PORT_FONTES (as do esquema: a da vista e as do carimbo)
+   color/textColor/io/style/w continuam os do Altium. */
+const PORT_SETAS  = ['nenhuma', 'esquerda', 'direita', 'ambos'];
+const PORT_ALINHA = ['esquerda', 'centro', 'direita'];
+const PORT_FONTES = ['Segoe UI', 'Arial', 'Arial Narrow', 'Times New Roman'];
+/* o tipo de E/S do Altium (TPortIO) */
+const PORT_IO = [[0, 'não especificado'], [1, 'saída'], [2, 'entrada'], [3, 'bidirecional']];
+/* o estilo da port nova (o da imagem do dono: borda azul escura, fundo branco, texto azul centralizado, ponta à direita) */
+const PORT_PADRAO = { seta:'direita', io:0, larguraAuto:true, color:'#1f3a93', bordaW:6, fill:'#ffffff',
+                      alinha:'centro', txtH:PORT_TXT, fonte:'Segoe UI', textColor:'#1f4fd1' };
+const PORT_CAMPOS = ['seta', 'io', 'larguraAuto', 'w', 'color', 'bordaW', 'fill', 'alinha', 'txtH', 'fonte', 'textColor'];
+
+function portTxtH(p){ return typeof p.txtH === 'number' && p.txtH > 0 ? p.txtH : PORT_TXT; }
+function portBicos(p){
+  if (PORT_SETAS.includes(p.seta)) return [p.seta === 'esquerda' || p.seta === 'ambos', p.seta === 'direita' || p.seta === 'ambos'];
+  const c = ESTILO_POR_NUM[p.style];
+  return c ? [c[0], c[1]] : [true, true];
+}
+/* a largura que o nome pede: a letra (média de 0,62 em, as maiúsculas da casa), as pontas e uma folga de cada lado */
+function portLargura(p){
+  const h = portTxtH(p), meia = Math.max(PORT_H, Math.round(h * 0.8));
+  const bico = Math.max(PORT_BICO, Math.round(meia * 0.53));
+  const [e, d] = portBicos(p);
+  const fator = /narrow/i.test(p.fonte || '') ? 0.5 : 0.62;
+  const larg = String(p.net || '').length * h * fator + (e ? bico : 0) + (d ? bico : 0) + 2 * Math.max(25, h * 0.5);
+  return Math.max(200, Math.ceil(larg / 10) * 10);
+}
+/* o número do `style` do Altium para a seta e o eixo (o BuildSchematic grava este) */
+function portEstiloAltium(seta, vertical){
+  /* deitada: ePortNone_Horizontal 0, ePortLeft 1, ePortRight 2, ePortLeftRight 3; em pé (a âncora embaixo):
+     ePortNone_Vertical 4, ePortTop 5 (a ponta longe da âncora), ePortBottom 6 (a da âncora), ePortTopBottom 7 */
+  if (vertical) return { esquerda:6, direita:5, ambos:7 }[seta] || 4;
+  return { esquerda:1, direita:2, ambos:3 }[seta] || 0;
+}
+/* a port em pé? (o eixo que o desenho usa) */
+function portEmPe(p){ return portGeom(p).ang % 180 === 90; }
+/* Acerta o `style`, o `rot` e o `w` da port depois de mexer na seta, no eixo ou no nome: o Altium só sabe de port
+   deitada (âncora na esquerda) ou em pé (âncora embaixo) — o `rot` do hub sai, e o eixo vai no `style`. */
+function portAcerta(p, emPe){
+  const vertical = emPe == null ? portEmPe(p) : !!emPe;
+  if (PORT_SETAS.includes(p.seta)) p.style = portEstiloAltium(p.seta, vertical);
+  else p.style = vertical ? 4 : 0;
+  delete p.rot;
+  if (p.larguraAuto) p.w = portLargura(p);
+  return p;
+}
+/* uma port nova (a ferramenta da barra, o MCP): o estilo padrão, por cima o `estilo` pedido (o "usar como padrão") */
+function portNova(o){
+  const p = Object.assign({ t:'port', sheet:o.sheet, net:o.net, x:o.x, y:o.y, style:0 }, PORT_PADRAO);
+  for (const k of Object.keys(p)) if (p[k] === undefined) delete p[k];
+  if (o.estilo) portEstilo(p, o.estilo);          /* conferido: um padrão velho/estranho não suja a port */
+  return portAcerta(p, !!o.emPe);
+}
+/* Aplica um estilo (só os campos conhecidos, conferidos) numa port; devolve a lista dos campos recusados */
+function portEstilo(p, est){
+  const ruins = [];
+  for (const k of Object.keys(est || {})){
+    const v = est[k];
+    const ok = k === 'seta' ? PORT_SETAS.includes(v)
+      : k === 'alinha' ? PORT_ALINHA.includes(v)
+      : k === 'fonte' ? PORT_FONTES.includes(v)
+      : k === 'io' ? [0, 1, 2, 3].includes(v)
+      : k === 'larguraAuto' ? typeof v === 'boolean'
+      : k === 'w' ? typeof v === 'number' && v >= 100 && v <= 5000
+      : k === 'bordaW' ? typeof v === 'number' && v >= 1 && v <= 40
+      : k === 'txtH' ? typeof v === 'number' && v >= 15 && v <= 200
+      : k === 'fill' ? v === 'none' || corDePort(v) != null
+      : k === 'color' || k === 'textColor' ? corDePort(v) != null
+      : false;
+    if (!ok){ ruins.push(k); continue; }
+    p[k] = typeof v === 'string' && v.charAt(0) === '#' ? v.toLowerCase() : v;
+    if (k === 'w') p.larguraAuto = false;
+  }
+  portAcerta(p);
+  return ruins;
+}
+
 /* A GEOMETRIA DA PORT MORA AQUI, e so aqui: o desenho e a caixa de clique da vista Esquema
    leem desta funcao. Se cada um calculasse a sua, no dia em que ESTILO_POR_NUM for
    preenchido o desenho giraria e a caixa nao — o clique passaria a errar a port sem que
@@ -297,11 +392,12 @@ function portGeom(p){
   const conhecido = ESTILO_POR_NUM[p.style];
   const vertical  = conhecido ? conhecido[2] : false;
   const ang = ((((vertical ? 90 : 0) + (p.rot || 0)) % 360) + 360) % 360;
-  return { w: (typeof p.w === 'number' && p.w > 0) ? p.w : 400,
-           h: PORT_H, bico: PORT_BICO,
-           pontaEsq: conhecido ? conhecido[0] : true,
-           pontaDir: conhecido ? conhecido[1] : true,
-           ang, dir: OD[ang] || [1, 0] };
+  const [pontaEsq, pontaDir] = portBicos(p);
+  /* a letra maior engorda a barra (e a ponta acompanha); no tamanho padrão, as medidas de sempre */
+  const h = Math.max(PORT_H, Math.round(portTxtH(p) * 0.8));
+  const w = p.larguraAuto ? portLargura(p) : (typeof p.w === 'number' && p.w > 0) ? p.w : 400;
+  return { w, h, bico: Math.max(PORT_BICO, Math.round(h * 0.53)),
+           pontaEsq, pontaDir, ang, dir: OD[ang] || [1, 0] };
 }
 
 /* Caixa da port em mil: EXATAMENTE o retangulo desenhado, nem um mil a mais. A barra nasce
@@ -316,12 +412,14 @@ function portBBox(p){
 
 function drawPort(ctx, p, color){
   const g = portGeom(p);
+  const semFundo = p.fill === 'none';
   const dentro = corDePort(p.fill)      || SCH.portFill;
   const letra  = corDePort(p.textColor) || SCH.portText;
   /* O destaque de net (`color`) manda SO no contorno: pintar a letra de laranja por cima
      do amarelo apagaria justamente o nome que se quer ler. Contorno mais grosso e o que
      marca a port em foco. */
   const borda  = color || corDePort(p.color) || SCH.port;
+  const bw = typeof p.bordaW === 'number' && p.bordaW > 0 ? p.bordaW : 4;
   ctx.save();
   ctx.translate(p.x, p.y);
   ctx.rotate((g.ang * Math.PI) / 180);
@@ -333,8 +431,8 @@ function drawPort(ctx, p, color){
   ctx.lineTo(g.pontaEsq ? g.bico : 0, -g.h);
   if (g.pontaEsq) ctx.lineTo(0, 0);
   ctx.closePath();
-  ctx.fillStyle = dentro; ctx.fill();
-  ctx.strokeStyle = borda; ctx.lineWidth = color ? 7 : 4; ctx.lineJoin = 'miter';
+  if (!semFundo){ ctx.fillStyle = dentro; ctx.fill(); }
+  ctx.strokeStyle = borda; ctx.lineWidth = color ? Math.max(7, bw + 3) : bw; ctx.lineJoin = 'miter';
   ctx.stroke();
   ctx.restore();
   /* O NOME ACOMPANHA O EIXO DA PORT: deitada, texto deitado; em pe, texto em pe — igual ao
@@ -342,11 +440,22 @@ function drawPort(ctx, p, color){
      letra deitada, o nome transbordava os 90 mil de largura da barra e brigava com o
      componente ao lado.
      O `% 180` e a trava contra letra de cabeca para baixo: 0 e 90 sao leituras honestas
-     (90 le de baixo para cima, como no Altium), 180 e 270 nao — e viram 0 e 90. Hoje o
-     `ang` so pode ser 0 ou 90 (o espelho nao traz `rot` de port), mas a trava fica para o
-     dia em que trouxer. Espelhar e virar a POSICAO, nunca a letra. */
-  worldText(ctx, p.net || '', p.x + g.dir[0] * (g.w / 2), p.y + g.dir[1] * (g.w / 2),
-            PORT_TXT, g.ang % 180, letra, 'center');
+     (90 le de baixo para cima, como no Altium), 180 e 270 nao — e viram 0 e 90. Espelhar e
+     virar a POSICAO, nunca a letra.
+     1.94.0: o ALINHAMENTO (esquerda/centro/direita) é o da leitura: a "esquerda" é onde a letra começa — a ponta
+     da âncora na port deitada ou em pé, e a outra na de cabeça para baixo. */
+  const th = portTxtH(p);
+  const al = PORT_ALINHA.includes(p.alinha) ? p.alinha : 'centro';
+  let t = g.w / 2, align = 'center';
+  if (al !== 'centro'){
+    const folga = Math.max(25, th * 0.5);
+    const ini = (g.pontaEsq ? g.bico : 0) + folga, fim = g.w - (g.pontaDir ? g.bico : 0) - folga;
+    const leDaAncora = g.ang < 180;
+    t = (al === 'esquerda') === leDaAncora ? ini : fim;
+    align = al === 'esquerda' ? 'left' : 'right';
+  }
+  worldText(ctx, p.net || '', p.x + g.dir[0] * t, p.y + g.dir[1] * t,
+            th, g.ang % 180, letra, align, PORT_FONTES.includes(p.fonte) ? { fonte:p.fonte } : null);
 }
 
 /* O "No ERC" do Altium: o X vermelho que marca "este pino fica sem ligar DE PROPOSITO".
@@ -583,6 +692,8 @@ function formaBBox(it){
 
 return { SCH, PCB, OD, worldText, roundRect, dePe, drawSymbolPart, mirrorPart, symBBox, drawFootprint,
          drawPowerPort, powerBBox, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, drawNoERC, mkCamera,
+         PORT_SETAS, PORT_ALINHA, PORT_FONTES, PORT_IO, PORT_PADRAO, PORT_CAMPOS, portLargura, portEstiloAltium, portEmPe,
+         portAcerta, portNova, portEstilo,
          FORMAS, FORMA_NOME, FORMA_COR, FORMA_LARG, formaLarg, formaCaixa, formaContorno, drawForma, formaPerto, formaBBox };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubDraw;
