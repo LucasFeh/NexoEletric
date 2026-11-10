@@ -299,6 +299,51 @@ function camposDe(texto) {
   return out;
 }
 
-return { PADRAO, IDS_PADRAO: [...IDS_PADRAO], ehPadrao, lista, compila, confere, caixaDe, opColocar, proximoRef, qrRegioes,
+/* ── O CÓDIGO DA PLACA NA SERIGRAFIA (1.92.2, pedido do dono: "um alerta, dizendo que o código não foi colocado na
+   PCB, todas as PCBs precisam ter código") ──
+   codigoNaPlaca(eb, codigo) -> {estado, codigo, achado, onde, msg}
+     estado 'nao-definido'  o projeto não tem o código da placa (o "PROJETO NÃO DEFINIDO" do quadro): defina o projeto;
+            'ok'            há um texto de serigrafia (Top/Bottom Overlay, à vista) com o campo =CodigoDaPlaca (a arte
+                            "Código da placa + revisão", qualquer arte com o campo, a logo da 1.77 com o .CodigoDaPlaca)
+                            ou com o código de agora escrito (sem caixa e sem espaço: "pmd - di261946" vale);
+            'desatualizado' não há o de agora, mas há um código de placa escrito à mão que é outro (ex.: o
+                            "PDMB-DI231765_P2" da DMB, de antes do Definir projeto) -- `achado` diz qual;
+            'falta'         nenhum código na serigrafia.
+   `codigo` é o código da placa de agora (HubCore.valorCampoArte('CodigoDaPlaca'): o do Definir projeto, ou o do nome
+   do projeto, ou PROJETO NÃO DEFINIDO). Com a variante de projeto ativa vale o código da PLACA (a PCB é a mesma). */
+const NAO_DEF = 'PROJETO NÃO DEFINIDO';
+const RE_CAMPO_COD = /(^|[^A-Za-z0-9_])[=.]CodigoDaPlaca(?![A-Za-z0-9_])/i;
+const RE_COD_PLACA = /[A-Z][A-Z0-9]*\s*-\s*DI\d{4,8}[A-Z0-9_]*/gi;
+/* sem caixa; o espaço em volta do "-" não conta ("PMD - DI261946"), a quebra de linha e o espaço separam palavras */
+const normCod = s => String(s || '').toUpperCase().replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').trim();
+/* o código inteiro, não pedaço de outro: "PDMB-DI231765_P2" não contém o código "DMB-DI231765" */
+function contemCodigo(txt, alvo) {
+  for (let i = txt.indexOf(alvo); i >= 0; i = txt.indexOf(alvo, i + 1)) {
+    const antes = txt.charAt(i - 1), depois = txt.charAt(i + alvo.length);
+    if (!/[A-Z0-9]/.test(antes) && !/[A-Z0-9]/.test(depois)) return true;
+  }
+  return false;
+}
+function codigoNaPlaca(eb, codigo) {
+  const cod = String(codigo || '').trim();
+  if (!cod || normCod(cod) === normCod(NAO_DEF))
+    return { estado: 'nao-definido', codigo: '', msg: 'Projeto não definido: a placa não tem código — defina o projeto (Definir projeto, no Esquema) e ponha o código da placa na serigrafia' };
+  const alvo = normCod(cod);
+  let outro = null, onde = '';
+  for (const t of (eb && eb.texts) || []) {
+    if (!t || t.hidden || t.designator || t.comment || !/Overlay$/.test(String(t.layer || ''))) continue;
+    const s = String(t.text || '');
+    if (RE_CAMPO_COD.test(s)) return { estado: 'ok', codigo: cod, achado: s, onde: t.owner || t.id || '', msg: '' };
+    if (contemCodigo(normCod(s), alvo)) return { estado: 'ok', codigo: cod, achado: s, onde: t.owner || t.id || '', msg: '' };
+    RE_COD_PLACA.lastIndex = 0;
+    const m = RE_COD_PLACA.exec(s);
+    if (m && !outro) { outro = m[0]; onde = t.owner || t.id || ''; }
+  }
+  if (outro) return { estado: 'desatualizado', codigo: cod, achado: outro, onde,
+    msg: 'O código da placa na serigrafia está desatualizado: "' + outro + '" — o de agora é ' + cod + '. Ponha o código + revisão automáticos (ele muda sozinho) e tire o texto antigo' };
+  return { estado: 'falta', codigo: cod, msg: 'O código da placa (' + cod + ') não está na serigrafia — toda PCB precisa ter o código' };
+}
+
+return { PADRAO, IDS_PADRAO: [...IDS_PADRAO], ehPadrao, codigoNaPlaca, lista, compila, confere, caixaDe, opColocar, proximoRef, qrRegioes,
          novoId, novaArte, duplica, camposDe, CAMPOS, LARG_MIN, ALT_MIN };
 });

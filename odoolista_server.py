@@ -290,7 +290,35 @@ def previa():
     # as fotos 3D que vao no envio (MCP pcb_render_3d): a tela diz quais existem
     return {'ok': True, 'payload': payload, 'uid_externo': payload['uid_externo'],
             'revisaoSugerida': sugerida, 'revisaoUsada': rev,
-            'imagens': OL.imagens_do_projeto(nome, ROOT), 'placa': OL.tem_placa(nome, ROOT)}
+            'imagens': OL.imagens_do_projeto(nome, ROOT), 'placa': OL.tem_placa(nome, ROOT),
+            # 1.92.2: o envio (e o ensaio) recusam sem a PCB declarada; a previa mostra a lista e o porque
+            'bloqueio': _bloqueio(nome)}
+
+
+def _bloqueio(nome):
+    """1.92.2: a frase do porque o envio ao Odoo nao pode sair (sem PCB, ou a PCB nao declarada), ou None"""
+    try:
+        sch = OL.le_schematic(nome, ROOT)
+    except OL.ErroOdoo:
+        sch = None
+    return OL.motivo_sem_pcb(nome, sch, ROOT)
+
+
+def _recusa_sem_pcb(data):
+    nome = str((data or {}).get('projeto') or '').strip() if isinstance(data, dict) else ''
+    if not nome or not _pasta(nome):
+        return None
+    b = _bloqueio(nome)
+    return ({'ok': False, 'error': b, 'semPcb': True}, 409) if b else None
+
+
+@bp.route('/bloqueio', methods=['GET'])
+def bloqueio():
+    """o botao "Enviar para o Odoo" fica desligado com o motivo (a tela pergunta; quem decide e o /ensaio e o /envio)"""
+    nome = str(request.args.get('projeto') or '').strip()
+    if not _pasta(nome):
+        return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    return {'ok': True, 'bloqueio': _bloqueio(nome)}
 
 
 @bp.route('/ensaio', methods=['POST'])
@@ -303,6 +331,10 @@ def ensaio():
     payload, erro, status = _prepara(request.get_json(silent=True))
     if erro:
         return {'ok': False, 'error': erro}, status
+    # 1.92.2: sem a PCB declarada (ou sem PCB) a lista nao vai ao Odoo -- nem o ensaio, que ja conversa com ele
+    recusa = _recusa_sem_pcb(request.get_json(silent=True))
+    if recusa:
+        return recusa
     cliente, erro = _cliente()
     if erro:
         return {'ok': False, 'error': erro, 'semSenha': True}, 400
@@ -324,6 +356,9 @@ def envio():
     payload, erro, status = _prepara(data)
     if erro:
         return {'ok': False, 'error': erro}, status
+    recusa = _recusa_sem_pcb(data)
+    if recusa:
+        return recusa
     erro = _confere_ensaio(payload, data)
     if erro:
         return {'ok': False, 'error': erro, 'confiraDeNovo': True}, 409

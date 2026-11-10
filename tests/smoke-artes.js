@@ -95,11 +95,31 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
      "PDMB-DI231765_P2 / REV. C" em volta de (83,9; 22,1) */
   const LOGO = { x: 33.17, y: 92.5 }, COD = { x: 83.88, y: 30 };
 
+  /* 0. (1.92.2) o alerta do código da placa: a DMB tem o código antigo digitado à mão ("PDMB-DI231765_P2") */
+  const c0 = await js(`${P}.codigoNaPlaca()`);
+  assert.strictEqual(c0.estado, 'desatualizado', 'a DMB com o código à mão antigo: ' + JSON.stringify(c0));
+  assert.ok(await js(`!document.getElementById('alertaCodigo').hidden && /desatualizado/.test(document.getElementById('alertaCodigoTxt').textContent)`), 'o alerta à vista');
+  await js(`${P}.setView(${(B[0] + B[2]) / 2}, ${(B[1] + B[3]) / 2}, 7)`); await espera(500);
+  await print('codigo-1-alerta-codigo-desatualizado');
+  await js(`document.getElementById('alertaCodigoBtn').click()`); await espera(300);
+  assert.strictEqual(await js(`${P}.estado().tool`), 'arte', 'o Colocar código pega a arte na mão');
+  await js(`${P}.setTool('select')`); await espera(200);
+
   /* 1. a lista */
-  const tit = await js(`(document.getElementById('tb-artes') || {}).title || ''`);
-  assert.ok(/Artes de overlay/.test(tit), 'o botão na barra: ' + tit);
-  await js(`document.getElementById('tb-artes').click()`);
+  /* 1.92.2: o botão saiu da barra e foi para o canto de cima à direita, do lado das Propriedades */
+  assert.ok(!(await js(`!!document.getElementById('tb-artes')`)), 'o botão não está mais na barra');
+  const bt = await js(`(() => { const b = document.getElementById('btnArtes'), r = b.getBoundingClientRect(), c = document.getElementById('cvwrap').getBoundingClientRect(), p = document.getElementById('props').getBoundingClientRect();
+    return { tit: b.title, vis: !b.hidden && r.width > 0, svg: !!b.querySelector('svg'), dir: c.right - r.right, topo: r.top - c.top, props: p.left - r.right }; })()`);
+  assert.ok(bt.vis && bt.svg && bt.tit === 'Artes', 'o botão Artes com o ícone e a dica: ' + JSON.stringify(bt));
+  assert.ok(bt.dir >= 0 && bt.dir < 20 && bt.topo >= 0 && bt.topo < 20 && bt.props >= 0 && bt.props < 30, 'no canto de cima à direita, colado nas Propriedades: ' + JSON.stringify(bt));
+  if (PRINT) {
+    /* o canto de cima à direita: o botão Artes do lado do painel de Propriedades */
+    const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 900, y: 0, width: 700, height: 330, scale: 1 } });
+    fs.writeFileSync(path.join(PRINT, 'artes-0-botao-no-canto-superior-direito.png'), Buffer.from(r.result.data, 'base64'));
+  }
+  await js(`document.getElementById('btnArtes').click()`);
   await ate(`document.querySelectorAll('.ar-lista .ar-card').length >= 2`, 8000, 'a lista não abriu');
+  assert.strictEqual(await js(`document.getElementById('btnArtes').getAttribute('aria-pressed')`), 'true', 'o botão aceso com a lista aberta');
   const nomes = await js(`[...document.querySelectorAll('.ar-lista .ar-card .ar-nm span:first-child')].map(s => s.textContent)`);
   assert.deepStrictEqual(nomes.slice(0, 2), ['Logo DiEletrons + QR', 'Código da placa + revisão'], 'as duas da casa primeiro');
   await js(`${P}.setView(${(B[0] + B[2]) / 2}, ${(B[1] + B[3]) / 2}, 7)`);
@@ -115,6 +135,9 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   await mouse('mousePressed', pc.x, pc.y); await mouse('mouseReleased', pc.x, pc.y);
   await ate(`${P}.changes().length === 1`, 5000, 'o clique não largou a arte');
   assert.strictEqual(await js(`${P}.estado().tool`), 'select', 'larga e volta ao Selecionar');
+  /* com a arte código + revisão na placa, o alerta some */
+  assert.strictEqual((await js(`${P}.codigoNaPlaca()`)).estado, 'ok', 'com a arte: ok');
+  assert.ok(await js(`document.getElementById('alertaCodigo').hidden`), 'o alerta some');
 
   /* 3. arrastar da lista e soltar na placa (o drop de verdade, com o DataTransfer do navegador) */
   const pl = await tela(LOGO.x, LOGO.y);
@@ -185,7 +208,7 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   await js(`${P}.artes().studio().fecha()`);
   await espera(300);
   /* a arte nova aparece na lista */
-  await js(`document.getElementById('tb-artes').click()`);
+  await js(`document.getElementById('btnArtes').click()`);
   await ate(`[...document.querySelectorAll('.ar-lista .ar-card')].some(c => /Selo de garantia/.test(c.textContent))`, 5000, 'a arte nova não entrou na lista');
 
   /* o PDF da placa com as artes (para a conferência) */

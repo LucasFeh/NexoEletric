@@ -4,6 +4,53 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.92.2 — 2026-11-10
+
+**O botão das Artes vai para o canto de cima à direita da vista PCB; a PCB avisa quando o código da placa não está na
+serigrafia; e o envio ao Odoo fica impedido sem a PCB declarada.**
+Pedidos do dono: "o ícone de 'Artes' pode tirar da barra e colocar no canto superior direito, do lado do menu de
+propriedades" e "quero que tenha um alerta, dizendo que o código não foi colocado na PCB, todas as PCBs precisam ter
+código, e se um esquema não tiver com PCB declarada, é pra impedir o envio pro Odoo".
+- **Botão Artes no canto de cima à direita**, colado no painel de Propriedades, na altura do título dele: o mesmo ícone (o
+  QR), a dica "Artes", a mesma lista (que abre logo embaixo, nesse canto) e o Studio; aceso enquanto a lista está aberta.
+  Saiu da barra de ferramentas. Não aparece na vista embutida (lean) nem com o visualizador de Gerber aberto.
+- **Alerta "código da placa na serigrafia"** (`HubPcbArtes.codigoNaPlaca`): no pé da vista PCB, no meio, fica um aviso
+  enquanto a placa não tiver o código de agora na serigrafia. Conta como presente a arte com o campo `=CodigoDaPlaca` (a
+  "Código da placa + revisão", qualquer arte com o campo, a logo da 1.77) ou um texto de serigrafia (Top/Bottom Overlay, à
+  vista; designator não conta) com o código inteiro escrito (sem caixa; "PMD - DI261946" vale; pedaço de outro código
+  não: "PDMB-DI231765_P2" não contém "DMB-DI231765"). Três avisos:
+  - **falta** — "O código da placa (PMD-DI261946) não está na serigrafia — toda PCB precisa ter o código";
+  - **desatualizado** — há um código de placa escrito à mão que é outro (o "PDMB-DI231765_P2" da DMB): diz qual e qual é o
+    de agora, e pede a arte automática no lugar do texto antigo;
+  - **projeto não definido** — sem o código da placa (a regra do "PROJETO NÃO DEFINIDO"): manda definir o projeto.
+  O botão **Colocar código** pega a arte "Código da placa + revisão" na mão (clique na placa para largar). Com a
+  variante ativa vale o código da placa (a PCB é a mesma). O alerta some sozinho quando a placa passa a ter o código.
+- **No Gerber, no Enviar pra JLC e no PDF**: o mesmo aviso (nos avisos do Gerber, na pergunta da JLC e numa notificação ao
+  abrir o PDF). É **aviso, não bloqueio**: a placa de teste, o painel e a placa sem serigrafia continuam saindo — se o
+  dono quiser travar, é uma linha.
+- **MCP**: o `pcb_artes` com o projeto diz `codigo_na_placa` (ok | falta | desatualizado | nao-definido, com o código e o
+  que achou); o `pcb_arte_colocar` com `codigo-revisao` resolve.
+- **Envio ao Odoo só com a PCB declarada** (`odoolista.motivo_sem_pcb`): sem o código da placa do Definir projeto no
+  cabeçalho do esquema (vazio, "*" ou "PROJETO NÃO DEFINIDO" — o palpite pelo nome da pasta não vale, porque é o código
+  que o Odoo recebe para a placa montada e a virgem), ou sem documento de PCB no projeto (sem board.js: "o projeto não tem
+  PCB"), o envio é **impedido**:
+  - na vista Esquema o **Enviar lista** fica desligado e o porquê aparece embaixo dos botões, em vermelho, apontando o
+    Definir projeto; ele volta sozinho quando o Definir projeto grava (a página pergunta ao servidor ao abrir, ao voltar
+    o foco e a cada 10 s);
+  - no servidor (`/api/lista/ensaio` e `/api/lista/envio`, também pelo que o Rust repassa e por qualquer cliente) a
+    recusa é 409 com `semPcb`, antes de falar com o Odoo; a `/previa` monta a lista e devolve `bloqueio`, e a tela do
+    envio mostra "Envio bloqueado: …" sem conferir; `GET /api/lista/bloqueio?projeto=` responde à tela. O MCP não tem
+    ferramenta de envio ao Odoo; quem chamar a rota leva a mesma recusa.
+  - A falta do código na serigrafia **não** bloqueia o envio (é só o alerta acima).
+- Testes: `tests/test-pcbartes.js` (o código na serigrafia: falta, arte com o campo, a logo da 1.77, escrito com espaço,
+  embaixo, desatualizado e qual, pedaço de outro código, cobre/escondido/designator não contam, não definido, a arte
+  virada), `tests/test-mcp-artes.js` (`codigo_na_placa` falta → ok), `tests/test_odoo_sem_pcb.py` (novo: sem código, código
+  vazio, "*", "PROJETO NÃO DEFINIDO" e sem board.js recusam ensaio e envio com 409 e nada chega ao Odoo falso; a prévia
+  diz o porquê; com a PCB declarada segue), `tests/test_lista_extras.py` (a bancada agora declara a PCB), os smokes
+  `tests/smoke-artes.js` (o botão no canto colado nas Propriedades; o alerta "desatualizado" na DMB, o Colocar código, o
+  alerta some com a arte) e `tests/smoke-odoo-bloqueio.js` (novo: na vista Esquema de verdade o Enviar lista desligado
+  com o motivo, o servidor recusando direto, e o botão voltando depois do Definir projeto).
+
 ## 1.92.1 — 2026-11-10
 
 **O corpo 3D da biblioteca volta a aparecer: o cache dos STEP da PcbLib se conserta sozinho (e saiu do %TEMP%), e o

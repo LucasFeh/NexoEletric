@@ -998,6 +998,35 @@ def tem_placa(nome, raiz=RAIZ):
     return os.path.isfile(os.path.join(raiz, 'Projects', nome, 'board.js'))
 
 
+NAO_DEFINIDO = 'PROJETO NÃO DEFINIDO'
+
+
+def codigo_da_placa(schematic):
+    """o CodigoDaPlaca do cabecalho do esquema (o do Definir projeto), '' se nao ha ou e o PROJETO NAO DEFINIDO"""
+    p = (schematic or {}).get('params')
+    for par in (p if isinstance(p, str) else '').split(';'):
+        if '=' in par:
+            k, val = par.split('=', 1)
+            if k.strip().lower() == 'codigodaplaca':
+                v = ' '.join(val.split())
+                return '' if (not v or v == '*' or v.upper() == NAO_DEFINIDO) else v
+    return ''
+
+
+def motivo_sem_pcb(nome, schematic, raiz=RAIZ):
+    """1.92.2 (pedido do dono: "se um esquema nao tiver com PCB declarada, e pra impedir o envio pro Odoo"): None = pode
+    enviar; senao a frase do porque. A PCB declarada e o codigo da placa escolhido no Definir projeto (o CodigoDaPlaca do
+    cabecalho) -- o palpite pelo nome da pasta nao vale aqui: e o codigo que o Odoo recebe como a placa montada e a
+    virgem. Projeto sem documento de PCB (board.js) tambem nao vai: a lista e a de uma placa."""
+    if not tem_placa(nome, raiz):
+        return ('o projeto não tem PCB (board.js): a lista do Odoo é a de uma placa montada — importe ou crie a PCB do '
+                'projeto antes de enviar')
+    if not codigo_da_placa(schematic):
+        return ('PCB não declarada: o projeto não tem o código da placa — use o Definir projeto (no Esquema) e escolha a '
+                'placa antes de enviar ao Odoo')
+    return None
+
+
 def anexa_imagens(limpo, nome, raiz=RAIZ):
     """O payload limpo + as fotos e a placa virgem. Copia: o limpo (o assinado) nao muda.
 

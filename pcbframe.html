@@ -128,6 +128,24 @@
     color:var(--fg-dim); box-shadow:var(--shadow-menu); cursor:pointer;}
   #btnPaineis:hover{color:var(--fg); border-color:var(--accent);}
   #btnPaineis svg{width:17px; height:17px;}
+  /* 1.92.2: as Artes de overlay no canto de cima à direita, do lado do painel de Propriedades (a lista abre embaixo dele) */
+  #btnArtes{position:absolute; right:8px; top:8px; z-index:12; width:32px; height:32px; padding:0; display:inline-flex;
+    align-items:center; justify-content:center; background:var(--panel); border:1px solid var(--border); border-radius:6px;
+    color:var(--fg-dim); box-shadow:var(--shadow-menu); cursor:pointer;}
+  #btnArtes:hover{color:var(--fg); border-color:var(--accent);}
+  #btnArtes[aria-pressed="true"]{background:var(--hi); border-color:var(--hi); color:var(--on-hi);}
+  #btnArtes svg{width:18px; height:18px;}
+  /* 1.92.2: o alerta do código da placa na serigrafia (pcbframe.js » pintaAlertaCodigo): no pé do canvas, no meio */
+  #alertaCodigo{position:absolute; left:50%; bottom:10px; transform:translateX(-50%); z-index:12; display:flex; align-items:center;
+    gap:10px; max-width:calc(100% - 120px); padding:6px 8px 6px 12px; border-radius:8px; font-size:12.5px; color:var(--fg);
+    background:var(--panel); border:1px solid var(--warn); box-shadow:var(--shadow-menu);}
+  #alertaCodigo[data-estado="nao-definido"]{border-color:var(--err);}
+  #alertaCodigo .tri{color:var(--warn); font-size:13px;}
+  #alertaCodigo[data-estado="nao-definido"] .tri{color:var(--err);}
+  #alertaCodigo span{min-width:0;}
+  #alertaCodigo button{flex:none; padding:4px 10px; border-radius:5px; border:1px solid var(--hi); background:var(--hi);
+    color:var(--on-hi); font:12px var(--font); cursor:pointer; white-space:nowrap;}
+  #alertaCodigo button:hover{filter:brightness(1.08);}
   #help{position:absolute; inset:24px; z-index:30; overflow:auto; padding:20px 26px; background:var(--panel2);
     border:1px solid var(--border); border-radius:8px; box-shadow:var(--shadow-menu); cursor:pointer;}
   #help h2{font-size:15px; color:var(--fg); margin-bottom:8px; font-weight:600;}
@@ -199,7 +217,8 @@
   /* 1.88.0: na variante de projeto a placa é a da padrão: a barra de ferramentas some; fica a barra da variante com o
      Suprimir / Montar (hub-variantes.js) */
   body.variante-on #pcbtb{display:none !important;}
-  body.lean #menubar, body.lean #pcbtb, body.lean #abas, body.lean #splitR, body.lean #props, body.lean #status, body.lean #btnPaineis{display:none !important;}
+  body.lean #menubar, body.lean #pcbtb, body.lean #abas, body.lean #splitR, body.lean #props, body.lean #status, body.lean #btnPaineis, body.lean #btnArtes{display:none !important;}
+  body.gerber-on #btnArtes, body.gerber-on #alertaCodigo, body.lean #alertaCodigo{display:none !important;}
 </style>
 </head>
 <body>
@@ -237,6 +256,10 @@
         </div>
       </div>
       <button id="btnPaineis" type="button" hidden title="Abrir o painel de propriedades"></button>
+      <!-- 1.92.2: as Artes de overlay (hub-pcbartes-ui.js), no canto do lado das Propriedades -->
+      <button id="btnArtes" type="button" hidden title="Artes" aria-label="Artes" aria-pressed="false"></button>
+      <!-- 1.92.2: o alerta do código da placa na serigrafia -->
+      <div id="alertaCodigo" role="status" hidden><b class="tri">▲</b><span id="alertaCodigoTxt"></span><button id="alertaCodigoBtn" type="button" title="Pega a arte Código da placa + revisão na mão: clique na placa para largar">Colocar código</button></div>
       <div id="help" hidden></div>
       <div id="fatal"></div>
     </div>

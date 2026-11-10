@@ -530,6 +530,8 @@ function artesListar(ctx, a) {
     out.na_placa = (eb.components || []).filter(c => c && c.arte).map(c => ({ ref: c.ref, arte: c.arte.id, nome: c.arte.nome, escala: c.arte.escala,
       x: c.x, y: c.y, rot: c.rot, layer: c.layer, face: c.layer === 'Bottom' ? 'BottomOverlay' : 'TopOverlay',
       textos: (eb.texts || []).filter(t => t.owner === c.ref && !t.designator).map(t => hc.resolveEspeciais(t.text)) }));
+    /* 1.92.2: o código da placa está na serigrafia? (toda PCB precisa ter; o mesmo alerta da vista PCB) */
+    if (A.codigoNaPlaca) out.codigo_na_placa = A.codigoNaPlaca(eb, hc.valorCampoArte ? hc.valorCampoArte('CodigoDaPlaca') : '');
   }
   return out;
 }
@@ -613,7 +615,7 @@ module.exports = {
     },
     {
       nome: 'pcb_artes', titulo: 'Listar artes de overlay', leitura: true, modulo: 'hub-pcbartes.js',
-      descricao: 'As ARTES DE OVERLAY da biblioteca da rede (o botão "Artes" da vista PCB): as da casa — "dieletrons-logo-qr" (a logo DiEletrons com o QR de www.dieletrons.com) e "codigo-revisao" (=CodigoDaPlaca e =Revisao, automáticos) — e as criadas no Studio, com tamanho, elementos, campos e avisos do mínimo da JLC. Com projeto, também as que já estão na placa (ref, posição, face e os textos já resolvidos).',
+      descricao: 'As ARTES DE OVERLAY da biblioteca da rede (o botão "Artes" da vista PCB): as da casa — "dieletrons-logo-qr" (a logo DiEletrons com o QR de www.dieletrons.com) e "codigo-revisao" (=CodigoDaPlaca e =Revisao, automáticos) — e as criadas no Studio, com tamanho, elementos, campos e avisos do mínimo da JLC. Com projeto, também as que já estão na placa (ref, posição, face e os textos já resolvidos) e codigo_na_placa: se o código da placa está na serigrafia (ok | falta | desatualizado | nao-definido — toda PCB precisa ter; pcb_arte_colocar com "codigo-revisao" resolve).',
       entrada: { type: 'object', properties: { projeto: Object.assign({}, PROJETO, { description: 'opcional: lista também as artes postas nesta placa' }) } },
       executa: async (a, ctx) => artesListar(ctx, a),
     },

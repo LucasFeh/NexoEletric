@@ -18,6 +18,7 @@ var HubOdooLista = (function () {
    schframe.html aponta para os tokens do hub-tema.css; fundo do modal, sombra e fonte sao os
    tokens da casca direto. A cor depois da virgula e o escuro antigo, para pagina sem tokens. */
 const CSS = `
+.od-bloq-txt{color:var(--err, #f87171) !important; font-size:11.5px; line-height:1.4; margin-top:4px;}
 #odoomodal{position:fixed; inset:0; z-index:60; display:none; background:var(--scrim,rgba(11,11,13,.62));}
 #odoomodal.on{display:flex;}
 /* sem borda: o contorno e o anel do --shadow-menu, como no .dialog da casca */
@@ -769,6 +770,19 @@ async function previa(){
   if (!$('odooRev').value.trim() && j.revisaoUsada) $('odooRev').value = j.revisaoUsada;
   ST.previa = j.payload;
   ST.conferido = null;
+  /* 1.92.2: a PCB não declarada (ou sem PCB): a lista aparece, mas não se confere nem se envia */
+  ST.bloqueio = j.bloqueio || null;
+  atualizaBotao();
+  if (j.bloqueio){
+    $('odooEnviar').disabled = true;
+    $('odooEnviar').title = 'Envio bloqueado: ' + j.bloqueio;
+    pintaLista(j.payload, null);
+    pintaFotos(j);
+    $('odooLista').prepend(el('div', 'od-aviso err', 'Envio bloqueado: ' + j.bloqueio + '.'));
+    estadoTxt('envio bloqueado — veja o aviso acima');
+    return false;
+  }
+  $('odooEnviar').title = '';
   /* ST.aplicados NAO se zera aqui. Ele e "vinculo aplicado na folha e ainda nao salvo", e so
      o Salvar (pintaPendentes) ou uma abertura nova o resolvem; a previa roda tambem quando a
      revisao ou um extra mudam, e zerar ali apagava a barra do "ainda sem salvar" e acendia o
@@ -1552,6 +1566,14 @@ function atualizaBotao(){
   if (!b) return;
   b.disabled = !temServidor();
   if (!temServidor()){ h.textContent = 'sem servidor — abra o hub por hubserver.py'; if (h.hidden) b.title = h.textContent; return; }
+  /* 1.92.2: sem a PCB declarada (Definir projeto) ou sem PCB, o envio não sai — o servidor recusa também */
+  b.classList.toggle('od-bloq', !!ST.bloqueio);
+  h.classList.toggle('od-bloq-txt', !!ST.bloqueio);
+  /* no painel enxuto (o da vista Esquema) o texto do botão não aparece: o porquê do bloqueio vai numa linha própria,
+     embaixo dos botões, na largura toda */
+  const bq = $('odooBloqueio');
+  if (bq){ bq.hidden = !ST.bloqueio; bq.textContent = ST.bloqueio ? 'Envio ao Odoo bloqueado: ' + ST.bloqueio + '.' : ''; }
+  if (ST.bloqueio){ b.disabled = true; h.textContent = 'Envio ao Odoo bloqueado: ' + ST.bloqueio + '.'; b.title = 'Envio ao Odoo bloqueado — ' + ST.bloqueio; return; }
   h.textContent = ST.reciboLocal ? 'último envio: ' + descRecibo(ST.reciboLocal)
                                  : 'monta a lista de componentes e manda para a fila do estoque';
   /* compacto: o texto não aparece no painel, vai no título do botão */
@@ -1571,6 +1593,7 @@ function montaDom(){
   }
   /* data-compacto (o painel enxuto da vista Esquema, 2026-11-04): só o botão, "Enviar lista", sem título nem texto */
   const compacto = sec.hasAttribute('data-compacto');
+  ST.compacto = compacto;
   if (!compacto) sec.append(el('h2', null, 'Odoo'));
   const b = el('button', 'wide'); b.id = 'btnOdooLista';
   b.title = 'Monta a lista de componentes do esquema e manda para a fila de aprovação do Odoo';
@@ -1578,6 +1601,11 @@ function montaDom(){
   const h = el('div', 'hint'); h.id = 'odooHint';
   if (compacto) h.hidden = true;
   sec.append(b, h);
+  if (compacto && sec.parentNode){
+    const bq = el('div', 'od-bloq-txt'); bq.id = 'odooBloqueio'; bq.hidden = true; bq.setAttribute('role', 'status');
+    bq.style.gridColumn = '1 / -1';
+    sec.parentNode.append(bq);
+  }
   b.addEventListener('click', () => { if (!ST.rodando) abre(); });
 
   const m = el('div'); m.id = 'odoomodal';
@@ -1666,10 +1694,22 @@ function montaDom(){
   return true;
 }
 
+/* 1.92.2: o bloqueio do envio (sem PCB declarada) se pergunta ao servidor ao abrir a página, quando ela volta a ter o
+   foco e a cada 10 s com a lista fechada: o Definir projeto grava e o botão acende sozinho */
+async function confereBloqueio(){
+  if (!temServidor() || !proj() || ST.aberto) return;
+  const j = await chama('/api/lista/bloqueio?projeto=' + encodeURIComponent(proj()));
+  if (!j || !j.ok) return;
+  const novo = j.bloqueio || null;
+  if (novo !== (ST.bloqueio || null)){ ST.bloqueio = novo; atualizaBotao(); }
+}
 function inicia(){
   if (!montaDom()) return;
   atualizaBotao();
   if (!temServidor()) return;
+  confereBloqueio();
+  window.addEventListener('focus', () => { confereBloqueio(); });
+  setInterval(() => { if (!document.hidden) confereBloqueio(); }, 10000);
   chama('/api/lista/recibo?projeto=' + encodeURIComponent(proj())).then(r => {
     if (r && r.ok && r.recibo){ ST.reciboLocal = r.recibo; atualizaBotao(); }
   });

@@ -61,7 +61,8 @@ def comp(ref, sym, **kw):
 
 
 def esquema(*itens):
-    return {'format': 'schmirror-v2', 'project': 'X', 'units': 'mil',
+    # 1.92.2: a PCB declarada (o Definir projeto) -- sem ela o ensaio e o envio sao recusados (odoolista.motivo_sem_pcb)
+    return {'format': 'schmirror-v2', 'project': 'X', 'units': 'mil', 'params': 'CodigoDaPlaca=PTEST-DI269999',
             'items': [{'t': 'sheet', 'name': 'main', 'size': 'A4'}] + list(itens)}
 
 
@@ -77,6 +78,9 @@ def raiz_com(nome='P', *itens):
     os.makedirs(os.path.join(d, 'Projects', nome))
     with io.open(os.path.join(d, 'Projects', nome, 'schematic.js'), 'w', encoding='utf-8') as f:
         f.write('var schematic = ' + json.dumps(esquema(*itens), ensure_ascii=False) + ';\n')
+    # e a PCB do projeto (1.92.2: projeto sem board.js nao vai ao Odoo)
+    with io.open(os.path.join(d, 'Projects', nome, 'board.js'), 'w', encoding='utf-8') as f:
+        f.write('var pcbmirror = {"format":"pcbmirror-v1","components":[]};\n')
     return d
 
 
@@ -493,7 +497,7 @@ def test_texto_que_o_utf8_nao_escreve_e_400_e_nao_deixa_tmp():
             st, j = b.post('/extras', corpo)
             assert st == 400 and j and j['ok'] is False and 'surrogate' in j['error'], (st, j)
         assert io.open(arq(b.d), 'rb').read() == antes, 'recusou mas mexeu no arquivo'
-        assert sorted(os.listdir(pasta)) == [OL.EXTRAS, 'schematic.js'], os.listdir(pasta)
+        assert sorted(os.listdir(pasta)) == ['board.js', OL.EXTRAS, 'schematic.js'], os.listdir(pasta)
 
         # quem chamar a gravacao sem a validacao: o erro sobe, mas o temporario nao fica
         try:

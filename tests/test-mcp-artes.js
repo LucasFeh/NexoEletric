@@ -71,6 +71,9 @@ function cliente() {
   assert.deepStrictEqual(r.j.artes[1].campos, ['CodigoDaPlaca', 'Revisao']);
   assert.ok(r.j.artes[0].tamanho_mm[0] > 34 && r.j.artes[0].tamanho_mm[0] < 36, 'a logo + QR ~35 mm: ' + r.j.artes[0].tamanho_mm);
 
+  /* 1.92.2: a placa sem o código da placa na serigrafia */
+  r = await chama('pcb_artes', { projeto: PROJ });
+  assert.strictEqual(r.j.codigo_na_placa.estado, 'falta', 'sem o código na serigrafia: ' + JSON.stringify(r.j.codigo_na_placa));
   r = await chama('pcb_arte_colocar', { projeto: PROJ, arte: 'codigo-revisao', x: 20, y: 10 });
   assert.ok(!r.erro, r.texto);
   assert.strictEqual(r.j.gravado, false, 'simula por padrão');
@@ -85,6 +88,7 @@ function cliente() {
   r = await chama('pcb_artes', { projeto: PROJ });
   assert.deepStrictEqual(r.j.na_placa.map(a => [a.ref, a.arte, a.face, a.textos]), [['ARTE1', 'codigo-revisao', 'TopOverlay', ['PLM-DI261999', 'REV. B']]],
     'a arte na placa com o código e a revisão do projeto: ' + JSON.stringify(r.j.na_placa));
+  assert.strictEqual(r.j.codigo_na_placa.estado, 'ok', 'com a arte, o código está na placa');
 
   r = await chama('pcb_mover', { projeto: PROJ, ref: 'ARTE1', layer: 'Bottom', rot: 180 });
   assert.ok(!r.erro, r.texto);

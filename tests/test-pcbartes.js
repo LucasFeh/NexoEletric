@@ -155,4 +155,36 @@ const DMB = 'Revisao=REV. C;CodigoDaPlaca=PMD-DI261946;NomeDaPlaca=MICONTROLADOR
   ok(ruim.validation.some(v => v.level === 'err'), 'arte sem desenho é recusada');
 }
 
+/* ── 5. o código da placa na serigrafia (1.92.2: "todas as PCBs precisam ter código") ── */
+{
+  const tx = (text, extra) => Object.assign({ id:'x' + Math.random(), layer:'TopOverlay', x:0, y:0, h:1.5, rot:0, text, designator:false, comment:false }, extra || {});
+  const placa = textos => ({ texts:textos });
+  const C = (textos, cod) => A.codigoNaPlaca(placa(textos), cod).estado;
+  eq(C([], 'PMD-DI261946'), 'falta', 'sem texto: falta');
+  eq(C([tx('=CodigoDaPlaca'), tx('=Revisao')], 'PMD-DI261946'), 'ok', 'a arte com o campo');
+  eq(C([tx('.CodigoDaPlaca')], 'PMD-DI261946'), 'ok', 'a logo da 1.77 com o .CodigoDaPlaca');
+  eq(C([tx('pmd - di261946\r\nREV. C', { layer:'BottomOverlay' })], 'PMD-DI261946'), 'ok', 'o código escrito, sem caixa e com espaço no hífen, embaixo também');
+  eq(C([tx('PDMB-DI231765_P2\r\nREV. C')], 'PMD-DI261946'), 'desatualizado', 'o código antigo escrito à mão (o da DMB)');
+  eq(C([tx('PDMB-DI231765_P2\r\nREV. C')], 'DMB-DI231765'), 'desatualizado', 'pedaço de outro código não vale (PDMB-… não é DMB-…)');
+  eq(C([tx('PLACA PMD-DI261946/REV.C')], 'PMD-DI261946'), 'ok', 'no meio de outro texto, inteiro, vale');
+  eq(A.codigoNaPlaca(placa([tx('PDMB-DI231765_P2\r\nREV. C')]), 'PMD-DI261946').achado, 'PDMB-DI231765_P2', 'diz qual é o antigo');
+  eq(C([tx('PMD-DI261946', { layer:'Top' })], 'PMD-DI261946'), 'falta', 'no cobre não vale: é serigrafia');
+  eq(C([tx('PMD-DI261946', { hidden:true })], 'PMD-DI261946'), 'falta', 'escondido não vale');
+  eq(C([tx('PMD-DI261946', { designator:true })], 'PMD-DI261946'), 'falta', 'designator não é código');
+  eq(C([tx('=CodigoDaPlaca')], 'PROJETO NÃO DEFINIDO'), 'nao-definido', 'projeto sem código: definir o projeto');
+  eq(C([], ''), 'nao-definido', 'sem código nenhum');
+  /* na placa de verdade, com os parâmetros do projeto */
+  H.setParamsProjeto('CodigoDaPlaca=PMD-DI261946;Revisao=REV. C', 'DMB - DI231765_P2');
+  const B = placa([]); Object.assign(B, { components:[], tracks:[], arcs:[], vias:[], silk:[], regions:[], fills:[], nets:[], board:{ outline:[] } });
+  B.texts = [tx('PDMB-DI231765_P2\r\nREV. C')];
+  const sem = H.effectiveBoard(B, H.applyPcbChanges(B, []));
+  eq(A.codigoNaPlaca(sem, H.valorCampoArte('CodigoDaPlaca')).estado, 'desatualizado', 'a DMB com o texto à mão: desatualizado');
+  const com = H.effectiveBoard(B, H.applyPcbChanges(B, [A.opColocar(A.PADRAO[1], { ref:'ARTE1', x:10, y:10 })]));
+  eq(A.codigoNaPlaca(com, H.valorCampoArte('CodigoDaPlaca')).estado, 'ok', 'com a arte código + revisão: ok');
+  const virada = H.effectiveBoard(B, H.applyPcbChanges(B, [A.opColocar(A.PADRAO[1], { ref:'ARTE1', x:10, y:10, layer:'Bottom', rot:180 })]));
+  eq(A.codigoNaPlaca(virada, H.valorCampoArte('CodigoDaPlaca')).estado, 'ok', 'a arte virada para baixo também conta');
+  H.setParamsProjeto('', 'LM555 astável');
+  eq(A.codigoNaPlaca(com, H.valorCampoArte('CodigoDaPlaca')).estado, 'nao-definido', 'sem o Definir projeto (e sem código no nome): definir');
+}
+
 console.log('test-pcbartes: ' + n + ' verificações ok');

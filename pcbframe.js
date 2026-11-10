@@ -1698,7 +1698,7 @@ function reaplica(){
   }
   selChaveAntes = SEL.map(chave).join('|');
   if (painel) painel.atualiza();
-  pintaAbas(); pintaStatusSel(); pintaBarra();
+  pintaAbas(); pintaStatusSel(); pintaBarra(); pintaAlertaCodigo();
   pede();
 }
 function commit(){
@@ -2537,6 +2537,7 @@ function instalaArtes(){
     poeEm:(arte, sx, sy) => { const w = telaParaMundo(sx, sy); poeArte(arte, snapPonto(w, null, { soGrade:true }), 0, ladoDaArte()); },
     cor:() => (LBYK.TopOverlay && LBYK.TopOverlay.color) || '#ffff00',
     toast:(t, tipo, ms) => HubDialog.toast(t, tipo || 'info', ms),
+    aoMudarLista:() => pintaBotaoArtes(),
   });
 }
 function motivoNaoPoeArte(){
@@ -2551,6 +2552,7 @@ function abreArtes(studio, id){
   instalaArtes();
   if (!ARTES) { HubDialog.toast('as artes de overlay (hub-pcbartes-ui.js) não carregaram nesta página — atualize com F5', 'warn'); return; }
   if (studio) ARTES.abreStudio(id || undefined); else ARTES.alterna();
+  pintaBotaoArtes();
 }
 function refsUsados(){
   const u = new Set(model.comps.map(m => m.eff.designator || m.src.ref));
@@ -2671,6 +2673,8 @@ function abrePdf(){
     return;
   }
   HubPcbPdfUi.abrir({ placa:() => EB, projeto:PROJ, podeSalvar:HubIO.canPost && !!PROJ, sujo:chDirty });
+  /* 1.92.2: o PDF de fabricação sai, mas avisa a placa sem o código na serigrafia */
+  const avc = avisoCodigo(); if (avc) HubDialog.toast('▲ ' + avc, 'warn', 9000);
 }
 
 /* ============================== placa nova, ECO, pad avulso e polygon pour ==============================
@@ -4714,9 +4718,8 @@ const BARRA = [
   /* 2026-11-03: imagem ou texto -> serigrafia (hub-pcbsilkgen.js; pedido do dono: "falta uma ferramenta que converta
      imagem ou texto em serigrafia") */
   { id:'serigrafia', ic:'serigrafia', acao:'serigrafia', titulo:'Imagem ou texto → serigrafia — um logo (PNG, JPG, SVG) ou um texto em qualquer fonte do Windows vira regiões de serigrafia, com os miolos vazados' },
-  /* 1.91.0: as artes de overlay (hub-pcbartes-ui.js; pedido do dono: "uma logo overlay padrão, onde a gente só puxa"):
-     a lista de onde se arrasta a logo + QR, o código + revisão e as artes do Studio */
-  { id:'artes', ic:'artes', acao:'artes', rotulo:'Artes', titulo:'Artes de overlay — a logo DiEletrons + QR, o código da placa + revisão (automáticos) e as artes do Studio: arraste para a placa ou clique e largue; o Studio cria e edita' },
+  /* 1.92.2: o botão das Artes saiu daqui (pedido do dono: "o ícone de Artes pode tirar da barra e colocar no canto
+     superior direito, do lado do menu de propriedades"): mora no canto de cima à direita do canvas (#btnArtes, ligaBotaoArtes) */
   { id:'preencher', ic:'preencher', acao:'preencher', at:'preencher', titulo:'Preencher — ligado: círculo, triângulo e polígono viram região cheia e o retângulo vira fill; desligado: contorno de trilhas' }, '|',
   { id:'furo', ic:'furo', tool:'furo', titulo:'Furo de fixação — Board Cutout redondo (diâmetro no painel)' },
   { id:'contorno', ic:'contorno', tool:'contorno', titulo:'Contorno da placa — polígono que substitui o contorno (pergunta antes)' },
@@ -7698,6 +7701,9 @@ function geraGerber(){
   /* a placa da TELA: com os teardrops refeitos e os poligonos do hub despejados (recalcula) */
   const eb = EB || HC.effectiveBoard(B, model);
   gerUltimo = HubGerber.gerar(eb, { base:baseDoPcbDoc(), nomes:gerOpc.nomes, vazias:gerOpc.vazias, gtoGbo:gerOpc.gtoGbo, x2:gerOpc.x2, software:'NexoEletric' });
+  /* 1.92.2: a placa sem o código da placa na serigrafia (aviso, não trava) */
+  const avc = avisoCodigo();
+  if (avc && Array.isArray(gerUltimo.avisos)) gerUltimo.avisos.unshift('ATENÇÃO: ' + avc + ' (Artes › Código da placa + revisão).');
   /* componente do comp_add sem footprint nao entra na placa: o Gerber sairia sem ele, calado */
   const sem = compsSemFootprint();
   if (sem.length && Array.isArray(gerUltimo.avisos))
@@ -7802,7 +7808,8 @@ async function enviaJlc(){
   const tam = bb ? fmtNum(bb.x2 - bb.x1, 2) + ' × ' + fmtNum(bb.y2 - bb.y1, 2) + ' mm' : '';
   const qtd = await HubDialog.escolhe(r.resumo.base + '\n' + cobre + ' camada(s) de cobre' + (jlc !== cobre ? ' — a JLC fabrica ' + jlc : '') + (tam ? ' · ' + tam : '') +
     '\n\nO Gerber gerado agora é salvo no projeto e sobe para o orçamento da JLCPCB no IntegrateBrowser, com as camadas da placa e a quantidade abaixo. Primeiro entra na sua conta da JLC (a da configuração do hub; sem ela, a janela do navegador aparece para você entrar). Antes do carrinho, o visualizador de camadas da JLC abre noutra janela e fica aberto para você conferir. O pedido para no carrinho: o pagamento fica com você.' +
-    (chDirty ? '\n\nAtenção: inclui mudanças ainda não salvas no changes.js.' : ''),
+    (chDirty ? '\n\nAtenção: inclui mudanças ainda não salvas no changes.js.' : '') +
+    (avisoCodigo() ? '\n\n▲ ' + avisoCodigo() + '. Dá para enviar assim, mas a placa vai sem o código certo.' : ''),
     { title:'Enviar pra JLC', rotulo:'Quantas placas', opcoes:JLC_QTDS.map(v => ({ v, rot:v + ' placas' })), v:lePref('jlc.qtd', '5'), ok:'Enviar' });
   if (qtd == null) return;
   gravaPref('jlc.qtd', qtd);
@@ -8180,7 +8187,49 @@ function montaDivisoria(){
   const bp = $('btnPaineis');
   if (bp) { bp.replaceChildren(HubPcbIcones.icone('paineis')); bp.addEventListener('click', () => { larg = 340; aplica(); salva(); }); }
   aplica();
+  ligaBotaoArtes();
+  const ab = $('alertaCodigoBtn'); if (ab) ab.addEventListener('click', colocaCodigo);
+  pintaAlertaCodigo();
 }
+/* 1.92.2: o botão das Artes de overlay no canto de cima à direita do canvas, colado no painel de Propriedades (pedido do
+   dono). O mesmo ícone (o QR) e a mesma lista/Studio; aceso enquanto a lista está aberta. */
+/* ── O CÓDIGO DA PLACA NA SERIGRAFIA (1.92.2, pedido do dono: "um alerta, dizendo que o código não foi colocado na PCB,
+   todas as PCBs precisam ter código") ──
+   HubPcbArtes.codigoNaPlaca diz se a placa efetiva tem o código de agora na serigrafia (a arte com =CodigoDaPlaca, ou o
+   código escrito), se o que está escrito é outro (desatualizado) ou se o projeto nem tem código (definir o projeto). O
+   alerta fica embaixo, no meio da placa, até a placa ter o código; o "Colocar código" pega a arte "Código da placa +
+   revisão" na mão. É aviso, não trava: o Gerber, o Enviar pra JLC e o PDF também avisam (a placa de teste ou a sem
+   serigrafia continuam saindo). */
+function estadoCodigo(){
+  if (typeof HubPcbArtes === 'undefined' || !HubPcbArtes.codigoNaPlaca || !EB) return null;
+  return HubPcbArtes.codigoNaPlaca(EB, HC.valorCampoArte ? HC.valorCampoArte('CodigoDaPlaca') : '');
+}
+function avisoCodigo(){ const e = estadoCodigo(); return e && e.estado !== 'ok' ? e.msg : ''; }
+function pintaAlertaCodigo(){
+  const box = $('alertaCodigo');
+  if (!box || LEAN) return;
+  const e = estadoCodigo();
+  if (!e || e.estado === 'ok') { box.hidden = true; return; }
+  box.hidden = false;
+  box.dataset.estado = e.estado;
+  $('alertaCodigoTxt').textContent = e.msg;
+  const b = $('alertaCodigoBtn');
+  b.hidden = e.estado === 'nao-definido';
+}
+function colocaCodigo(){
+  instalaArtes();
+  const a = ARTES && ARTES.arte('codigo-revisao');
+  if (!a) { HubDialog.toast('a arte "Código da placa + revisão" não está na biblioteca (o administrador a tirou?) — abra as Artes', 'warn'); return; }
+  comecaArte(a);
+}
+function ligaBotaoArtes(){
+  const b = $('btnArtes');
+  if (!b || LEAN || typeof HubPcbIcones === 'undefined') return;
+  b.replaceChildren(HubPcbIcones.icone('artes'));
+  b.hidden = false;
+  b.addEventListener('click', () => { fazAcao('artes'); pintaBotaoArtes(); });
+}
+function pintaBotaoArtes(){ const b = $('btnArtes'); if (b) b.setAttribute('aria-pressed', String(!!(ARTES && ARTES.listaAberta()))); }
 
 /* ============================== a variante de projeto ==============================
    1.88.0 (hub-variantes.js, tools/rotas/variantes.py): a área nas Propriedades da placa, a barra que sobra no lugar da
@@ -8347,6 +8396,7 @@ window.__hubPcb = Object.assign(Object.create(V), {
   /* as artes de overlay (1.91.0): o controle da lista/Studio, pôr uma arte num ponto, a arte na mão */
   artes:() => ARTES, poeArte:(id, x, y, lado) => { const a = ARTES && ARTES.arte(id); return a ? poeArte(a, { x, y }, lado === 'Bottom' ? 180 : 0, lado || 'Top') : null; },
   comecaArte:id => { const a = ARTES && ARTES.arte(id); if (a) comecaArte(a); return !!a; },
+  codigoNaPlaca:() => estadoCodigo(),
   /* a borda (1.92.0): os segmentos, a caixa e as alças na tela */
   borda:() => { const s = segsContorno(); return { n:s.length, caixa:BD ? BD.caixa(s) : null, pts:HC.outlineToPts(s) }; },
   alcasBorda:() => { const B = bordaSel(); if (!B) return null; const n = B.pts.length, out = [];

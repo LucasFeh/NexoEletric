@@ -201,9 +201,10 @@ function instala(V) {
     box.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); fechaLista(); } });
     pintaLista();
     if (!ST.carregado) recarrega();
+    if (V.aoMudarLista) V.aoMudarLista();
     return ST.lista;
   }
-  function fechaLista() { if (ST.lista) { ST.lista.box.remove(); ST.lista = null; } }
+  function fechaLista() { if (ST.lista) { ST.lista.box.remove(); ST.lista = null; if (V.aoMudarLista) V.aoMudarLista(); } }
   function alterna() { if (ST.lista) fechaLista(); else abreLista(); }
   function pintaLista() {
     const L = ST.lista; if (!L) return;
