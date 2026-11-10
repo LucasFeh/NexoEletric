@@ -1643,6 +1643,7 @@ function desenhaSelecao(){
   if (arrasto && arrasto.moveu) return;           /* o que esta na mao ja aparece no lugar novo */
   for (const a of SEL) realcaAlvo(a, COR.sel, true);
   desenhaAlcas();
+  desenhaAlcasBorda();
 }
 let HOVER = null;
 function desenhaHover(){ if (HOVER && !selTem(HOVER) && tool === 'select' && !arrasto && !janela) realcaAlvo(HOVER, COR.sel, false); }
@@ -3905,6 +3906,180 @@ function editaContorno(a, k, v){
   pts[i0] = p0; pts[i1] = p1;
   return gravaContorno(pts, 'contorno editado no hub (reta ' + (a.i + 1) + ')');
 }
+/* ── A BORDA COM O MOUSE (1.92.0, pedido do dono: "expandir a seleção com tab 2x quando selecionar a borda da PCB, mas
+   só a borda pra movimentar, [...] arrastar, aumentar e diminuir a borda da PCB só com interface de click") ──
+   Clicou numa reta ou arco da borda: Tab seleciona a cadeia ligada a ele, Tab de novo a borda INTEIRA — só a borda. Com
+   a borda selecionada aparecem as alças: o vértice (bolinha) anda sozinho, o quadrado no meio de cada reta move a
+   aresta pela normal (as pontas deslizam pelas retas vizinhas: chanfro de 45° e canto em esquadro ficam) e a cruz no
+   meio da placa move a borda toda; arrastar a própria reta também move a aresta (ou a borda toda, quando ela inteira
+   está selecionada). As setas andam a borda inteira um passo da grade (Shift: 10). Grade e Ctrl (solta a grade) como
+   nas outras alças; a medida (largura × altura) ao vivo no cursor e no rodapé. Um gesto = UM outline_set (o mesmo do
+   Contorno e da ficha), então o Ctrl+Z volta tudo num passo; o Gerber, o DRC, o 3D, o PDF e o envio à JLC leem a borda
+   nova da placa efetiva. Arco acompanha os vértices (o bulge fica). Não edita quem não edita a placa (visualizador,
+   fora da equipe) nem com a variante ativa. As contas: hub-pcbborda.js. */
+let ultimoTabBorda = null;
+const BD = typeof HubPcbBorda !== 'undefined' ? HubPcbBorda : null;
+const alvoBorda = i => PORCHAVE.get('b:' + i) || null;
+function tabBorda(){
+  const segs = segsContorno();
+  if (!BD || !segs.length) return;
+  const chaveSel = SEL.map(chave).join('|');
+  let idx, nivel;
+  if (ultimoTabBorda && ultimoTabBorda.sel === chaveSel) { nivel = 2; idx = segs.map((s, i) => i); }
+  else {
+    nivel = 1; const u = new Set();
+    for (const a of SEL) for (const i of BD.cadeia(segs, a.i)) u.add(i);
+    idx = [...u].sort((x, y) => x - y);
+  }
+  const lista = idx.map(alvoBorda).filter(Boolean);
+  if (!lista.length) return;
+  selSo(lista);
+  ultimoTabBorda = { sel:SEL.map(chave).join('|'), nivel };
+  const c = BD.caixa(segs);
+  avisoRodape((nivel === 1 ? 'Tab: ' + lista.length + ' segmento(s) ligados' + (lista.length === segs.length ? ' (a borda inteira)' : '') + ' · Tab de novo: a borda inteira'
+    : 'Tab Tab: a borda inteira (' + lista.length + ' segmentos, ' + fmtDist(c.w) + ' × ' + fmtDist(c.h) + ' ' + unidade + ')') +
+    ' · arrastar move só a borda · alças: vértice, meio da reta, cruz no centro · setas andam · Esc limpa');
+  pede();
+}
+/* a borda selecionada e editável: {segs, pts, sel:Set(i), todos} ou null */
+function bordaSel(){
+  if (!BD || tool !== 'select' || !editOn || LEAN || !SEL.length || !SEL.every(a => a.t === 'contorno')) return null;
+  const segs = segsContorno(), pts = HC.outlineToPts(segs);
+  if (!pts || pts.length !== segs.length) return null;
+  return { segs, pts, sel:new Set(SEL.map(a => a.i)), todos:SEL.length >= segs.length };
+}
+function centroBorda(B){ const c = BD.caixa(B.segs); return c ? [(c.x1 + c.x2) / 2, (c.y1 + c.y2) / 2] : null; }
+/* a alça da borda debaixo do ponto de TELA s: {tipo:'vert'|'aresta'|'meio', i} */
+function alcaBordaEm(s){
+  const B = bordaSel();
+  if (!B) return null;
+  const perto = (p, r) => { const q = mundoParaTela(p[0], p[1]); return Math.hypot(s.x - q.x, s.y - q.y) <= r; };
+  const n = B.pts.length;
+  for (let i = 0; i < n; i++) if ((B.todos || B.sel.has(i) || B.sel.has((i - 1 + n) % n)) && perto(B.pts[i], 6)) return { tipo:'vert', i };
+  for (let i = 0; i < n; i++) {
+    if (!(B.todos || B.sel.has(i)) || !BD.arestaReta(B.pts, i)) continue;
+    const a = B.pts[i], b = B.pts[(i + 1) % n];
+    if (perto([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], 6)) return { tipo:'aresta', i };
+  }
+  if (B.todos) { const c = centroBorda(B); if (c && perto(c, 8)) return { tipo:'meio' }; }
+  return null;
+}
+/* arrastar a própria reta da borda */
+function alcaDoSegmento(a){
+  const B = bordaSel() || (BD ? { segs:segsContorno(), pts:HC.outlineToPts(segsContorno()), sel:new Set([a.i]), todos:false } : null);
+  if (!B || !B.pts) return null;
+  if (B.todos && selTem(a)) return { tipo:'meio' };
+  return BD.arestaReta(B.pts, a.i) ? { tipo:'aresta', i:a.i } : null;
+}
+function cursorAlcaBorda(ab){
+  if (ab.tipo !== 'aresta') return 'move';
+  const pts = HC.outlineToPts(segsContorno()), nn = pts && BD.normalAresta(pts, ab.i);
+  return nn && Math.abs(nn[0]) > Math.abs(nn[1]) ? 'ew-resize' : 'ns-resize';
+}
+function motivoNaoEditaPlaca(){ return motivoNaoPoeArte(); }
+function iniciaBorda(g){
+  const motivo = motivoNaoEditaPlaca();
+  if (motivo) { HubDialog.toast(motivo, 'warn', 6000); return false; }
+  if (!garanteEdicao()) return false;
+  const segs = segsContorno(), pts = HC.outlineToPts(segs);
+  if (!BD || !pts) { HubDialog.toast('a borda desta placa não fecha uma volta: edite pela ferramenta Contorno', 'warn'); return false; }
+  arrasto = { borda:true, tipo:g.ab.tipo, i:g.ab.i, pts0:pts, w0:g.inicio, novo:null, w:g.inicio, moveu:true };
+  return true;
+}
+const passoGrade = (v, livre) => (livre ? v : Math.round(v / grade.mm) * grade.mm);
+function atualizaBorda(e, w){
+  const a = arrasto, livre = e && e.ctrlKey;
+  a.w = w;
+  if (a.tipo === 'vert') a.novo = BD.moveVertice(a.pts0, a.i, livre ? w.x : snapV(w.x, grade.mm), livre ? w.y : snapV(w.y, grade.mm));
+  else if (a.tipo === 'aresta') {
+    const nn = BD.normalAresta(a.pts0, a.i);
+    const d = passoGrade((w.x - a.w0.x) * nn[0] + (w.y - a.w0.y) * nn[1], livre);
+    a.d = d; a.novo = BD.moveAresta(a.pts0, a.i, d);
+  } else a.novo = BD.transladaPts(a.pts0, passoGrade(w.x - a.w0.x, livre), passoGrade(w.y - a.w0.y, livre));
+  if (!a.novo) return;
+  const segs = HC.ptsToOutline(a.novo);
+  a.dim = segs ? BD.caixa(segs) : null;
+  a.ruim = !segs || BD.cruza(a.novo) || Math.abs(BD.area(a.novo)) < 1;
+  const oque = a.tipo === 'vert' ? 'vértice ' + (a.i + 1) : a.tipo === 'aresta' ? 'aresta ' + (a.i + 1) + (a.d >= 0 ? ' +' : ' ') + fmtDist(a.d) + ' ' + unidade : 'a borda inteira';
+  avisoRodape('Borda ' + (a.dim ? fmtDist(a.dim.w) + ' × ' + fmtDist(a.dim.h) + ' ' + unidade : '—') + ' · ' + oque + (a.ruim ? ' · ▲ a borda se cruzaria' : '') + ' · Ctrl solta a grade · Esc desiste');
+  pede();
+}
+function desenhaBordaArrasto(){
+  const a = arrasto;
+  if (!a || !a.novo) return;
+  const segs = HC.ptsToOutline(a.novo) || [];
+  ctx.save();
+  ctx.strokeStyle = a.ruim ? COR.del : COR.seta; ctx.lineWidth = px(2); ctx.setLineDash([px(6), px(3)]);
+  ctx.beginPath();
+  for (const s of segs) {
+    if (s.kind === 'arc') { ctx.moveTo(s.cx + s.r * Math.cos(s.sa * RAD), s.cy + s.r * Math.sin(s.sa * RAD)); ctx.arc(s.cx, s.cy, s.r, s.sa * RAD, s.ea * RAD, false); }
+    else { ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); }
+  }
+  ctx.stroke();
+  ctx.restore();
+  /* a medida ao vivo, ao lado do cursor (na tela) */
+  if (a.dim && a.w) {
+    const q = mundoParaTela(a.w.x, a.w.y), t = fmtDist(a.dim.w) + ' × ' + fmtDist(a.dim.h) + ' ' + unidade;
+    ctx.save(); ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.font = '600 12px ' + (getComputedStyle(document.body).getPropertyValue('--mono') || 'monospace');
+    const L = ctx.measureText(t).width + 12;
+    ctx.fillStyle = 'rgba(16,16,18,.88)'; ctx.fillRect(q.x + 14, q.y + 12, L, 20);
+    ctx.strokeStyle = a.ruim ? COR.del : COR.seta; ctx.lineWidth = 1; ctx.strokeRect(q.x + 14.5, q.y + 12.5, L - 1, 19);
+    ctx.fillStyle = '#ffffff'; ctx.textBaseline = 'middle'; ctx.fillText(t, q.x + 20, q.y + 22);
+    ctx.restore();
+  }
+}
+function terminaBorda(a){
+  if (!a.novo) { pede(); return; }
+  if (a.ruim) { HubDialog.toast('a borda ficaria com lados que se cruzam (ou sem área) — não mudei', 'warn'); pede(); return; }
+  const oque = a.tipo === 'vert' ? 'vértice ' + (a.i + 1) : a.tipo === 'aresta' ? 'aresta ' + (a.i + 1) : 'borda movida';
+  if (gravaContorno(a.novo, 'borda editada no hub (' + oque + ': ' + fmtNum(a.dim.w, 3) + ' x ' + fmtNum(a.dim.h, 3) + ' mm)')) commit(); else pede();
+}
+function empurraBorda(d, grande){
+  const B = bordaSel();
+  if (!B) return;
+  if (!B.todos) { avisoRodape('as setas andam a borda INTEIRA: Tab Tab seleciona ela toda'); return; }
+  const motivo = motivoNaoEditaPlaca();
+  if (motivo) { HubDialog.toast(motivo, 'warn', 6000); return; }
+  if (!garanteEdicao()) return;
+  const p = grade.mm * (grande ? 10 : 1);
+  if (gravaContorno(BD.transladaPts(B.pts, d[0] * p, d[1] * p), 'borda movida no hub (setas)')) { commit(); avisoRodape('borda +' + fmtDist(d[0] * p) + ' ; ' + fmtDist(d[1] * p) + ' ' + unidade); }
+}
+function desenhaAlcasBorda(){
+  const B = bordaSel();
+  if (!B) return;
+  const n = B.pts.length, r = px(4);
+  ctx.save(); ctx.setLineDash([]);
+  for (let i = 0; i < n; i++) {
+    if (!(B.todos || B.sel.has(i)) || !BD.arestaReta(B.pts, i)) continue;
+    const a = B.pts[i], b = B.pts[(i + 1) % n], m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    ctx.fillStyle = COR.sel; ctx.fillRect(m[0] - r, m[1] - r, 2 * r, 2 * r);
+    ctx.strokeStyle = '#1f6feb'; ctx.lineWidth = px(1.2); ctx.strokeRect(m[0] - r, m[1] - r, 2 * r, 2 * r);
+  }
+  for (let i = 0; i < n; i++) {
+    if (!(B.todos || B.sel.has(i) || B.sel.has((i - 1 + n) % n))) continue;
+    const p = B.pts[i];
+    ctx.beginPath(); ctx.arc(p[0], p[1], px(3.5), 0, 2 * Math.PI);
+    ctx.fillStyle = COR.seta; ctx.fill(); ctx.strokeStyle = '#000000'; ctx.lineWidth = px(1); ctx.stroke();
+  }
+  if (B.todos) {
+    const c = centroBorda(B);
+    if (c) {
+      ctx.strokeStyle = COR.seta; ctx.lineWidth = px(2);
+      ctx.beginPath(); ctx.moveTo(c[0] - px(9), c[1]); ctx.lineTo(c[0] + px(9), c[1]); ctx.moveTo(c[0], c[1] - px(9)); ctx.lineTo(c[0], c[1] + px(9)); ctx.stroke();
+      ctx.beginPath(); ctx.arc(c[0], c[1], px(5), 0, 2 * Math.PI); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+function fichaBorda(){
+  const segs = segsContorno(), c = BD ? BD.caixa(segs) : null;
+  const est = model.outlineChanged ? 'mudada no hub (outline_set)' : 'do Altium';
+  return { titulo:'Board Outline', sub:'borda inteira · ' + SEL.length + ' de ' + segs.length + ' segmentos · ' + est, campos:[
+    par('Size', { k:'w', rot:'Width', tipo:'ro', v:c ? fmtDist(c.w) + ' ' + unidade : '—' }, { k:'h', rot:'Height', tipo:'ro', v:c ? fmtDist(c.h) + ' ' + unidade : '—' }),
+    { nota:'Arraste a borda (ou a cruz no meio) para movê-la; o quadrado no meio de uma reta move a aresta (aumenta ou diminui a placa daquele lado); a bolinha move o vértice. Setas: um passo da grade (Shift: 10). Grava um outline_set; Ctrl+Z volta.' },
+  ] };
+}
 function desfazPontoPoligono(){
   if (!draft) return false;
   if ((draft.tipo === 'poligono' || draft.tipo === 'contorno' || draft.tipo === 'pour') && draft.pts.length) {
@@ -4269,6 +4444,7 @@ function desenhaArrasto(){
     realcaPonta(o, arrasto.ponta.qual);
     return;
   }
+  if (arrasto.borda) { desenhaBordaArrasto(); return; }
   if (arrasto.estica) { desenhaEstica(); return; }
   const P = arrasto.topo && arrasto.topo.plano;
   realcaDonosDoArrasto();
@@ -4507,6 +4683,7 @@ function pintaStatusSel(){
   const el = $('ssel'); if (!el) return;
   if (!SEL.length) { el.textContent = ''; return; }
   if (SEL.length === 1) { el.textContent = 'sel.: ' + rotuloAlvo(SEL[0]); return; }
+  if (SEL.every(a => a.t === 'contorno')) { const n = segsContorno().length; el.textContent = 'sel.: borda da placa — ' + SEL.length + (SEL.length === n ? ' segmentos (inteira)' : ' de ' + n + ' segmentos'); return; }
   el.textContent = SEL.length + ' selecionados';
 }
 function avisoRodape(t){ const el = $('smsg'); if (el) el.textContent = t || ''; }
@@ -5181,6 +5358,7 @@ cv.addEventListener('mousedown', e => {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !LEAN) { realcaNetEm(w); return; }
   /* a cota da regua anda pela linha de cota: arrastar muda por onde ela passa (nao pede edicao) */
   if (!LEAN) { const c = cotaEm(w); if (c) { gesto = { modo:'cota', cota:c, s, inicio:w, moveu:false }; return; } }
+  if (editOn && !LEAN) { const ab = alcaBordaEm(s); if (ab) { gesto = { modo:'borda', ab, s, inicio:w }; return; } }
   if (editOn && !LEAN) { const al = alcaEm(s); if (al) { gesto = { modo:'alca', al, s, inicio:w }; return; } }
   /* a ponta so com UMA trilha selecionada: a selecao do Tab (varias) anda inteira */
   if (editOn && !LEAN && SEL.length === 1) {
@@ -5208,8 +5386,8 @@ window.addEventListener('mousemove', e => {
   ultimoMouse = { x:e.clientX, y:e.clientY };
   cursorW = w; pintaCursor(w);
   if (tool === 'select') {
-    const al = alcaEm(s);
-    cv.style.cursor = al ? cursorAlca(al) : 'default';
+    const ab = alcaBordaEm(s), al = ab ? null : alcaEm(s);
+    cv.style.cursor = ab ? cursorAlcaBorda(ab) : al ? cursorAlca(al) : 'default';
     const h = hitsEm(w.x, w.y)[0] || null;
     if (h !== HOVER) { HOVER = h; $('shover').textContent = h ? rotuloAlvo(h) : ''; pede(); }
   } else if (tool === 'medir') {
@@ -5239,6 +5417,9 @@ function moveGesto(e, s, w){
   if (g.modo === 'nada') { if (longe && !g.avisou) { g.avisou = true; avisoTrava(); } return; }
   if (g.modo === 'ponta') { if (!arrasto && !longe) return; if (!arrasto) iniciaPonta(g); atualizaPonta(e, w); return; }
   if (g.modo === 'alca') { if (!arrasto && !longe) return; if (!arrasto) iniciaEstica(g); atualizaEstica(e, w); return; }
+  /* a borda da placa (1.92.0): arrastar a reta da borda move a aresta; com a borda inteira selecionada, a borda toda */
+  if (g.modo === 'mover' && !arrasto && g.topo && g.topo.t === 'contorno') { const ab = alcaDoSegmento(g.topo); if (!ab) { if (longe) { g.modo = 'nada'; HubDialog.toast('O arco da borda acompanha as retas vizinhas: arraste uma reta, um vértice ou (Tab Tab) a borda inteira', 'info', 4000); } return; } g.modo = 'borda'; g.ab = ab; }
+  if (g.modo === 'borda') { if (!arrasto && !longe) return; if (!arrasto && !iniciaBorda(g)) { g.modo = 'nada'; g.avisou = true; return; } atualizaBorda(e, w); return; }
   if (g.modo === 'mover') { if (!arrasto && !longe) return; if (!arrasto && !iniciaArrasto(g)) return; atualizaArrasto(e, w); return; }
   if (g.modo === 'cota') {
     if (!g.moveu && !longe) return;
@@ -5503,6 +5684,7 @@ function terminaArrasto(){
   arrasto = null; EXCLUI = null; cacheSujo = true;
   avisoRodape('');
   if (a.estica) { terminaEstica(a); return; }
+  if (a.borda) { terminaBorda(a); return; }
   if (a.ponta) {
     if (a.pontaGeo) {
       const m = a.ponta.alvo.m, e = m.eff;
@@ -5780,6 +5962,12 @@ window.addEventListener('keydown', e => {
       if (e.key === '2' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); rotaVia(false); return; }
       if (e.key === '*' || k === 'Ctrl+2' || k === teclaDe('via') || k === teclaDe('outraFace')) { e.preventDefault(); rotaVia(true); return; }
     }
+  }
+  /* 1.92.0: a borda da placa selecionada — Tab: a cadeia, Tab Tab: a borda inteira (só ela); setas: a borda anda */
+  if (tool === 'select' && SEL.length && SEL.every(a => a.t === 'contorno') && !arrasto && !LEITOR.pendente() && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    if (e.key === 'Tab') { e.preventDefault(); tabBorda(); return; }
+    const dSeta = { ArrowLeft:[-1, 0], ArrowRight:[1, 0], ArrowUp:[0, 1], ArrowDown:[0, -1] }[e.key];
+    if (dSeta) { e.preventDefault(); empurraBorda(dSeta, e.shiftKey); return; }
   }
   if (tool === 'select' && e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey && !arrasto && !LEITOR.pendente()) {
     e.preventDefault(); tabTopologia(); return;
@@ -7068,6 +7256,7 @@ function fichaFerramenta(){
 function ficha(){
   if (tool !== 'select') return Object.assign({ tipo:'ferramenta' }, fichaFerramenta());
   if (!SEL.length) return { tipo:'placa' };
+  if (SEL.length > 1 && SEL.every(a => a.t === 'contorno') && !retanguloDe(segsContorno())) return Object.assign({ tipo:'objeto' }, fichaBorda());
   if (SEL.length === 1) return Object.assign({ tipo:'objeto' }, fichaDe(SEL[0]));
   return Object.assign({ tipo:'multi' }, fichaMulti(SEL));
 }
@@ -8158,6 +8347,12 @@ window.__hubPcb = Object.assign(Object.create(V), {
   /* as artes de overlay (1.91.0): o controle da lista/Studio, pôr uma arte num ponto, a arte na mão */
   artes:() => ARTES, poeArte:(id, x, y, lado) => { const a = ARTES && ARTES.arte(id); return a ? poeArte(a, { x, y }, lado === 'Bottom' ? 180 : 0, lado || 'Top') : null; },
   comecaArte:id => { const a = ARTES && ARTES.arte(id); if (a) comecaArte(a); return !!a; },
+  /* a borda (1.92.0): os segmentos, a caixa e as alças na tela */
+  borda:() => { const s = segsContorno(); return { n:s.length, caixa:BD ? BD.caixa(s) : null, pts:HC.outlineToPts(s) }; },
+  alcasBorda:() => { const B = bordaSel(); if (!B) return null; const n = B.pts.length, out = [];
+    for (let i = 0; i < n; i++) if ((B.todos || B.sel.has(i)) && BD.arestaReta(B.pts, i)) { const a = B.pts[i], b = B.pts[(i + 1) % n]; out.push({ tipo:'aresta', i, x:(a[0] + b[0]) / 2, y:(a[1] + b[1]) / 2, normal:BD.normalAresta(B.pts, i) }); }
+    const c = B.todos ? centroBorda(B) : null; if (c) out.push({ tipo:'meio', x:c[0], y:c[1] });
+    return out; },
   historico:() => ({ desfazer:undoStack.length > 1, refazer:redoStack.length > 0 }),
   valida:() => HC.applyPcbChanges(B, CH).changeItems.map(i => ({ op:i.ch.op, status:i.status, msg:i.msg || '' })),
   /* o Auto-rotear: abrir (com o worker ou, worker:null, em fatias), o controle aberto e a prévia na placa */

@@ -4,6 +4,38 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.92.0 — 2026-11-10
+
+**A borda da placa com o mouse: Tab, Tab seleciona a borda inteira (e só ela), e as alças arrastam a borda, uma aresta
+ou um vértice, com a medida ao vivo.**
+Pedido do dono: "eu também queria que fosse possível expandir a seleção com tab 2x quando selecionar a borda da PCB, mas
+só a borda pra movimentar, também queria que fosse possível arrastar, aumentar e diminuir a borda da PCB só com interface
+de click".
+- **Tab na borda (como no Altium):** clicou numa reta ou arco da borda da placa (o `board.outline`, a Board Shape do
+  Altium), **Tab** seleciona os segmentos ligados a ele (a cadeia) e **Tab de novo** a borda **inteira** — só a borda:
+  nenhum componente, trilha ou serigrafia entra. A barra de status diz "borda da placa — N segmentos (inteira)" (ou "N de
+  M"); o rodapé mostra a largura × altura; Esc limpa. A ficha da borda inteira mostra Width/Height e como editar (o
+  retângulo continua com a ficha de Largura/Altura/Origem da 1.70.0).
+- **Alças da borda selecionada:** a **bolinha** de cada vértice move o vértice; o **quadrado no meio de cada reta** move a
+  aresta pela normal — aumenta ou diminui a placa daquele lado —, com as pontas deslizando pelas retas vizinhas (o canto
+  em esquadro continua em esquadro e o chanfro de 45° continua de 45°, como os da DMB); a **cruz no meio** move a borda
+  toda. Arrastar a própria reta da borda também move a aresta (ou a borda toda, quando ela inteira está selecionada). As
+  **setas** andam a borda inteira um passo da grade (Shift: 10 passos). A grade da vista vale (Ctrl solta), e a medida
+  **largura × altura aparece ao vivo** ao lado do cursor e no rodapé; borda que se cruzaria fica vermelha e não grava.
+  Arco da borda (a orelha da DMB embaixo à direita) acompanha os vértices ligados nele.
+- **Um gesto = um passo do Ctrl+Z:** cada arrasto grava um `outline_set` (o mesmo da ferramenta Contorno e da ficha,
+  trocando o anterior), então o desfazer volta tudo de uma vez. O Gerber (Profile), o DRC, o 3D, o PDF e o Enviar pra JLC
+  leem a borda nova da placa efetiva (conferido: o Profile do Gerber vai até a borda arrastada).
+- **Permissões:** visualizador e quem não é da equipe do projeto não editam a borda (o aviso diz por quê); com a variante
+  de projeto ativa a PCB é a da padrão e não se edita (regra da 1.88.0).
+- As contas ficam em `hub-pcbborda.js` (cadeia, caixa, mover aresta/vértice/borda, normal, cruzamento), puras e testadas.
+- Testes novos: `tests/test-pcbborda.js` (retângulo: a aresta cresce e diminui em esquadro, sentido horário e anti-horário,
+  a borda anda, vértice; a DMB: a cadeia é a borda inteira, a aresta da esquerda +5 mm deixa a placa 5 mm mais larga com os
+  chanfros no mesmo ângulo, fechada e sem cruzar, e o Profile do Gerber acompanha) e o smoke `tests/smoke-borda.js` (a
+  vista de verdade numa cópia da DMB: clique na reta, Tab = cadeia só de borda, Tab Tab = os 13 segmentos e a contagem na
+  barra; a cruz move a borda 5 mm e o Ctrl+Z volta num passo; o quadrado da aresta da direita arrastado 6 mm com a medida ao
+  vivo, um outline_set, mesma altura, fechada, Gerber acompanha, Ctrl+Z volta; a seta sobe a borda).
+
 ## 1.91.0 — 2026-11-10
 
 **Artes de overlay na PCB: a logo DiEletrons com o QR do site e o código da placa + revisão viram artes padrão que se
