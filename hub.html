@@ -305,6 +305,12 @@ tbody tr[aria-selected="true"] { background: rgba(var(--tint),0.09); box-shadow:
 .bom-view iframe { flex: 1; width: 100%; border: 0; background: var(--sunken); }
 .bom-path { font-family: var(--mono); font-size: 11px; color: var(--text-3);
   word-break: break-all; margin: 4px 0 0; }
+.bom-outros { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+.bom-outros[hidden] { display: none; }
+.bom-outros-t { font-size: 11px; color: var(--text-3); }
+.bom-outro { text-align: left; font-family: var(--mono); font-size: 11px; color: var(--text-2); background: none;
+  border: 0; padding: 2px 0; cursor: pointer; word-break: break-all; }
+.bom-outro:hover { color: var(--text); text-decoration: underline; }
 
 /* laser: opções · prévia · resumo. Reusa .nd-fields/.nd-check/.nd-hint/.nd-sep. */
 .lz-grid { height: 100%; display: grid; min-height: 0;
@@ -1120,6 +1126,7 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
           <div id="bomWarn"></div>
           <button class="btn btn-primary" id="bomLink" style="width:100%;margin-top:16px">Copiar link</button>
           <p class="nd-hint bom-path" id="bomNome"></p>
+          <div class="bom-outros" id="bomOutros" hidden></div>
         </aside>
 
         <div class="split" data-split="l" title="arraste para redimensionar · duplo clique fecha/abre"></div>
@@ -3968,6 +3975,17 @@ let bomTimer = null, bomFeito = null, bomPedido = 0; /* evita resposta antiga ap
 const varAtiva = () => (window.HubVariantes && proj() ? HubVariantes.ativa(proj().name) : null);
 const supDoProjeto = () => (window.HubVariantes ? HubVariantes.refs(S.detail && S.detail.schematic, varAtiva()) : new Set());
 const dnpDoProjeto = () => { const s = HubCore.dnpRefs(S.detail && S.detail.schematic); for (const r of supDoProjeto()) s.add(r); return s; };
+/* 1.89.4: o titulo da BOM = o nome ATUAL da placa (o hubserver o lê do cabeçalho a cada /source: bomNomeSrv); sem ele,
+   pelo cabeçalho que o hub tem (o mesmo do hubserver.py » bom_alvos: "<código> · <nome>", e na variante o código da PCB
+   montada "<código> <NOME DA VARIANTE>"); sem placa definida, a pasta */
+let bomNomeSrv = null;   /* {chave: projeto|variante, nome} */
+function bomNome(p, v) {
+  const k = ((p && p.id) || '') + '|' + ((v && v.id) || '');
+  if (bomNomeSrv && bomNomeSrv.chave === k && bomNomeSrv.nome) return bomNomeSrv.nome;
+  const c = window.HubVariantes ? HubVariantes.codigos(S.detail && S.detail.schematic, v) : null;
+  if (c && c.placa) return v ? c.montada : (c.nomePlaca ? c.placa + ' · ' + c.nomePlaca : c.placa);
+  return ((c && c.nomePlaca) || (p && p.name) || 'placa') + (v ? ' ' + String(v.nome || v.codigo || '').toUpperCase() : '');
+}
 function bomGerar(B) {
   B = B || bomBoard();
   if (!B) return null;
@@ -3978,7 +3996,7 @@ function bomGerar(B) {
   const dnp = HubCore.dnpRefs(S.detail && S.detail.schematic);
   if (dnp.size) B = Object.assign({}, B, { components: (B.components || []).map(c => dnp.has(String(c.ref)) ? Object.assign({}, c, { dnp: true }) : c) });
   const v = varAtiva();
-  return HubBom.gerar(B, S.bom, { proj: ((p && p.name) || 'placa') + (v ? HubVariantes.sufixo(v) : ''), generated: B.generated || '' });
+  return HubBom.gerar(B, S.bom, { proj: bomNome(p, v), generated: B.generated || '' });
 }
 
 async function bomCompute() {
@@ -3988,10 +4006,12 @@ async function bomCompute() {
   let B = bomBoard();
   if (location.protocol.startsWith('http')) {
     try {
-      const resp = await fetch('/api/bom/' + encodeURIComponent(p.id) + '/source', { cache:'no-store' });
+      const va = varAtiva();
+      const resp = await fetch('/api/bom/' + encodeURIComponent(p.id) + '/source?variante=' + encodeURIComponent((va && va.id) || ''), { cache:'no-store' });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const dado = await resp.json();
       if (!dado.ok || !dado.board) throw new Error(dado.error || 'resposta vazia');
+      bomNomeSrv = { chave: p.id + '|' + ((va && va.id) || ''), nome: dado.projeto || '' };
       B = HubPlacaViva.mesclaEsquema(bomBoard(), S.detail && S.detail.board, dado.board);
     } catch (e) {
       if (pedido === bomPedido) $('#bomMeta').textContent = 'falha ao atualizar: ' + e.message;
@@ -4028,24 +4048,50 @@ async function bomCompute() {
 
    Enquanto ninguém copiou, mostra o endereço daqui; depois de copiar, mostra o que foi
    copiado de verdade — que é o de REDE, e não o localhost que este navegador usou. */
-let bomUrl = null;          /* {id, url} do último link copiado */
+let bomUrl = null;          /* {id, url} do último link copiado (id = projeto|variante) */
+/* 1.89.4: o link é o da PLACA (o código do cabeçalho, lido pelo hubserver agora) e o da variante ativa; as outras variantes
+   do projeto têm o link delas, listado embaixo (clique copia). O link antigo (pela pasta) continua abrindo a padrão. */
+const bomChave = p => p.id + '|' + (((varAtiva() || {}).id) || '');
+function bomOutros(j) {
+  const box = $('#bomOutros');
+  if (!box) return;
+  box.textContent = '';
+  const outros = ((j && j.ok && j.links) || []).filter(l => !l.ativa);
+  if (!outros.length) { box.hidden = true; return; }
+  box.hidden = false;
+  box.append(el('div', 'bom-outros-t', 'outras variantes:'));
+  for (const l of outros) {
+    const b = el('button', 'bom-outro', (l.variante ? (l.variante.nome || l.variante.codigo) : 'Padrão') + ' — ' + l.url);
+    b.type = 'button';
+    b.title = 'copiar o link da BOM ' + l.nome;
+    b.onclick = async () => {
+      try { await navigator.clipboard.writeText(l.url); toast('link copiado: ' + l.url, 'ok'); }
+      catch (e) { toast('o link é ' + l.url, 'warn', 8000); }
+    };
+    box.append(b);
+  }
+}
 function bomFooter() {
   const p = proj();
-  if (!p) { $('#bomNome').textContent = ''; return; }
+  if (!p) { $('#bomNome').textContent = ''; bomOutros(null); return; }
   if (!location.protocol.startsWith('http')) {
     $('#bomNome').textContent = 'o link precisa do hub servido por hubserver.py';
     return;
   }
-  $('#bomNome').textContent = (bomUrl && bomUrl.id === p.id)
+  const k = bomChave(p);
+  $('#bomNome').textContent = (bomUrl && bomUrl.id === k)
     ? bomUrl.url
     : location.origin + HubBom.linkDe(p.id);
   /* BOM de referencia noutro lugar (app desktop -> a do NexoBD, 1.31.0): o rodape mostra ESSA; sem o Nexo Hub,
      o motivo de nao haver link, e nao o endereco local */
-  if (!(bomUrl && bomUrl.id === p.id) && (HubBom.linkInfo || HubBom.linkRef)) {
+  if (HubBom.linkInfo || HubBom.linkRef) {
     (HubBom.linkInfo ? HubBom.linkInfo(p.id) : HubBom.linkRef(p.id).then(u => u && { ok: true, externo: true, url: u })).then(j => {
       const q = proj();
-      if (!j || !q || q.id !== p.id || (bomUrl && bomUrl.id === p.id)) return;
+      if (!j || !q || q.id !== p.id || bomChave(q) !== k) return;
+      bomOutros(j);
+      if (bomUrl && bomUrl.id === k) return;
       if (j.ok && j.externo && j.url) $('#bomNome').textContent = j.url;
+      else if (j.ok && j.id) $('#bomNome').textContent = location.origin + HubBom.linkDe(j.id);
       else if ((j.nexobd || j.semHub) && !j.ok) $('#bomNome').textContent = j.error || 'BOM sem link: sem conexão com o Nexo Hub';
     });
   }
@@ -4106,7 +4152,7 @@ async function bomCopiarLink() {
   if (!bomBoard()) return toast('sem board.js — rode ExportPcb no Altium', 'err');
   const r = await HubBom.copiarLink(p.id, S.bom);
   if (!r.ok) return toast(r.error, 'err');
-  bomUrl = { id: p.id, url: r.url };
+  bomUrl = { id: bomChave(p), url: r.url };
   bomFooter();
   /* o link e o do NexoBD, mas a BOM ainda nao esta la (ou o NexoBD nao respondeu pela rede) */
   if (r.aviso) return toast((r.copiou ? 'link do NexoBD copiado — ' : 'o link está no rodapé — ') + r.aviso, 'warn');
@@ -4127,7 +4173,7 @@ async function bomAbrir() {
   const info = HubBom.linkInfo ? await HubBom.linkInfo(p.id) : null;
   if (info && (info.nexobd || info.semHub) && !info.ok) return toast(info.error || 'BOM sem link: sem conexão com o Nexo Hub', 'warn');
   const ref = info ? (info.ok && info.externo ? info.url : null) : (HubBom.linkRef ? await HubBom.linkRef(p.id) : null);
-  window.open(ref || HubBom.linkDe(p.id), '_blank');
+  window.open(ref || HubBom.linkDe((info && info.ok && info.id) || p.id), '_blank');
 }
 
 /* sem projeto não há barra, abas nem painel para desenhar (todos leem proj()):

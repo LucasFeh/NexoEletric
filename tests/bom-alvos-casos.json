@@ -1,0 +1,54 @@
+{
+  "_": "1.89.4: o link da BOM pela placa e por variante. A mesma regra no hubserver.py (bom_alvos) e no electron/lib/bom-alvos.js; tests/test_bomlink_placa.py e electron/test/bom-alvos.test.js conferem os dois com estes casos.",
+  "casos": [
+    {
+      "pasta": "DMB - DI231765_P2",
+      "params": { "CodigoDaPlaca": "PMD-DI261946", "NomeDaPlaca": "PLACA MAE DMB", "CodigoDoEquipamento": "DMB-DI231765" },
+      "variantes": [
+        { "id": "v1a2b3c4", "nome": "Sem display", "codigo": "DMBSD-DI261950" },
+        { "id": "v5d6e7f8", "nome": "Versão 2", "codigo": "DMBV2-DI261951" }
+      ],
+      "esperado": [
+        { "variante": null, "id": "pmd-di261946", "nome": "PMD-DI261946 · PLACA MAE DMB", "apelidos": ["dmb-di231765-p2"] },
+        { "variante": { "id": "v1a2b3c4", "nome": "Sem display", "codigo": "DMBSD-DI261950" }, "id": "pmd-di261946-sem-display", "nome": "PMD-DI261946 SEM DISPLAY", "apelidos": [] },
+        { "variante": { "id": "v5d6e7f8", "nome": "Versão 2", "codigo": "DMBV2-DI261951" }, "id": "pmd-di261946-versao-2", "nome": "PMD-DI261946 VERSÃO 2", "apelidos": [] }
+      ]
+    },
+    {
+      "pasta": "LM555 astável",
+      "params": { "CodigoDaPlaca": "PROJETO NÃO DEFINIDO" },
+      "variantes": [],
+      "esperado": [
+        { "variante": null, "id": "lm555-ast-vel", "nome": "LM555 astável", "apelidos": [] }
+      ]
+    },
+    {
+      "pasta": "PACI-DI221687",
+      "params": { "CodigoDaPlaca": "PACI-DI221687" },
+      "variantes": [{ "id": "v0000aa", "nome": "X", "codigo": "EQX-DI1" }],
+      "esperado": [
+        { "variante": null, "id": "paci-di221687", "nome": "PACI-DI221687", "apelidos": [] },
+        { "variante": { "id": "v0000aa", "nome": "X", "codigo": "EQX-DI1" }, "id": "paci-di221687-x", "nome": "PACI-DI221687 X", "apelidos": [] }
+      ]
+    },
+    {
+      "pasta": "Placa sem código",
+      "params": { "NomeDaPlaca": "FONTE 24V" },
+      "variantes": [{ "id": "v0000bb", "nome": "Lite", "codigo": "EQL-DI2" }],
+      "esperado": [
+        { "variante": null, "id": "placa-sem-c-digo", "nome": "FONTE 24V", "apelidos": [] },
+        { "variante": { "id": "v0000bb", "nome": "Lite", "codigo": "EQL-DI2" }, "id": "placa-sem-c-digo-lite", "nome": "FONTE 24V LITE", "apelidos": [] }
+      ]
+    },
+    {
+      "pasta": "PMD-DI261946 Sem display",
+      "params": { "CodigoDaPlaca": "PMD-DI261946" },
+      "variantes": [{ "id": "v0000cc", "nome": "Sem display", "codigo": "EQS-DI3" }, { "id": "v0000dd", "nome": "Sem-display", "codigo": "EQT-DI4" }],
+      "esperado": [
+        { "variante": null, "id": "pmd-di261946", "nome": "PMD-DI261946", "apelidos": [] },
+        { "variante": { "id": "v0000cc", "nome": "Sem display", "codigo": "EQS-DI3" }, "id": "pmd-di261946-sem-display", "nome": "PMD-DI261946 SEM DISPLAY", "apelidos": [] },
+        { "variante": { "id": "v0000dd", "nome": "Sem-display", "codigo": "EQT-DI4" }, "id": "pmd-di261946-sem-display-v0000dd", "nome": "PMD-DI261946 SEM-DISPLAY", "apelidos": [] }
+      ]
+    }
+  ]
+}

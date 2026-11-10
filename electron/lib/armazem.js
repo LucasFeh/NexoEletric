@@ -35,6 +35,7 @@ const { createHash } = require('node:crypto');
 const os = require('node:os');
 const { PY_FLAGS } = require('./python-flags');
 const sincronia = require('./sincronia');
+const bomAlvos = require('./bom-alvos');
 
 const ESPERA = 3000;
 const ESPERA_EVENTO = 1500;
@@ -179,78 +180,162 @@ async function publicarWebBom({ cliente, bundle, versao, estado, log = () => {} 
 }
 
 /**
- * A BOM de cada projeto no NexoBD. fonte(nome, slug) → {ok, board} (o /api/bom/<slug>/source do hubserver) ou null
- * (hub fora: fica para a rodada seguinte). estado = {nome: {item, board, sch, opts}} (mudado aqui).
- * → {atualizados: [nomes], pendentes: [nomes], erros: [{nome, erro}]}
+ * A BOM de cada projeto no NexoBD. 1.89.4 (pedido do dono: o link pelo nome ATUAL da placa, e um link por variante):
+ * cada projeto tem uma BOM por alvo de lib/bom-alvos.js -- a padrao em /bom/<slug do codigo da placa> e cada variante
+ * em /bom/<placa>-<variante>, com os suprimidos dela fora. Um item por alvo (chave nexoeletric-bom = o id do link); o
+ * slug da pasta (o link de antes da 1.89.4) e os ids que o alvo ja teve (codigo da placa trocado, variante renomeada)
+ * continuam como outras chaves do MESMO item: o link ja distribuido abre a BOM de hoje, com os vistos da bancada.
+ * Um id de link que e o atual de outro projeto (duas pastas com o mesmo codigo de placa) nao e tomado: fica com quem
+ * ja o tem no NexoBD, e o outro vai para os erros.
+ * fonte(nome, slug, variante) → {ok, board} (o /api/bom/<slug>/source?variante= do hubserver; '' = a padrao) ou null
+ * (hub fora: fica para a rodada seguinte). estado = {nome: {v: 2, alvos: {<id da variante ou ''>: {item, id}}, board,
+ * sch, changes, vars, opts, lista}} (mudado aqui). → {atualizados: [nomes], pendentes: [nomes], erros: [{nome, erro}]}
  */
 async function espelharBoms({ cliente, ws, nomes, estado, fonte, versao = '', apagados = [], log = () => {} }) {
   const out = { atualizados: [], pendentes: [], erros: [] };
+  const vivo = async (busca) => { try { const it = await busca(); return it && !it.apagado_em ? it : null; } catch { return null; } };
   for (const nome of apagados) {
     try {
-      const it = await cliente.chave(SISTEMA_BOM, slugProjeto(nome));
-      if (it && !it.apagado_em && (it.atributos || {}).projeto === nome) { await cliente.apagarItem(it.id); log(`- BOM ${nome}: apagada no NexoBD`); }
+      const e = estado[nome] || {};
+      const ids = new Set([e.item, ...Object.values(e.alvos || {}).map((a) => a && a.item)].filter(Boolean));
+      const it = await vivo(() => cliente.chave(SISTEMA_BOM, slugProjeto(nome)));
+      if (it && (it.atributos || {}).projeto === nome) ids.add(it.id);
+      for (const id of ids) { try { await cliente.apagarItem(id); } catch { /* ja apagada */ } }
+      if (ids.size) log(`- BOM ${nome}: apagada no NexoBD`);
     } catch (err) { out.erros.push({ nome, erro: err.message }); }
     delete estado[nome];
   }
-  for (const nome of nomes) {
+  // os alvos de todos os projetos antes de publicar: quem e o dono ATUAL de cada id de link
+  const info = [];
+  for (const nome of [...nomes].sort()) {
     const pasta = path.join(ws, 'Projects', nome);
     const shaB = sha256Arq(path.join(pasta, 'board.js'));
     if (!shaB) continue;                                       // sem board.js nao ha BOM
     const shaS = sha256Arq(path.join(pasta, 'schematic.js'));
     const shaC = sha256Arq(path.join(pasta, 'changes.js'));   // a PCB mexida no hub tambem muda a BOM (1.33.0)
+    const shaV = sha256Arq(path.join(pasta, 'variantes.json'));
     let optsTxt = null;
     try { const o = JSON.parse(fs.readFileSync(path.join(pasta, 'bom-opts.json'), 'utf8')); if (o && typeof o === 'object' && !Array.isArray(o)) optsTxt = jsonCanonico(o); } catch { /* sem opcoes */ }
     const shaO = optsTxt ? sha256(optsTxt) : null;
     const e = estado[nome] || (estado[nome] = {});
-    if (e.item && e.board === shaB && e.sch === shaS && (e.changes || null) === shaC && e.opts === shaO) continue;
-    const slug = slugProjeto(nome);
-    try {
-      let it = await cliente.chave(SISTEMA_BOM, slug);
-      if (it && it.apagado_em) it = null;
-      if (!it) {
-        it = await cliente.criarItem({ tipo: 'outro', categoria: 'nexoeletric', nome: `BOM: ${nome}`, descricao: 'A BOM do projeto para a bancada: o NexoBD serve em /bom/' + slug,
-          atributos: { programa: 'nexoeletric', projeto: nome, id: slug }, chaves: [{ sistema: SISTEMA_BOM, chave: slug }], app: APP });
-        log(`+ BOM ${nome}: item ${it.id} criado no NexoBD`);
-      }
-      const arqs = it.arquivos || {};
-      const arquivos = {};
-      let fonteAtual = null;
-      if (arqs['fonte.json']) { try { fonteAtual = JSON.parse(Buffer.from(await cliente.blob(arqs['fonte.json'].sha256)).toString('utf8')); } catch { fonteAtual = null; } }
-      const fontes = { board: shaB, schematic: shaS, changes: shaC };
-      let pendente = false;
-      if (!fonteAtual || !fonteAtual.fontes || fonteAtual.fontes.board !== shaB || (fonteAtual.fontes.schematic || null) !== shaS ||
-          (fonteAtual.fontes.changes || null) !== shaC) {
-        const f = await fonte(nome, slug);
-        if (f && f.ok && f.board) {
-          const tag = sha256(`${shaB}|${shaS || ''}|${shaC || ''}`).slice(0, 12);
-          arquivos['fonte.json'] = { bytes: Buffer.from(JSON.stringify({ ok: true, projeto: nome, board: f.board, sourceRev: tag, fontes, gerado_em: new Date().toISOString(), gerador: `NexoEletric ${versao}`.trim() })), nome: 'fonte.json' };
-        } else pendente = true;
-      }
-      if (optsTxt && (!arqs['opts.json'] || arqs['opts.json'].sha256 !== shaO)) arquivos['opts.json'] = { bytes: Buffer.from(optsTxt), nome: 'opts.json' };
-      if (!arqs['vistos.json']) {
-        try {
-          const v = JSON.parse(fs.readFileSync(path.join(pasta, 'bom-vistos.json'), 'utf8'));
-          if (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length) arquivos['vistos.json'] = { bytes: Buffer.from(jsonCanonico(v)), nome: 'vistos.json' };
-        } catch { /* sem vistos antigos */ }
-      }
-      if (Object.keys(arquivos).length) {
-        const rv = await cliente.novaRevisao(it.id, { arquivos, herdar: true, base: it.rev || 0, forcar: true, nota: `BOM de ${nome} (${Object.keys(arquivos).join(', ')})`, app: APP });
-        log(`^ BOM ${nome}: revisão ${rv.numero || rv.rev} (${Object.keys(arquivos).join(', ')})`);
-        out.atualizados.push(nome);
-      }
-      if (pendente) { out.pendentes.push(nome); e.item = it.id; delete e.board; continue; }
-      Object.assign(e, { item: it.id, board: shaB, sch: shaS, changes: shaC, opts: shaO });
-    } catch (err) { out.erros.push({ nome, erro: err.message }); }
+    if (e.v !== 2) {                                           // a memoria de antes da 1.89.4: um item por projeto
+      e.alvos = e.item ? { '': { item: e.item, id: slugProjeto(nome) } } : {};
+      delete e.item; delete e.board; e.v = 2;
+    }
+    if (!e.lista || e.lista.sch !== shaS || e.lista.vars !== shaV) e.lista = { sch: shaS, vars: shaV, alvos: bomAlvos.alvosDaPasta(pasta, nome) };
+    info.push({ nome, pasta, shaB, shaS, shaC, shaV, optsTxt, shaO, e, alvos: e.lista.alvos });
+  }
+  const dono = new Map();                                     // id do link -> os projetos que o tem como atual
+  for (const x of info) for (const a of x.alvos) (dono.get(a.id) || dono.set(a.id, new Set()).get(a.id)).add(x.nome);
+  const comBom = new Set(info.map((y) => y.nome));
+  const kDe = (a) => (a.variante ? a.variante.id : '');
+  for (const x of info) {
+    const { nome, e, alvos } = x;
+    const atuais = new Set(alvos.map(kDe));
+    if (e.board === x.shaB && e.sch === x.shaS && (e.changes || null) === x.shaC && (e.vars || null) === x.shaV && e.opts === x.shaO &&
+        alvos.every((a) => { const m = e.alvos[kDe(a)]; return m && m.item && m.id === a.id; }) && Object.keys(e.alvos).every((k) => atuais.has(k))) continue;
+    // a variante apagada: a BOM dela sai do NexoBD
+    for (const k of Object.keys(e.alvos)) {
+      if (atuais.has(k)) continue;
+      try { await cliente.apagarItem(e.alvos[k].item); log(`- BOM ${nome} (variante ${k}): apagada no NexoBD`); } catch { /* ja apagada */ }
+      delete e.alvos[k];
+    }
+    let pendente = false, falhou = false, mudou = false;
+    for (const a of alvos) {
+      const k = kDe(a);
+      try {
+        const r = await publicarBom({ cliente, x, a, k, mem: e.alvos[k], dono, comBom, fonte, versao, vivo, log });
+        if (r.erro) { falhou = true; out.erros.push({ nome, erro: r.erro }); continue; }
+        e.alvos[k] = { item: r.item, id: a.id };
+        if (r.atualizou) mudou = true;
+        if (r.pendente) pendente = true;
+      } catch (err) { falhou = true; out.erros.push({ nome, erro: err.message }); }
+    }
+    if (mudou) out.atualizados.push(nome);
+    if (pendente) { out.pendentes.push(nome); delete e.board; continue; }
+    if (falhou) { delete e.board; continue; }
+    Object.assign(e, { board: x.shaB, sch: x.shaS, changes: x.shaC, vars: x.shaV, opts: x.shaO });
   }
   return out;
 }
 
-/** A fonte da BOM pelo hubserver no ar (o mesmo gerador do painel BOM e da pagina antiga). */
+/** Uma BOM (um alvo) de um projeto no NexoBD: acha ou cria o item, poe a chave do link e sobe o que mudou. */
+async function publicarBom({ cliente, x, a, k, mem, dono, comBom, fonte, versao, vivo, log }) {
+  const { nome } = x;
+  const nosso = (it) => !!it && ((mem && it.id === mem.item) || ((it.atributos || {}).projeto === nome && String((it.atributos || {}).variante || '') === k));
+  const rot = k ? `${nome} (variante ${a.variante.nome || k})` : nome;
+  let it = await vivo(() => cliente.chave(SISTEMA_BOM, a.id));
+  if (it && !nosso(it)) {
+    const d = (it.atributos || {}).projeto;
+    if (d && d !== nome && (dono.get(a.id) || new Set()).has(d)) return { erro: `o link /bom/${a.id} já é do projeto "${d}" (o mesmo código de placa): este fica sem esse link` };
+    it = null;                                                 // um apelido velho de outro projeto: o link e deste agora
+  }
+  if (!it) {
+    // o item que este alvo ja tinha: o da memoria, o do id anterior, e (a padrao de antes da 1.89.4) o do slug da pasta
+    const cands = [mem && mem.item ? () => cliente.item(mem.item) : null, mem && mem.id ? () => cliente.chave(SISTEMA_BOM, mem.id) : null,
+      !k ? () => cliente.chave(SISTEMA_BOM, slugProjeto(nome)) : null].filter(Boolean);
+    for (const c of cands) { const i = await vivo(c); if (nosso(i)) { it = i; break; } }
+    if (it) {
+      await cliente.definirChave(SISTEMA_BOM, a.id, it.id);
+      log(`↪ BOM ${rot}: o link agora é /bom/${a.id} (o anterior continua abrindo)`);
+    } else {
+      it = await cliente.criarItem({ tipo: 'outro', categoria: 'nexoeletric', nome: `BOM: ${a.nome}`, descricao: 'A BOM do projeto para a bancada: o NexoBD serve em /bom/' + a.id,
+        atributos: { programa: 'nexoeletric', projeto: nome, id: a.id, variante: k || null }, chaves: [{ sistema: SISTEMA_BOM, chave: a.id }], app: APP });
+      log(`+ BOM ${rot}: item ${it.id} criado no NexoBD (/bom/${a.id})`);
+    }
+  }
+  // o slug da pasta (o link antigo) abre a padrao, se ninguem mais o usa
+  for (const ap of a.apelidos || []) {
+    const i = await vivo(() => cliente.chave(SISTEMA_BOM, ap));
+    if (i && i.id === it.id) continue;
+    if ([...(dono.get(ap) || [])].some((n) => n !== nome)) continue; // e o link atual de outro projeto
+    const outro = i && (i.atributos || {}).projeto;
+    if (outro && outro !== nome && comBom.has(outro)) continue;    // ainda abre a BOM de outro projeto vivo
+    await cliente.definirChave(SISTEMA_BOM, ap, it.id);
+  }
+  const at = it.atributos || {};
+  if (at.projeto !== nome || at.id !== a.id || String(at.variante || '') !== k || it.nome !== `BOM: ${a.nome}`) {
+    await cliente.alterarItem(it.id, { nome: `BOM: ${a.nome}`, descricao: 'A BOM do projeto para a bancada: o NexoBD serve em /bom/' + a.id,
+      atributos: { programa: 'nexoeletric', projeto: nome, id: a.id, variante: k || null } });
+  }
+  const arqs = it.arquivos || {};
+  const arquivos = {};
+  let fonteAtual = null;
+  if (arqs['fonte.json']) { try { fonteAtual = JSON.parse(Buffer.from(await cliente.blob(arqs['fonte.json'].sha256)).toString('utf8')); } catch { fonteAtual = null; } }
+  const fontes = { board: x.shaB, schematic: x.shaS, changes: x.shaC, ...(k ? { variantes: x.shaV } : {}) };
+  const fa = (fonteAtual && fonteAtual.fontes) || null;
+  let pendente = false;
+  if (!fa || fa.board !== x.shaB || (fa.schematic || null) !== x.shaS || (fa.changes || null) !== x.shaC || (k && (fa.variantes || null) !== x.shaV) ||
+      fonteAtual.projeto !== a.nome || fonteAtual.bomId !== a.id) {
+    const f = await fonte(nome, slugProjeto(nome), k);
+    if (f && f.ok && f.board) {
+      const tag = sha256(`${x.shaB}|${x.shaS || ''}|${x.shaC || ''}${k ? `|${k}|${x.shaV || ''}` : ''}`).slice(0, 12);
+      arquivos['fonte.json'] = { bytes: Buffer.from(JSON.stringify({ ok: true, projeto: a.nome, bomId: a.id, variante: a.variante, board: f.board, sourceRev: tag, fontes,
+        gerado_em: new Date().toISOString(), gerador: `NexoEletric ${versao}`.trim() })), nome: 'fonte.json' };
+    } else pendente = true;
+  }
+  if (x.optsTxt && (!arqs['opts.json'] || arqs['opts.json'].sha256 !== x.shaO)) arquivos['opts.json'] = { bytes: Buffer.from(x.optsTxt), nome: 'opts.json' };
+  if (!k && !arqs['vistos.json']) {
+    try {
+      const v = JSON.parse(fs.readFileSync(path.join(x.pasta, 'bom-vistos.json'), 'utf8'));
+      if (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length) arquivos['vistos.json'] = { bytes: Buffer.from(jsonCanonico(v)), nome: 'vistos.json' };
+    } catch { /* sem vistos antigos */ }
+  }
+  let atualizou = false;
+  if (Object.keys(arquivos).length) {
+    const rv = await cliente.novaRevisao(it.id, { arquivos, herdar: true, base: it.rev || 0, forcar: true, nota: `BOM de ${rot} (${Object.keys(arquivos).join(', ')})`, app: APP });
+    log(`^ BOM ${rot}: revisão ${rv.numero || rv.rev} (${Object.keys(arquivos).join(', ')})`);
+    atualizou = true;
+  }
+  return { item: it.id, pendente, atualizou };
+}
+
+/** A fonte da BOM pelo hubserver no ar (o mesmo gerador do painel BOM e da pagina antiga); variante: '' = a padrao. */
 function fonteDoHub(origem) {
-  return async (_nome, slug) => {
+  return async (_nome, slug, variante = '') => {
     if (!origem) return null;
     try {
-      const r = await fetch(`${origem}/api/bom/${encodeURIComponent(slug)}/source`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
+      const r = await fetch(`${origem}/api/bom/${encodeURIComponent(slug)}/source?variante=${encodeURIComponent(variante || '')}`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
       if (!r.ok) return null;
       return await r.json();
     } catch { return null; }
@@ -264,8 +349,8 @@ function fonteDoHub(origem) {
  * hubDir = a pasta com os hub-*.js (a do instalador); falhou alguma coisa, fica a fonte do hubserver como veio.
  */
 function fonteEfetiva(hubDir, ws, fonte) {
-  return async (nome, slug) => {
-    const f = await fonte(nome, slug);
+  return async (nome, slug, variante) => {
+    const f = await fonte(nome, slug, variante);
     if (!f || !f.ok || !f.board || !hubDir) return f;
     try {
       const req = (arq) => require(path.join(hubDir, arq));
@@ -310,7 +395,7 @@ async function renomearProjetos({ cliente, raiz, renomear = [], estado, boms = {
   const existe = (nome) => fs.existsSync(path.join(raiz, nome));
   const moveEstado = (de, para) => {
     if (estado.projetos[de]) { estado.projetos[para] = estado.projetos[de]; delete estado.projetos[de]; }
-    if (boms[de]) { boms[para] = boms[de]; delete boms[de]; }
+    if (boms[de]) { boms[para] = boms[de]; delete boms[de]; delete boms[para].board; delete boms[para].lista; }
   };
   const tirar = async (fn) => { try { await fn(); } catch { /* chave que ja nao existe */ } };
   const feitos = [], locais = [];
@@ -329,13 +414,16 @@ async function renomearProjetos({ cliente, raiz, renomear = [], estado, boms = {
       await cliente.alterarItem(it.id, { nome: para, atributos: { pasta: para } });
       vivos.delete(de); vivos.set(para, it);
       log(`↔ ${de} → ${para}: renomeado no NexoBD (item ${it.id})`);
+      // as BOMs (1.89.4: uma por variante) acompanham; o slug da pasta nova vira mais um apelido da padrao e o da velha
+      // continua abrindo (link ja distribuido). O id pela placa nao muda com a pasta; a rodada seguinte acerta o resto.
       try {
+        const memB = boms[de] || {};
+        const ids = new Set([memB.item, ...Object.values(memB.alvos || {}).map((x) => x && x.item)].filter(Boolean));
         const b = await cliente.chave(SISTEMA_BOM, slugProjeto(de));
-        if (b && !b.apagado_em && (b.atributos || {}).projeto === de) {
-          const slug = slugProjeto(para);
-          if (slug !== slugProjeto(de)) { await cliente.definirChave(SISTEMA_BOM, slug, b.id); await tirar(() => cliente.apagarChave(SISTEMA_BOM, slugProjeto(de))); }
-          await cliente.alterarItem(b.id, { nome: `BOM: ${para}`, descricao: 'A BOM do projeto para a bancada: o NexoBD serve em /bom/' + slug, atributos: { projeto: para, id: slug } });
-        }
+        if (b && !b.apagado_em && (b.atributos || {}).projeto === de) ids.add(b.id);
+        const padrao = (memB.alvos && memB.alvos[''] && memB.alvos[''].item) || (b && !b.apagado_em && (b.atributos || {}).projeto === de && !(b.atributos || {}).variante ? b.id : null);
+        if (padrao && slugProjeto(para) !== slugProjeto(de)) await cliente.definirChave(SISTEMA_BOM, slugProjeto(para), padrao);
+        for (const id of ids) await tirar(() => cliente.alterarItem(id, { atributos: { projeto: para } }));
       } catch (err) { log(`BOM ${de} → ${para}: ${err.message}`); }
     }
     moveEstado(de, para);

@@ -4,6 +4,29 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.89.4 — 2026-11-10
+
+**O link da BOM é o da placa (com o nome atual dela) e cada variante tem o seu.**
+Pedido do dono: "no BOM, o nome que vem no link ainda não tá pegando o nome atual da placa" e "precisa ser um link
+diferente pra cada variante de projeto".
+- Até aqui o link da BOM (aba BOM › Copiar link, o da bancada no NexoBD) era `/bom/<nome da pasta>` (ex.
+  `http://192.168.15.83:47810/bom/dmb-di231765-p2`) e a página tinha o nome da pasta no título: a pasta não muda de nome
+  quando o Definir projeto escolhe a placa (1.88.0). Agora o link sai do **código da placa** do cabeçalho do projeto
+  (`CodigoDaPlaca`, lido na hora): `/bom/pmd-di261946`, e o título da página (e o da prévia na aba BOM) é
+  **"<código> · <nome da placa>"** (`NomeDaPlaca`). Pelo código, e não pelo nome: é único no catálogo, curto para digitar
+  no tablet e não muda quando o nome da placa é corrigido. Trocar a placa no Definir projeto troca o link e o título
+  logo depois (na rodada seguinte do sincronismo com o NexoBD).
+- **Um link por variante**, com a BOM dela (sem os suprimidos): `/bom/<código da placa>-<nome da variante>` (ex.
+  `/bom/pmd-di261946-sem-display`: o código da PCB montada da variante, 1.89.0), título "<código> <NOME DA VARIANTE>".
+  O rodapé da aba BOM mostra o link da variante ativa e, embaixo, os das outras (clique copia). Variante apagada: a BOM
+  dela sai do NexoBD.
+- **Os links já distribuídos continuam abrindo**: o da pasta (`dmb-di231765-p2`) e o de um código de placa anterior
+  ficam como apelidos da BOM padrão (o mesmo item do NexoBD, com os vistos da bancada) e mostram o nome atual.
+- Sem placa definida, o link continua o da pasta. Duas pastas com o mesmo código de placa: o link fica com a que já o
+  tem, e a outra aparece nos erros do sincronismo.
+- Não precisa atualizar o NexoBD nem o Nexo Hub: o NexoEletric publica as BOMs com as chaves novas no NexoBD que já
+  está na rede (apelido = outra chave do mesmo item).
+
 ## 1.89.3 — 2026-11-10
 
 **A padrão no dropdown da variante se chama pelo equipamento; o resumo da variante fica curto.**

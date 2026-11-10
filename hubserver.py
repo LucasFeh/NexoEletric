@@ -1752,6 +1752,135 @@ def _proj_dir_by_id(proj_id):
     return None
 
 
+# ── o LINK da BOM pela placa (1.89.4) ─────────────────────────────────────────────────────────────────────────────────
+# Pedido do dono: "no BOM, o nome que vem no link ainda nao ta pegando o nome atual da placa" e "precisa ser um link
+# diferente pra cada variante de projeto". Ate a 1.89.3 o link era /bom/<slug da PASTA> (ex. dmb-di231765-p2), e a pasta
+# nao muda de nome quando o Definir projeto escolhe a placa (1.88.0). Agora:
+#   padrao   /bom/<slug do CodigoDaPlaca>                      (ex. /bom/pmd-di261946)
+#   variante /bom/<slug do CodigoDaPlaca>-<slug do NOME dela>  (ex. /bom/pmd-di261946-sem-display): o slug do codigo da
+#            PCB montada da variante no Odoo ("<codigo da placa> <NOME DA VARIANTE>", variantes.py » montada_da_variante)
+# O CODIGO e nao o nome da PCB: e unico no catalogo, curto para digitar no tablet e nao muda quando o nome da placa e
+# corrigido; o nome vai no titulo da pagina. Sem placa definida, o slug da pasta (o de sempre). O slug antigo (o da pasta,
+# e o de um codigo anterior) continua abrindo a BOM padrao: e um apelido (outra chave do mesmo item no NexoBD,
+# electron/lib/armazem.js » espelharBoms). A mesma regra em electron/lib/bom-alvos.js (os testes conferem os dois com
+# tests/bom-alvos-casos.json): mude os dois juntos.
+_BOM_ID_MAX = 160          # o ID_OK do NexoBD (server/bom.mjs): [a-z0-9][a-z0-9-]{0,159}
+_NAO_DEFINIDO = 'PROJETO NÃO DEFINIDO'
+
+
+def _bom_slug(s):
+    """slug sem acento: 'Versão 2' -> 'versao-2' (o _proj_id da pasta fica como era: e o dos links antigos)"""
+    import unicodedata
+    t = unicodedata.normalize('NFKD', str(s or ''))
+    t = ''.join(c for c in t if not unicodedata.category(c).startswith('M'))
+    return re.sub(r'[^a-z0-9]+', '-', t.lower()).strip('-')
+
+
+def _bom_corta(slug):
+    return slug[:_BOM_ID_MAX].strip('-') or 'proj'
+
+
+def bom_alvos(pasta, params, variantes):
+    """As BOMs do projeto: [{variante: None|{id, nome, codigo}, id, nome, apelidos}] -- a padrao primeiro.
+
+    pasta = o nome da pasta; params = o cabecalho do schematic.js (dict K -> V); variantes = a lista do variantes.json
+    (variantes.py » le). nome = o titulo da pagina: "<codigo> · <nome da placa>" na padrao, "<codigo> <NOME DA
+    VARIANTE>" na variante (o codigo da PCB montada); sem placa definida, o nome da pasta."""
+    params = params or {}
+    placa = ' '.join(str(params.get('CodigoDaPlaca') or '').split())
+    if placa.upper() == _NAO_DEFINIDO:
+        placa = ''
+    nome_placa = ' '.join(str(params.get('NomeDaPlaca') or '').split())
+    antigo = _proj_id(pasta)
+    base = _bom_corta(_bom_slug(placa)) if _bom_slug(placa) else antigo
+    if placa:
+        rotulo = placa + ' · ' + nome_placa if nome_placa else placa
+    else:
+        rotulo = nome_placa or pasta
+    out = [{'variante': None, 'id': base, 'nome': rotulo, 'apelidos': [antigo] if antigo != base else []}]
+    usados = {base}
+    for v in variantes or []:
+        if not isinstance(v, dict) or not v.get('id'):
+            continue
+        vn = ' '.join(str(v.get('nome') or v.get('codigo') or v.get('id')).split()).upper()
+        vid = _bom_corta(base + '-' + (_bom_slug(vn) or _bom_slug(v['id'])))
+        if vid in usados:
+            vid = _bom_corta(vid[:_BOM_ID_MAX - 18] + '-' + _bom_slug(v['id']))
+        usados.add(vid)
+        out.append({'variante': {'id': str(v['id']), 'nome': str(v.get('nome') or ''), 'codigo': str(v.get('codigo') or '')},
+                    'id': vid, 'nome': ((placa or rotulo) + ' ' + vn).strip(), 'apelidos': []})
+    # o slug da pasta que por acaso e o de uma variante fica com a variante
+    out[0]['apelidos'] = [x for x in out[0]['apelidos'] if x not in usados]
+    return out
+
+
+def _params_do_esquema(sch):
+    out = {}
+    p = sch.get('params') if isinstance(sch, dict) else None
+    for par in (p if isinstance(p, str) else '').split(';'):
+        if '=' in par:
+            k, v = par.split('=', 1)
+            out[k.strip()] = ' '.join(v.split())
+    return out
+
+
+_bom_alvos_cache = {}      # pasta -> (carimbo do schematic.js e do variantes.json, alvos)
+
+
+def _bom_alvos_de(d):
+    """bom_alvos da pasta d, com 'ativa' na da variante ativa NESTA maquina. Cache pela data dos dois arquivos: a
+    pagina do link pergunta a cada 4 s e o schematic.js tem megabytes."""
+    def carimbo(f):
+        try:
+            st = os.stat(os.path.join(d, f))
+            return (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+    chave = (carimbo('schematic.js'), carimbo('variantes.json'))
+    c = _bom_alvos_cache.get(d)
+    if c and c[0] == chave:
+        alvos = c[1]
+    else:
+        params = {}
+        if chave[0]:
+            try:
+                params = _params_do_esquema(load_var_file(os.path.join(d, 'schematic.js')))
+            except (OSError, ValueError):
+                params = {}
+        lst = _variantes.le(d)['variantes'] if _variantes is not None else []
+        alvos = bom_alvos(os.path.basename(d), params, lst)
+        _bom_alvos_cache[d] = (chave, alvos)
+    vid = _variantes.id_ativa(d) if _variantes is not None else None
+    r = [dict(a, ativa=False) for a in alvos]
+    ativa = next((a for a in r if a['variante'] and a['variante']['id'] == vid), r[0])
+    ativa['ativa'] = True
+    return r
+
+
+def _bom_resolve(bom_id):
+    """(pasta, alvo) do id de um link: o id da pasta (o de sempre: alvo None, a API do painel) ou o id/apelido de uma BOM
+    pela placa (alvo = o de bom_alvos). None = nenhum projeto."""
+    d = _proj_dir_by_id(bom_id)
+    if d is not None:
+        return d, None
+    pdir = os.path.join(ROOT, 'Projects')
+    if not os.path.isdir(pdir):
+        return None
+    for name in sorted(os.listdir(pdir)):
+        d = os.path.join(pdir, name)
+        if not os.path.isdir(d):
+            continue
+        for a in _bom_alvos_de(d):
+            if a['id'] == bom_id or bom_id in a['apelidos']:
+                return d, a
+    return None
+
+
+def _bom_dir(bom_id):
+    r = _bom_resolve(bom_id)
+    return r[0] if r else None
+
+
 def _bom_json_read(d, fname):
     """Estado ilegivel vira estado VAZIO, nunca erro: um bom-vistos.json corrompido nao
     pode derrubar a pagina que serve para montar a placa."""
@@ -1797,7 +1926,10 @@ def _bom_source_rev(d):
     return _bom_tag(stamps)
 
 
-def _bom_source(d):
+_ATIVA = object()           # _bom_source: a variante ativa nesta maquina (o painel BOM)
+
+
+def _bom_source(d, variante=_ATIVA):
     """Geometria da PCB com os dados de compra do espelho mais recente.
 
     Um comment alterado no esquema deve chegar a bancada antes do proximo ECO/ExportBoard.
@@ -1833,8 +1965,12 @@ def _bom_source(d):
                 comp['dnp'] = True
         # 1.88.0: a variante de projeto ativa nesta maquina (tools/rotas/variantes.py): o suprimido SAI do BOM (nao e
         # "nao montar" na lista: naquele produto ele nao existe); a placa e a mesma
+        # 1.89.4: ou a pedida (?variante=<id>; '' = a padrao): cada variante tem o proprio link (o armazem publica todas)
         if _variantes is not None:
-            v = _variantes.ativa(d)
+            if variante is _ATIVA:
+                v = _variantes.ativa(d)
+            else:
+                v = _variantes.acha(_variantes.le(d), variante) if variante else None
             fora = _variantes.refs(sch, v)
             if fora:
                 board['components'] = [c for c in board.get('components', []) if str(c.get('ref')) not in fora]
@@ -1845,18 +1981,36 @@ def _bom_source(d):
 
 @app.route('/api/bom/<proj_id>/source')
 def api_bom_source(proj_id):
-    d = _proj_dir_by_id(proj_id)
-    if d is None:
+    """A fonte da BOM. proj_id = o id da pasta (a variante ativa nesta maquina: o painel) ou o de um link pela placa (a
+    BOM daquele link); ?variante=<id> ('' = a padrao) escolhe (o armazem publica cada uma no NexoBD). Vem junto o titulo
+    (projeto: o nome ATUAL da placa, lido do cabecalho agora) e o id do link (bomId), 1.89.4."""
+    r = _bom_resolve(proj_id)
+    if r is None:
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    d, alvo = r
     if not os.path.isfile(os.path.join(d, 'board.js')):
         return {'ok': False, 'error': 'board.js ausente'}, 404
+    alvos = _bom_alvos_de(d)
+    if 'variante' in request.args:
+        variante = request.args.get('variante') or None
+    elif alvo is not None:
+        variante = alvo['variante']['id'] if alvo['variante'] else None
+    else:
+        variante = _ATIVA
+    if variante is _ATIVA:
+        alvo = next(a for a in alvos if a['ativa'])
+    else:
+        alvo = next((a for a in alvos if (a['variante'] or {}).get('id') == variante), None) if variante else alvos[0]
+        if alvo is None:
+            return {'ok': False, 'error': 'a variante nao existe mais neste projeto'}, 404
     try:
         for _ in range(3):
             antes = _bom_source_rev(d)
-            board = _bom_source(d)
+            board = _bom_source(d, variante)
             rev = _bom_source_rev(d)
             if antes == rev:
-                return {'ok': True, 'board': board, 'sourceRev': rev}
+                return {'ok': True, 'board': board, 'sourceRev': rev, 'projeto': alvo['nome'], 'bomId': alvo['id'],
+                        'variante': alvo['variante']}
     except (OSError, ValueError) as e:
         return {'ok': False, 'error': 'nao consegui ler os espelhos: ' + str(e)}, 500
     return {'ok': False, 'error': 'espelhos mudaram durante a leitura; tente Refresh'}, 503
@@ -1877,7 +2031,7 @@ BOM_BOOTSTRAP = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"
 <script src="/hub-bom.js"></script>
 <script>
 (function(){
-  var API = %(api)s, PROJ = %(projJson)s;
+  var API = %(api)s, PROJ = %(projJson)s, Q = %(q)s;
   function falha(m){ document.getElementById('av').innerHTML = '<b>' + m + '</b>'; }
   function pega(u){
     return fetch(u, { cache: 'no-store' })
@@ -1887,13 +2041,13 @@ BOM_BOOTSTRAP = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"
   if (typeof HubFont === 'undefined' || typeof HubLaser === 'undefined')
     return falha('nao consegui carregar hub-font.js / hub-laser.js, de que o gerador depende');
   if (typeof HubBom === 'undefined') return falha('nao consegui carregar hub-bom.js');
-  Promise.all([pega(API + '/source'), pega(API + '/opts'), pega(API + '/vistos')]).then(function (res){
+  Promise.all([pega(API + '/source' + Q), pega(API + '/opts'), pega(API + '/vistos')]).then(function (res){
     var r;
     if (!res[0] || !res[0].ok || !res[0].board)
       return falha((res[0] && res[0].error) || 'nao consegui carregar os dados do BOM');
     try {
       r = HubBom.gerar(res[0].board, (res[1] && res[1].opts) || null, {
-        proj: PROJ,
+        proj: res[0].projeto || PROJ,
         generated: res[0].board.generated || '',
         api: API,
         vistos: (res[2] && res[2].vistos) || {},
@@ -1915,14 +2069,17 @@ BOM_BOOTSTRAP = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"
 @app.route('/bom/<proj_id>')
 def bom_page(proj_id):
     """A pagina do BOM do projeto, montada na hora pelo gerador atual."""
-    d = _proj_dir_by_id(proj_id)
-    if d is None:
+    r = _bom_resolve(proj_id)
+    if r is None:
         abort(404)
+    d, alvo = r
+    # o id da pasta (o link antigo) e a BOM padrao (1.89.4): vai para o link pela placa
+    alvo = alvo or _bom_alvos_de(d)[0]
     if _bom_no_nexobd():
         # no app desktop a BOM e a do NexoBD (vistos compartilhados com a bancada): esta pagina leva para la
         base, erro = _bom_base_nexobd()
         if base:
-            return Response('', status=302, headers={'Location': base + '/bom/' + proj_id})
+            return Response('', status=302, headers={'Location': base + '/bom/' + alvo['id']})
         return Response('<!doctype html><meta charset="utf-8"><p style="font:14px system-ui;padding:24px">'
                         'BOM sem link: %s</p>' % erro.replace('<', '&lt;'), mimetype='text/html', status=503)
     name = os.path.basename(d)
@@ -1932,17 +2089,20 @@ def bom_page(proj_id):
             'O projeto <b>%s</b> ainda nao tem <code>board.js</code> — '
             'rode ExportPcb no Altium.' % name.replace('<', '&lt;'),
             mimetype='text/html', status=404)
+    if proj_id != alvo['id']:
+        return Response('', status=302, headers={'Location': '/bom/' + alvo['id']})
     body = BOM_BOOTSTRAP % {
-        'projEsc': name.replace('&', '&amp;').replace('<', '&lt;'),
-        'projJson': json.dumps(name),
-        'api': json.dumps('/api/bom/' + proj_id),
+        'projEsc': alvo['nome'].replace('&', '&amp;').replace('<', '&lt;'),
+        'projJson': json.dumps(alvo['nome']),
+        'api': json.dumps('/api/bom/' + alvo['id']),
+        'q': json.dumps('?variante=' + (alvo['variante']['id'] if alvo['variante'] else '')),
     }
     return Response(body, mimetype='text/html')
 
 
 @app.route('/api/bom/<proj_id>/vistos', methods=['GET'])
 def api_bom_vistos_get(proj_id):
-    d = _proj_dir_by_id(proj_id)
+    d = _bom_dir(proj_id)
     if d is None:
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
     vistos = _bom_json_read(d, BOM_VISTOS)
@@ -1963,7 +2123,7 @@ def api_bom_vistos_set(proj_id):
     O corpo e um DELTA ({set:{chave:bool}}), nao o mapa inteiro: dois tablets marcando
     pecas diferentes ao mesmo tempo se somam, em vez de o ultimo apagar o do outro.
     """
-    d = _proj_dir_by_id(proj_id)
+    d = _bom_dir(proj_id)
     if d is None:
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
     if _bom_no_nexobd():
@@ -1996,7 +2156,7 @@ def api_bom_vistos_set(proj_id):
 
 @app.route('/api/bom/<proj_id>/opts', methods=['GET'])
 def api_bom_opts_get(proj_id):
-    d = _proj_dir_by_id(proj_id)
+    d = _bom_dir(proj_id)
     if d is None:
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
     return {'ok': True, 'opts': _bom_json_read(d, BOM_OPTS) or None}
@@ -2009,7 +2169,7 @@ def api_bom_opts_set(proj_id):
     Sao preferencia de exibicao (tema, lados, o que aparece), nao dado de projeto -- por
     isso ficam em arquivo separado do board.js e podem ser reescritas a vontade.
     """
-    d = _proj_dir_by_id(proj_id)
+    d = _bom_dir(proj_id)
     if d is None:
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
     data = request.get_json(silent=True)
@@ -2094,20 +2254,28 @@ def api_bom_link(proj_id):
     127.0.0.1 copiaria um link que so funciona no proprio PC -- e o ponto do link e justamente
     mandar para o tablet. Se o host do request ja e um nome/IP de rede, fica como veio.
     """
-    if _proj_dir_by_id(proj_id) is None:
+    d = _bom_dir(proj_id)
+    if d is None:
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    # 1.89.4: o link e o da placa (o codigo do cabecalho, lido agora) na variante ativa; links = todas as BOMs do projeto
+    alvos = _bom_alvos_de(d)
+    ativa = next(a for a in alvos if a['ativa'])
+
+    def lista(prefixo):
+        return [{'id': a['id'], 'nome': a['nome'], 'url': prefixo + '/bom/' + a['id'], 'ativa': a['ativa'],
+                 'variante': a['variante'], 'apelidos': a['apelidos']} for a in alvos]
     if _bom_no_nexobd():
         base, erro = _bom_base_nexobd()
         if not base:
             return {'ok': False, 'error': 'BOM sem link: ' + erro, 'nexobd': True, 'externo': True}, 503
-        r = {'ok': True, 'url': base + '/bom/' + proj_id, 'lan': True, 'trocado': False,
-             'externo': True, 'nexobd': True}
+        r = {'ok': True, 'url': base + '/bom/' + ativa['id'], 'id': ativa['id'], 'nome': ativa['nome'],
+             'links': lista(base), 'lan': True, 'trocado': False, 'externo': True, 'nexobd': True}
         if request.args.get('verificar') != '0':
-            tem = _bom_no_nexobd_existe(base, proj_id)
+            tem = _bom_no_nexobd_existe(base, ativa['id'])
             limite = time.time() + BOM_NEXOBD_ESPERA
             while tem is False and time.time() < limite:
                 time.sleep(1.0)                          # o armazem esta subindo a BOM (o copiar gravou as opcoes)
-                tem = _bom_no_nexobd_existe(base, proj_id)
+                tem = _bom_no_nexobd_existe(base, ativa['id'])
             if tem is False:
                 r['aviso'] = ('a BOM deste projeto ainda não chegou ao NexoBD (sem board.js, ou o NexoEletric ainda '
                               'está enviando): o link abre um aviso até ela chegar')
@@ -2123,8 +2291,9 @@ def api_bom_link(proj_id):
         ip = _lan_ip()
         if ip:
             host, trocado = ip, True
+    prefixo = 'http://' + host + (':' + porta if porta else '')
     return {'ok': True,
-            'url': 'http://' + host + (':' + porta if porta else '') + '/bom/' + proj_id,
+            'url': prefixo + '/bom/' + ativa['id'], 'id': ativa['id'], 'nome': ativa['nome'], 'links': lista(prefixo),
             'lan': host not in LOCAL_ADDRS,
             'trocado': trocado}
 

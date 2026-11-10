@@ -128,3 +128,35 @@ assert.strictEqual(Bom.linkDe(''), '/bom/');
 
   console.log('test-bomlink OK (contrato api/vistos/rev, delta, sincronia, fallback localStorage, copiarLink)');
 })().catch(e => { console.error(e); process.exit(1); });
+
+/* ── 1.89.4: o título e o link pelo nome ATUAL da placa ──
+   Pedido do dono: "no BOM, o nome que vem no link ainda não tá pegando o nome atual da placa". O painel pede a fonte
+   com a variante ativa e usa o título que o hubserver leu do cabeçalho agora (bomNomeSrv); sem resposta, o cabeçalho
+   que o hub tem — nunca mais o nome da pasta quando a placa está definida. */
+{
+  /* só a parte pura do hub-variantes.js (sem document): a de tela abre um BroadcastChannel que prende o processo */
+  const doc = global.document;
+  delete global.document;
+  const V = require('../hub-variantes.js');
+  global.document = doc;
+  const trecho = hub.match(/let bomNomeSrv = null;[^\n]*\nfunction bomNome\(p, v\) \{[\s\S]*?\n\}\n/);
+  assert.ok(trecho, 'o painel não tem bomNome');
+  const sch = { params: 'CodigoDaPlaca=PMD-DI261946;NomeDaPlaca=PLACA MAE DMB;CodigoDoEquipamento=DMB-DI231765' };
+  const S = { detail: { schematic: sch } };
+  const f = new Function('window', 'S', 'HubVariantes', trecho[0] + ';return { bomNome, srv: x => { bomNomeSrv = x; } };');
+  const N = f({ HubVariantes: V }, S, V);
+  const p = { id: 'dmb-di231765-p2', name: 'DMB - DI231765_P2' };
+  assert.strictEqual(N.bomNome(p, null), 'PMD-DI261946 · PLACA MAE DMB', 'o título é o da placa, não o da pasta');
+  assert.strictEqual(N.bomNome(p, { id: 'v1', nome: 'Sem display', codigo: 'X-DI1' }), 'PMD-DI261946 SEM DISPLAY',
+                     'na variante, o código da PCB montada (1.89.0)');
+  /* o Definir projeto trocou a placa: o hubserver leu o cabeçalho novo e o título acompanha */
+  N.srv({ chave: p.id + '|', nome: 'PMD-DI261999 · PLACA NOVA' });
+  assert.strictEqual(N.bomNome(p, null), 'PMD-DI261999 · PLACA NOVA');
+  assert.strictEqual(N.bomNome(p, { id: 'v1', nome: 'Sem display' }), 'PMD-DI261946 SEM DISPLAY', 'o do servidor é de outra variante');
+  S.detail.schematic = { params: '' };
+  N.srv(null);
+  assert.strictEqual(N.bomNome(p, null), 'DMB - DI231765_P2', 'sem placa definida, a pasta');
+  assert.ok(/\/source\?variante=' \+ encodeURIComponent\(\(va && va\.id\) \|\| ''\)/.test(hub), 'a fonte do painel não leva a variante ativa');
+  assert.ok(/proj: bomNome\(p, v\)/.test(hub), 'o BOM do painel não usa o nome da placa');
+  assert.ok(hub.includes('id="bomOutros"'), 'os links das outras variantes não aparecem');
+}
