@@ -228,4 +228,22 @@ eq(T.fonteId(tf, 14, 'Arial'), 2, 'fonte nova');
   eq([cores, traco.filter(c => c === '#d32f2f').length], [['#110f0a', '#110f0a'], 0], 'no PDF: a cor do template, sem destaque');
 }
 
+/* ── 1.90.1: os dois códigos do carimbo da casa na mesma linha ("deixa os dois códigos alinhados") ── */
+{
+  const P = T.primitivas(casa, null, { proj:'CodigoDaPlaca=PMD-DI261946;CodigoDoEquipamento=DMB-DI231765', projeto:'x' });
+  const de = o => P.find(p => p.g === 'text' && p.origem === o);
+  const eqp = de('=CodigoDoEquipamento'), pl = de('=CodigoDaPlaca');
+  eq([eqp.s, pl.s], ['DMB-DI231765', 'PMD-DI261946'], 'os dois códigos no quadro');
+  eq([eqp.y, eqp.v, eqp.tam, eqp.fonte], [pl.y, pl.v, pl.tam, pl.fonte], 'mesma linha de base, fonte e tamanho');
+  const tplEq = casa.itens.find(i => i.s === '=CodigoDoEquipamento');
+  ok(eqp.x === tplEq.x, 'cada um continua centrado na sua célula (o x é o do template)');
+  ok(tplEq.y !== pl.y, 'o dado do template não muda: é regra do desenho');
+  /* o editor de template (cru) mostra a posição gravada */
+  const C = T.primitivas(casa, null, { proj:'', projeto:'x', cru:true }).find(p => p.g === 'text' && p.origem === '=CodigoDoEquipamento');
+  eq(C.y, tplEq.y, 'cru: a posição do template');
+  /* não definido: o "PROJETO NÃO DEFINIDO" dos dois também alinhado */
+  const N = T.primitivas(casa, null, { proj:'', projeto:'x' });
+  eq(N.find(p => p.origem === '=CodigoDoEquipamento').y, N.find(p => p.origem === '=CodigoDaPlaca').y, 'não definido: alinhado também');
+}
+
 console.log('test-schtemplate: ' + n + ' verificações ok');

@@ -6590,16 +6590,19 @@ function fichaDe(a){
       const av = avisosDoComp(m);
       const mostra = camposMostra(m);
       return { titulo:'Component', sub:(e.designator || s.ref) + (est ? ' · ' + est : ''), campos:[
-        { grade:[{ k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }, { k:'rot', rot:'Rotation', tipo:'ang', v:e.rot }] },
-        { grade:[{ k:'layer', rot:'Layer', tipo:'enum', v:e.layer, opc:opcFaces(), dica:'trocar de face espelha o componente como olhar a placa por baixo (a rotação vira 180 − r), igual ao L no arrasto' },
-                 { k:'designator', rot:'Designator', tipo:'texto', v:e.designator || s.ref, dica:'renomear na PCB dessincroniza do esquema — o ECO vai acusar' }] },
+        /* 1.90.1: a mesma ordem da ficha do Esquema — X | Y; Rotation | Layer (a face é o "espelhar" da placa); Designator;
+           Comment. O View 3D saiu do painel como o "Ver em 3D" do Esquema: a vista 3D fica no botão direito e na tecla 3 */
+        { grade:[{ k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }] },
+        { grade:[{ k:'rot', rot:'Rotation', tipo:'ang', v:e.rot },
+                 { k:'layer', rot:'Layer', tipo:'enum', v:e.layer, opc:opcFaces(), dica:'trocar de face espelha o componente como olhar a placa por baixo (a rotação vira 180 − r), igual ao L no arrasto' }] },
+        { grade:[{ k:'designator', rot:'Designator', tipo:'texto', v:e.designator || s.ref, dica:'renomear na PCB dessincroniza do esquema — o ECO vai acusar' }] },
         { grade:[{ k:'comment', rot:'Comment', tipo:'texto', v:e.comment !== undefined ? e.comment : (s.comment || '') }] },
         ...(mostra.length ? [{ grade:mostra }] : []),
         { botoes:[{ id:'parametros', rot:'Parâmetros',
                     aviso:av.length ? { err:av.some(x => x.nivel === 'err'), dica:'Parâmetros — ' + av.length + (av.length === 1 ? ' aviso' : ' avisos') + ':\n' + av.map(x => '• ' + x.t).join('\n') } : null,
                     dica:'todos os parâmetros e informações do componente (footprint, 3D, pads, os parâmetros que vão para o Odoo) — só leitura' },
                   { id:'girar', rot:'Rotate 90°' }, { id:'virar', rot:'Flip' }, { id:'enquadrar', rot:'Zoom' }] },
-        { botoes:[{ id:'editarFp', rot:'Edit Footprint…' }, { id:'vista3d', rot:'View 3D' }] },
+        { botoes:[{ id:'editarFp', rot:'Edit Footprint…' }] },
       ] };
     }
     case 'pad': {

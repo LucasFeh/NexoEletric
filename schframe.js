@@ -4170,11 +4170,12 @@ function infoFootprint(it, sym, fpNome){
   return { kv, avisos, fp };
 }
 function acoesFootprint(it, sym, fp){
-  const linha = el('div', 'pr-grade pr-g3');
+  /* 1.90.1 (pedido do dono): só Trocar… | Editar…. O "Ver em 3D" saiu do painel: o 3D continua no editor que o
+     Editar… abre (botão 3D da barra dele, tecla 3) */
+  const linha = el('div', 'pr-grade pr-g2');
   const b = (rot, titulo, fn) => { const x = el('button', 'wide sutil', rot); x.type = 'button'; x.title = titulo; x.onclick = fn; linha.append(x); };
   b('Trocar…', 'Trocar footprint: a galeria de footprints (PcbLib do Altium + biblioteca do hub), com o desenho e o teste dos pinos — a PCB recebe no Design » Update PCB', () => trocaFootprint(it, sym));
-  b(fp ? 'Editar…' : 'Novo…', (fp ? 'Editar footprint' : 'Abrir o editor de footprint') + ': o PCB Library do Altium, no hub — pads, serigrafia e o corpo 3D (STEP). Grava na biblioteca do hub', () => abreFootprint(it));
-  if (fp) b('Ver em 3D', 'o footprint com o modelo 3D, no editor', () => abreFootprint(it, { modo3d:true }));
+  b(fp ? 'Editar…' : 'Novo…', (fp ? 'Editar footprint' : 'Abrir o editor de footprint') + ': o PCB Library do Altium, no hub — pads, serigrafia e o corpo 3D (STEP; o modo 3D fica na barra do editor, tecla 3). Grava na biblioteca do hub', () => abreFootprint(it));
   return linha;
 }
 /* os parametros viajam num campo plano "K=V;K=V" (o parser do BuildSchematic le linha a linha) */
@@ -4455,6 +4456,8 @@ function renderProps(){
      o funil de toda troca (commit, undo, troca de folha, selecao) */
   const fmt = $('folhaFmt');
   if (fmt) fmt.replaceChildren(secFolha());
+  /* 1.90.1: o botão Definir projeto fica vermelho enquanto o projeto não está definido (hub-catalogo.js) */
+  if (window.HubCatalogo && typeof HubCatalogo.repinta === 'function') HubCatalogo.repinta();
   const cabFolha = $('prFolha');
   if (cabFolha){
     const um = selAlvos().filter(a => onSheet(a.it));
@@ -4630,10 +4633,14 @@ function renderProps(){
   /* O formato só aceita 0/90/180/270 (o validateSchematic recusa o resto), então valor fora disso é
      RECUSADO em vez de arredondado calado: arredondar faria a ficha dizer um número e o arquivo guardar outro. */
   const rotAtual = () => ((((it.rot || 0) % 360) + 360) % 360);
-  const l1 = grade('pr-g4');
+  /* 1.90.1 (pedido do dono): "a coordenada X e Y fica na primeira linha, rotação e espelhar na segunda, designator
+     fica na terceira linha no canto esquerdo e do outro lado fica a parte na mesma linha, mas bem afastado; pinos
+     pode ficar na quarta linha" */
+  const l1 = grade('pr-g2');
   cel(l1, 'X', prCampo(it.x, 'posição X em mil — o mesmo número do Altium', c => aplicaXY(c, 'x'), { cls:'mono' }));
   cel(l1, 'Y', prCampo(it.y, 'posição Y em mil (Y para cima, como no Altium)', c => aplicaXY(c, 'y'), { cls:'mono' }));
-  cel(l1, 'Rotação', prCampo(rotAtual(), 'graus, anti-horário: só 0, 90, 180 ou 270', campo => {
+  const l1b = grade('pr-g2');
+  cel(l1b, 'Rotação', prCampo(rotAtual(), 'graus, anti-horário: só 0, 90, 180 ou 270', campo => {
     const v = parseInt(String(campo.value).replace(/[^0-9-]/g, ''), 10);
     const n = ((v % 360) + 360) % 360;
     if (!isFinite(v) || [0, 90, 180, 270].indexOf(n) < 0){
@@ -4657,7 +4664,7 @@ function renderProps(){
                + '<path d="M7 14.5 12 19l5-4.5z"/></svg>';
   bV.onclick = () => { selSo([alvoAll(it)]); mirrorSel('y'); };
   caixaEsp.append(bH, bV);
-  cel(l1, 'Espelhar', caixaEsp);
+  cel(l1b, 'Espelhar', caixaEsp);
 
   /* o texto do botão de troca (e se ele sai em destaque) é regra pura, provada em
      tests/test-troca-simbolo.js — a ficha só desenha o que ela decide */
@@ -4737,12 +4744,14 @@ function renderProps(){
       try { localStorage.setItem(VER_PINOS_KEY, showState.pinos ? '1' : '0'); } catch (e) {}
       pintaOlhoPinos(); renderProps(); cam.draw(); pintaMiniaturas();
     });
-  const nPin = el('span', 'pr-ro mono', String(pins.length));
-  nPin.title = pins.length + (pins.length === 1 ? ' pino' : ' pinos') + ' nesta parte — a tabela com as nets está em Parâmetros';
-  const l2 = grade('pr-g3');
+  const nPin = el('span', 'pr-npin mono', String(pins.length));
+  kPin.title = nPin.title = pins.length + (pins.length === 1 ? ' pino' : ' pinos') + ' nesta parte — a tabela com as nets está em Parâmetros';
+  kPin.append(nPin);
+  const l2 = grade('pr-gsep');
   cel(l2, kRef, ref);
-  cel(l2, 'Parte', campoParte);
-  cel(l2, kPin, nPin);
+  cel(l2, 'Parte', campoParte).classList.add('dir');
+  const l2b = grade('pr-g1');
+  l2b.append(kPin);
 
   /* LINHA 3: Footprint (a linha toda: o nome é comprido) + Trocar… | Editar… | Ver em 3D */
   const fpInfo = infoFootprint(it, sym, fpNome);

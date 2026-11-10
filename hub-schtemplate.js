@@ -438,7 +438,23 @@ function primitivas(tpl, medida, ctxo){
       case 'image': out.push({ g:'image', x1:it.x1, y1:it.y1, x2:it.x2, y2:it.y2, src:it.src || null, aspecto:!!it.aspecto }); break;
     }
   }
+  if (!c.cru) alinhaCodigos(out);
   return out;
+}
+/* 1.90.1 (pedido do dono: "deixa os dois códigos alinhados"): no carimbo da casa (A4_DiEletrons) o código do
+   equipamento é a 2ª linha de uma célula de duas — a 1ª era o NomeDoEquipamento, que saiu do quadro na 1.88.0 — e
+   ficava mais baixo que o código da placa, sozinho no meio da célula dele. Com o nome vazio, o código do equipamento
+   passa para a MESMA linha de base, fonte e tamanho do código da placa (cada um continua centrado na sua célula).
+   É regra do desenho, não do dado: vale para todo template (o da casa no NexoBD, sem regravar) na tela, nas miniaturas
+   e no PDF do esquema; o editor de template (cru) mostra as posições como estão gravadas. Só quando os dois estão na
+   mesma faixa do carimbo (até 1,5 altura de letra de diferença) — outro template com outra arrumação fica como está. */
+function alinhaCodigos(out){
+  const de = re => out.find(p => p.g === 'text' && typeof p.origem === 'string' && re.test(p.origem.trim()));
+  const eq = de(/^=CodigoDoEquipamento$/i), pl = de(/^=CodigoDaPlaca$/i), nome = de(/^=NomeDoEquipamento$/i);
+  if (!eq || !pl || (nome && String(nome.s == null ? '' : nome.s).trim())) return;
+  if (Math.abs(eq.y - pl.y) > 1.5 * Math.max(eq.tam || 0, pl.tam || 0)) return;
+  eq.y = pl.y; eq.v = pl.v;
+  for (const k of ['fonte', 'tam', 'negrito', 'italico']) eq[k] = pl[k];
 }
 
 /* A caixa de um ITEM do template (não da primitiva), em mil: o editor seleciona e arrasta por

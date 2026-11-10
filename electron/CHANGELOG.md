@@ -4,6 +4,32 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.90.1 — 2026-11-10
+
+**A ficha do componente no Esquema na ordem que o dono pediu, e sem o "Ver em 3D".**
+Pedido do dono: "a coordenada X e Y fica na primeira linha, rotação e espelhar na segunda, designator fica na terceira
+linha no canto esquerdo e do outro lado fica a parte na mesma linha, mas bem afastado; pinos pode ficar na quarta linha,
+e o botão 'Ver 3D' pode sair, deixa só trocar, editar e depois trocar componente e parâmetro igual tá".
+- Esquema › Propriedades do componente: **X | Y**; **Rotação | Espelhar**; **Designator** (com o olho) na esquerda e
+  **Parte** na direita, afastados; **Pinos** (o olho e a contagem); Footprint com **Trocar… | Editar…**; e
+  **Parâmetros** (com o ponto de aviso) | **Trocar componente…**, como na 1.90.0.
+- O "Ver em 3D" saiu do painel. O 3D do footprint continua no editor que o Editar… abre (botão 3D da barra dele,
+  tecla 3).
+- PCB › Propriedades do componente na mesma ordem: X | Y; Rotation | Layer (a face é o "espelhar" da placa);
+  Designator; Comment; Show Designator/Comment; e os botões. O View 3D saiu do painel; a vista 3D da placa continua
+  no botão direito (Ver em 3D) e na tecla 3.
+- **Definir projeto em vermelho** enquanto o projeto não está definido (pedido do dono: "no botão de 'definir projeto'
+  se não tiver projeto definido ele fica em vermelho"). A regra é a mesma que põe "PROJETO NÃO DEFINIDO" no quadro da
+  folha (`HubSchTemplate.camposNaoDefinidos`): fica vermelho se faltar o código da placa OU o do equipamento, e a dica
+  diz qual falta. O vermelho é o de alerta do tema (o do "Sem aprovação"), sem piscar. Volta ao normal na hora em
+  que o Definir projeto grava, e se repinta a cada mudança da folha (desfazer, recarga, aprovação).
+- **Os dois códigos do carimbo alinhados** (pedido do dono: "deixa os dois códigos alinhados"). No A4_DiEletrons o
+  código do equipamento era a 2ª linha de uma célula de duas (a 1ª, o NomeDoEquipamento, saiu do quadro na 1.88.0) e
+  ficava mais baixo que o da placa. Com o nome vazio, ele passa à mesma linha de base, fonte e tamanho do código da
+  placa, cada um centrado na sua célula. É regra do desenho (`hub-schtemplate.js` » `alinhaCodigos`), não do dado: o
+  template da casa no NexoBD não muda, e toda folha e todo projeto pegam sozinhos, na tela, nas miniaturas e no PDF do
+  esquema. O editor de template mostra as posições como estão gravadas.
+
 ## 1.90.0 — 2026-11-10
 
 **A ficha do componente fica só com o que se edita, em grade; o resto vai para o botão "Parâmetros". O "Não montar"

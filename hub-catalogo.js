@@ -126,6 +126,9 @@ tr.nafila td{background:rgba(245,158,11,.06);}
 .ct-menu .tit{font-size:11px; color:var(--fg-dim, var(--text-3, #999)); padding:4px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:320px;}
 .ct-menu button{display:block; width:100%; text-align:left; border:0 !important; background:transparent !important; padding:6px 8px;}
 .ct-menu button:hover{background:rgba(127,127,127,.16) !important;}
+/* 1.90.1 (pedido do dono): "no botão de 'definir projeto' se não tiver projeto definido ele fica em vermelho" — o
+   vermelho de alerta do tema, o mesmo do "Sem aprovação" (hub-aprovacao.js), sem piscar */
+.ct-sec button.ct-nd{color:var(--err, #f87171); border-color:var(--err, #f87171);}
 .ct-sec .ct-resumo{font-size:11px; color:var(--fg-dim, var(--text-3, #999)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 `;
 function css(){
@@ -168,11 +171,31 @@ function monta(caixa, ganchos){
     const ND = (T() && T().NAO_DEFINIDO) || 'PROJETO NÃO DEFINIDO';
     resumo.textContent = placa || eq ? 'placa ' + (placa || ND) + ' · equipamento ' + (eq || ND) : ND + ' — escolha a placa e o equipamento no catálogo';
     resumo.title = [nomePlaca && 'PCB: ' + nomePlaca, (p.NomeDoEquipamento || p.Equipamento_linha_um) && 'equipamento: ' + (p.NomeDoEquipamento || p.Equipamento_linha_um)].filter(Boolean).join(' · ');
+    /* 1.90.1: VERMELHO enquanto o projeto não está definido — a MESMA regra que põe "PROJETO NÃO DEFINIDO" no
+       quadro da folha (HubSchTemplate.camposNaoDefinidos: o código da placa OU o do equipamento faltando, depois do
+       que o nome da pasta já resolve). Definido, volta ao normal. */
+    const nd = faltaDefinir(ganchos);
+    b.classList.toggle('ct-nd', nd.length > 0);
+    b.title = nd.length ? 'PROJETO NÃO DEFINIDO: falta ' + nd.join(' e ') + ' — escolha no catálogo de todos os produtos'
+                        : 'código da placa e código e nome do equipamento do carimbo, do catálogo de todos os produtos';
   };
   ganchos._pinta = pinta;
   pinta();
 }
 function abreDaFolha(){ if (ganchosDaFolha) abre(ganchosDaFolha); }
+/* o que falta definir no projeto, pelo que o carimbo mostra: ['o código da placa', 'o código do equipamento'] ou [] */
+function faltaDefinir(g){
+  const t = T(), sch = g && g.schematic ? g.schematic() : null;
+  let nd = null;
+  if (t && typeof t.camposNaoDefinidos === 'function') nd = t.camposNaoDefinidos(sch && sch.params, (sch && sch.project) || '');   /* o mesmo projeto do quadro (daFolha) */
+  else {
+    const p = t ? t.parseParams(sch && sch.params) : {};
+    nd = { CodigoDaPlaca: !(p.CodigoDaPlaca || p.Desenho_linha_unica), CodigoDoEquipamento: !(p.CodigoDoEquipamento || p.Equipamento_linha_dois) };
+  }
+  return [nd.CodigoDaPlaca && 'o código da placa', nd.CodigoDoEquipamento && 'o código do equipamento'].filter(Boolean);
+}
+/* a vista repinta o botão a cada mudança da folha (desfazer, recarga do disco, aprovação): não só depois do Definir */
+function repinta(){ if (ganchosDaFolha && ganchosDaFolha._pinta) ganchosDaFolha._pinta(); }
 
 /* A LOGO DA CASA NA PCB: um comp_add do footprint embutido LOGO_DIELETRONS (hub-core.js) no changes.js, no canto de baixo à
    esquerda da placa, para arrastar na vista PCB. O código e a revisão são as strings especiais do footprint: a placa os
@@ -666,5 +689,5 @@ function rotuloProjeto(p){
 }
 const limpaParam = s => String(s == null ? '' : s).replace(/[;|]/g, ' ').replace(/\s+/g, ' ').trim();
 
-root.HubCatalogo = { monta, abre, abreDaFolha, poeLogo, codigosNoTexto, escolhe, rotuloProjeto, nomeDaPlaca, carregaNomes, placaSemP };
+root.HubCatalogo = { monta, abre, abreDaFolha, repinta, faltaDefinir, poeLogo, codigosNoTexto, escolhe, rotuloProjeto, nomeDaPlaca, carregaNomes, placaSemP };
 })(typeof window !== 'undefined' ? window : globalThis);
