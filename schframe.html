@@ -103,6 +103,8 @@
   #schtb button:disabled{opacity:.35; cursor:not-allowed;}
   #schtb svg{width:18px; height:18px; flex:none; fill:none; stroke:currentColor; stroke-width:1.7;
     stroke-linecap:round; stroke-linejoin:round;}
+  #schtb .erc-n{border-radius:8px; padding:0 5px; font-weight:600;}
+  #schtb .erc-n.erro{background:#ef4444; color:#fff;} #schtb .erc-n.aviso{background:#facc15; color:#3b2f00;}
   #schtb .lb{font-size:11px; letter-spacing:.02em; font-variant-numeric:tabular-nums;}
   /* a gaveta dos pousos: a face leva folga a direita para a setinha, que fica no canto de
      baixo, por cima dela; a lista cai logo abaixo da barra, na vertical, com os mesmos
@@ -733,6 +735,9 @@
       <button id="btnAdd" aria-label="Adicionar componentes"
               title="Escolher componentes das bibliotecas e jogar no esquema (C)">
         <svg viewBox="0 0 24 24"><rect x="3" y="7" width="10" height="10" rx="1"/><path d="M3 10H1M3 14H1M13 10h2M13 14h2"/><path d="M19 5v8M15 9h8"/></svg><span class="lb" id="addBtnN"></span></button>
+      <!-- 1.95.0: o DRC do esquema (o ERC, hub-scherc.js) — a contagem de erros/avisos no botão; o clique abre a lista -->
+      <button id="btnErc" title="DRC do esquema: pinos desconectados, fora do almoxarifado, designador duplicado/sem número, net de um pino, footprint…">
+        <svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 16.5v.5"/></svg><span class="lb">DRC</span><span class="lb erc-n" id="ercN"></span></button>
       <!-- o tamanho da folha saiu da barra (pedido do usuario em 2026-09-25): ele mora em
            Configuracoes › Folha, no painel da direita. O montaBotaoLibs poe o separador
            antes do "libs". -->
@@ -820,6 +825,9 @@
             <svg viewBox="0 0 16 16"><path d="M1 8h4.5"/><path d="M7.5 5h7M7.5 8h7M7.5 11h4.5"/></svg></button>
           <!-- guias do arrasto (alinhamento, espaço igual, distância); o desenho do ícone e o título saem do schframe.js -->
           <button class="ibtn active" id="btnGuias" aria-pressed="true"></button>
+          <!-- 1.95.0: os avisos do DRC na folha (o triângulo amarelo no pino solto e o vermelho do fora do almoxarifado) -->
+          <button class="ibtn active" id="btnErcMarcas" aria-pressed="true" title="Avisos do DRC na folha visíveis (triângulo no pino solto, vermelho no fora do almoxarifado) — clique para esconder">
+            <svg viewBox="0 0 24 24"><path d="M12 4l8.5 15h-17z"/><path d="M12 10v4M12 16.5v.3"/></svg></button>
         </div>
         <!-- O PASSO DA GRADE. As folhas desta casa snapam em 1 mm ou 0,3 mm dentro do proprio
              Altium, e quase todo vertice de fio dos projetos reais esta fora da grade de 100
@@ -1025,6 +1033,7 @@
 <script src="Libs/sch-templates-casa.js"></script>
 <script src="hub-schtemplate.js"></script>
 <script src="hub-schtemplate-ui.js"></script>
+<script src="hub-scherc.js"></script>
 <!-- os carimbos da casa e a aprovacao do projeto (o Aprovar ao lado do Salvar) -->
 <script src="hub-aprovacao.js"></script>
 <!-- o Definir projeto: o catalogo de todos os produtos (codigo da placa, codigo e nome do equipamento) -->

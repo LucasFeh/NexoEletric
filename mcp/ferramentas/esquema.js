@@ -7,6 +7,10 @@ const { ErroMcp } = require('../lib/contexto.js');
 const { PROJETO, isNum } = require('../lib/util.js');
 /* a port estilizável (1.94.0): o mesmo motor da vista (hub-draw.js » portNova/portEstilo) */
 const HubDraw = require('../../hub-draw.js');
+/* o DRC do esquema (1.95.0): o mesmo motor da vista (hub-scherc.js); a ficha do almoxarifado pelo HubOdooLink */
+const HubSchErc = require('../../hub-scherc.js');
+const HubOdooLink = require('../../hub-odoolink.js');
+const HubSchTemplate = require('../../hub-schtemplate.js');
 
 const COMUNS = {
   simular: { type: 'boolean', description: 'true = só valida, não grava' },
@@ -701,6 +705,40 @@ module.exports = {
         return { ok: !v.errors.length && !ser.errors.length, erros: v.errors, avisos: v.warnings, formato: ser.errors.map(e => e.msg), descartados: (ser.descartados || []).length,
                  pinos_sem_ligacao: n ? n.pinosSoltos.length : null, pontas_soltas: n ? n.pontasSoltas.length : null,
                  simbolos_do_esquema_diferentes: L.divergentes && L.divergentes.length ? L.divergentes : undefined };
+      },
+    },
+    {
+      nome: 'sch_erc', titulo: 'DRC do esquema (ERC)', leitura: true,
+      descricao: 'Roda o DRC do esquema — o mesmo da vista Esquema (botão DRC): pino desconectado (No ERC na ponta ou pino NC = de propósito), '
+        + 'componente fora do almoxarifado (sem OdooId/LocalId e sem o valor no espelho do almoxarifado), designador duplicado ou não numerado ("R?"), '
+        + 'net com um pino só / rótulo, port ou power solto, componente sem footprint, footprint fora da PcbLib e projeto não definido (sem o código da placa). '
+        + 'Devolve as violações com severidade (erro/aviso), folha e posição em mil. suprimidos = refs que não contam (os suprimidos da variante).',
+      entrada: { type: 'object', properties: { projeto: PROJETO, regras: { type: 'array', items: { type: 'string', enum: HubSchErc.REGRAS.map(r => r[0]) }, description: 'só estas regras' },
+        suprimidos: { type: 'array', items: { type: 'string' } }, limite: { type: 'integer', minimum: 1, description: 'máximo de violações na lista (padrão 300)' } }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const s = ctx.schematic(p), L = ctx.libsDe(s);
+        const n = netsOuNada(ctx.hc, s, L) || { nets: [], pinosSoltos: [], warnings: [] };
+        /* o espelho do almoxarifado como a vista o tem (os globais que o HubOdooLink lê) */
+        for (const [arq, v] of [['almox-index.js', 'almoxIndex'], ['almox-basicos.js', 'almoxBasicos'], ['almox-especiais.js', 'almoxEspeciais'], ['almox-locais.js', 'almoxLocais']]) {
+          const x = ctx.lib(arq, v);
+          if (x !== undefined) globalThis[v] = x;
+        }
+        const temAlmox = !!(globalThis.almoxBasicos || globalThis.almoxEspeciais);
+        const nd = HubSchTemplate.projetoNaoDefinido(s.params, s.project || '');
+        const r = HubSchErc.rodar({
+          hc: ctx.hc, schematic: s, nets: n, slib: L.schlib, plib: L.pcblib, suprimidos: new Set((a.suprimidos || []).map(String)),
+          foraDoAlmox: temAlmox ? c => !HubOdooLink.fichaDoComp(c) && !/(?:^|;)\s*LocalId\s*=\s*[^;]+/i.test(String(c.params || '')) : null,
+          projetoNaoDefinido: nd || false,
+        });
+        const so = a.regras && a.regras.length ? new Set(a.regras) : null;
+        const vs = r.violacoes.filter(v => !so || so.has(v.regra));
+        const lim = a.limite || 300;
+        return { passa: !vs.some(v => v.sev === 'erro'), erros: vs.filter(v => v.sev === 'erro').length, avisos: vs.filter(v => v.sev !== 'erro').length,
+                 por_regra: r.porRegra.filter(c => !so || so.has(c.regra)),
+                 violacoes: vs.slice(0, lim).map(v => ({ regra: v.regra, sev: v.sev, msg: v.msg, folha: v.sheet, x: v.x, y: v.y, ref: v.ref })),
+                 cortadas: vs.length > lim ? vs.length - lim : undefined,
+                 nota: temAlmox ? undefined : 'sem o espelho do almoxarifado nesta pasta: a regra "fora do almoxarifado" não foi conferida' };
       },
     },
     {

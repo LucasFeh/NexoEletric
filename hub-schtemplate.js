@@ -602,6 +602,18 @@ function camposNaoDefinidos(params, projeto){
   for (const n of CAMPOS_DEFINIR) out[n] = valor(n, c) === NAO_DEFINIDO;
   return out;
 }
+/* 1.95.0 (o DRC do esquema): o projeto ainda não definido? '' = definido; senão o porquê, numa frase. Não definido =
+   o cabeçalho não traz o código da placa do Definir projeto (a "PCB não declarada" que trava o Odoo desde a 1.92.2), ou
+   o carimbo mostra "PROJETO NÃO DEFINIDO" no código da placa ou no do equipamento. */
+function projetoNaoDefinido(params, projeto){
+  const p = parseParams(params);
+  const declarada = Object.keys(p).some(k => k.toLowerCase() === 'codigodaplaca' && String(p[k]).trim() && p[k] !== '*' && !ehNaoDefinido(p[k]));
+  const nd = camposNaoDefinidos(params, projeto);
+  const falta = [];
+  if (!declarada || nd.CodigoDaPlaca) falta.push('o código da placa');
+  if (nd.CodigoDoEquipamento) falta.push('o código do equipamento');
+  return falta.length ? 'projeto não definido: falta ' + falta.join(' e ') + ' — use o Definir projeto (o carimbo mostra "' + NAO_DEFINIDO + '")' : '';
+}
 /* move um item por (dx, dy) — no lugar */
 function moveItem(it, dx, dy){
   if (it.x != null){ it.x += dx; it.y += dy; }
@@ -791,7 +803,7 @@ const API = { ESTILOS, CARIMBOS, APELIDOS, CAMPOS_PADRAO, ARQ_CASA, AUTOMATICOS,
               parseParams, serializaParams, acervo, lista, acha, contexto, valor, resolve, campos, codigoDoProjeto,
               folhaDe, estiloPorMedida, primitivas, desenha, itemFolha, daFolha,
               caixaItem, moveItem, fonteId, aplica,
-              NAO_DEFINIDO, CAMPOS_DEFINIR, ehNaoDefinido, setVariante, textoVariante, naoDefinidos, camposNaoDefinidos, caixaTexto,
+              NAO_DEFINIDO, CAMPOS_DEFINIR, ehNaoDefinido, projetoNaoDefinido, setVariante, textoVariante, naoDefinidos, camposNaoDefinidos, caixaTexto,
               idCasa, serializaCasa, copia, PADROES, a3DiEletrons, emOutraFolha, rotulo, tamanhoDe, nomeCurto, opcoesFolha };
 root.HubSchTemplate = API;
 if (typeof module === 'object' && module.exports) module.exports = API;

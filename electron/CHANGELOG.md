@@ -4,6 +4,34 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.95.0 — 2026-11-10
+
+**DRC do esquema: o triângulo amarelo no pino desconectado, o vermelho no fora do almoxarifado e a lista de tudo.**
+Pedido do dono: "se o componente no esquema estiver desconectado de uma net, eu quero que apareça um triângulo amarelo, e
+quero um DRC no esquema também, mostrando esses componentes desconectados, ou qualquer coisa que tiver errado, tipo
+componente fora do almoxarifado também; quero que os componentes que estiverem fora do almoxarifado fiquem vermelhinhos,
+em volta dizendo que estão fora".
+- **Botão DRC** na barra do Esquema, com a contagem (vermelha com erro, amarela só com aviso): abre o painel com a lista
+  (severidade erro/aviso, regra, mensagem, folha), os filtros por regra e ↑/↓; o clique leva à folha e à câmera da
+  violação e marca o componente. Recontado sozinho a cada mudança (ligar/desligar fio, mover, apagar, desfazer).
+- **Regras** (hub-scherc.js, o mesmo motor na vista e no MCP): pino desconectado (o No ERC na ponta e o pino NC ficam de
+  fora; o marcador No ERC da barra silencia); componente **fora do almoxarifado** (sem OdooId/LocalId e sem o valor no
+  espelho do almoxarifado — o mesmo "sem ficha" do botão Parâmetros); designador duplicado; designador não numerado
+  ("R?"); net com um pino só e rótulo/port/power solto; componente sem footprint; footprint fora da PcbLib; projeto não
+  definido (sem o código da placa do Definir projeto, ou "PROJETO NÃO DEFINIDO" no carimbo); e os outros avisos do
+  botão Parâmetros (acervo pendente, desenho emprestado, partes, pinos sem pad, Odoo fora do espelho), agora contados
+  por uma função só (avisosDoComp) para a ficha e o DRC.
+- **Na folha, só na tela** (não no PDF nem nas miniaturas): o triângulo amarelo ⚠ junto da ponta de cada pino
+  desconectado, e o contorno vermelho tracejado com a etiqueta "fora do almoxarifado" em volta do componente (um só em
+  volta de todas as partes; a etiqueta tem tamanho de folha, então de longe fica só o contorno). O botão do triângulo em
+  Configurações esconde/mostra essas marcas.
+- **Variante**: o componente suprimido na variante ativa não gera aviso de desconectado, de fora do almoxarifado nem
+  dos Parâmetros (o DRC reconta ao trocar de variante).
+- MCP: **`sch_erc`** roda o DRC do esquema e lista as violações (filtro por regra, `suprimidos`).
+- Testes: `tests/test-scherc.js` (cada regra, No ERC, NC, variante, severidade, o desenho e o MCP) e `tests/smoke-erc.js`
+  (a vista de verdade com o almoxarifado da máquina copiado: a contagem, o painel, o triângulo num R99 solto, o C3 da DMB
+  fora do almoxarifado em vermelho, esconder as marcas).
+
 ## 1.94.0 — 2026-11-10
 
 **Port na barra do Esquema, totalmente estilizável.**

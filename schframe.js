@@ -1585,6 +1585,7 @@ function reapply(){
   model = HubCore.buildSchModel(schematic);
   nets  = HubCore.extractNets(model, SLIB);
   val   = HubCore.validateSchematic(schematic, SLIB, PLIB, nets);
+  if (typeof ercDepois === 'function') ercDepois();
   if (sheetIdx >= model.sheets.length) sheetIdx = 0;
   /* poda da selecao: o item pode ter sumido (Delete, undo, troca de simbolo) e o INDICE do
      alvo pode ter ficado fora de faixa — um fio que perdeu vertices por outro caminho deixa
@@ -4036,6 +4037,57 @@ $('btnPaineis').addEventListener('click', () => { if (painelProps) painelProps.a
    escolhas de DESENHO do lib-subs.js, e uma delas fazia todo resistor "RES [ SMD ]" abrir a
    ficha do 10R. Devolve { alvo, nome }, { motivo } ou null. */
 /* o componente local (LocalId do params) e o registro dele em Libs/almox-locais.js: {id, s, integrado} ou null */
+/* ── OS AVISOS DE UM COMPONENTE (1.95.0) ──
+   O que o ponto do botão Parâmetros conta, agora numa função só: a ficha (renderProps) e o DRC do esquema
+   (hub-scherc.js) leem daqui, e a regra é uma. `pre` traz o que a ficha já calculou (para não refazer); sem ele, a
+   conta é feita aqui. Cada aviso leva `cod` (acervo/odoo/desenho/partes/footprint) — o DRC deixa de fora o que já
+   tem regra própria (o "sem ficha", que é o fora do almoxarifado, e o footprint que não existe). */
+function avisosDoComp(it, pre){
+  pre = pre || {};
+  const rsym = pre.rsym || HubCore.resolveSym(SLIB, it.sym);
+  const sym = pre.sym !== undefined ? pre.sym : ((rsym && rsym.item) || null);
+  const ac = pre.ac !== undefined ? pre.ac : (() => { const x = acervoDoComp(it, sym, ACERVO_POR); return x ? x.acervo : null; })();
+  const nparts = pre.nparts || (sym ? (sym.partcount || (sym.parts || []).length || 1) : 1);
+  const totalPartes = pre.totalPartes || Math.max(it.part || 1, ...schematic.items
+    .filter(x => x && x.t === 'comp' && x.ref === it.ref && x.sheet === it.sheet).map(x => x.part || 1));
+  const fpInfo = pre.fpInfo || infoFootprint(it, sym, it.footprint || '');
+  const avisos = [];
+  const acNome = ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca');
+  /* "Biblioteca do Altium" é trabalho pendente: o componente ainda não tem par no almoxarifado, e é isso que
+     impede a lista do Odoo de casar a linha por id em vez de por texto. Com o OdooId nos params ele JÁ tem
+     (acervoDoComp) — e o aviso, que era falso nesse caso, não sai mais. */
+  const acPendente = !!ac && /biblioteca do altium|espelho do altium/i.test(String(ac.titulo || ''));
+  if (acPendente) avisos.push({ t:'Acervo: ' + acNome + ' — vincule ao almoxarifado pelo "Trocar componente…" para a lista do Odoo casar por id', nivel:'err', cod:'acervo' });
+  else if (!ac && sym) avisos.push({ t:'Acervo: o símbolo não é de nenhum acervo da casa', cod:'acervo' });
+  const od = odooDoComp(it);
+  const lkOdoo = od && od.alvo ? true : false;
+  /* CRIADO LOCALMENTE (Biblioteca, botão Novo componente): vai com a ficha no "Enviar para o Odoo" */
+  const loc = localDoComp(it);
+  let odooTxt = null;
+  if (!lkOdoo){
+    odooTxt = loc && !loc.integrado ? 'ainda não está no Odoo: vai com a ficha no "Enviar para o Odoo"'
+      : od && od.motivo ? od.motivo
+      : od ? 'o espelho não diz qual é o Odoo — rode a sincronização do almoxarifado'
+      : 'sem ficha: vincule ao almoxarifado pelo "Trocar componente…"';
+    if (!(loc && !loc.integrado)) avisos.push({ t:'Odoo: ' + odooTxt, cod: !od && !loc ? 'sem-ficha' : 'odoo' });
+  }
+  /* o desenho emprestado precisa se ANUNCIAR: o corpo âmbar na folha diz que algo é diferente */
+  let desenhoTxt = null;
+  if (!sym){
+    const emg = desenhoDeEmergencia(it);
+    desenhoTxt = emg ? 'emprestado de "' + emg.nome + '" (Biblioteca de símbolos, por ' + emg.how + ') — só para ver'
+                     : 'nenhum: a folha mostra o quadrado vermelho';
+    avisos.push({ t:'Desenho: ' + desenhoTxt, nivel: emg ? 'warn' : 'err', cod:'desenho' });
+  }
+  if (nparts < totalPartes) avisos.push({ t:'Partes: o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham', cod:'partes' });
+  for (const a of fpInfo.avisos) avisos.push({ t:a, cod: /não está na PcbLib/.test(a) ? 'footprint-inexistente' : 'footprint' });
+  /* FORA DO ALMOXARIFADO: sem ficha no almoxarifado (sem OdooId, sem LocalId, sem o valor no espelho) — o mesmo
+     "sem ficha: vincule ao almoxarifado" acima. Sem o HubOdooLink ou sem o espelho do almoxarifado carregado não se
+     afirma nada (senão a folha inteira ficaria vermelha por falta do espelho, e não da peça). */
+  const almox = ['almoxBasicos', 'almoxEspeciais'].some(v => window[v] && Array.isArray(window[v].symbols) && window[v].symbols.length);
+  const fora = typeof HubOdooLink !== 'undefined' && almox && !od && !loc;
+  return { avisos, acNome, acPendente, od, lkOdoo, loc, odooTxt, desenhoTxt, fora };
+}
 function localDoComp(comp){
   const m = /(?:^|;)\s*LocalId\s*=\s*([^;]*)/i.exec(String((comp && comp.params) || ''));
   if (!m) return null;
@@ -4917,37 +4969,9 @@ function renderProps(){
   cel(l3, 'Footprint', campoFootprint(it, fpNome), true);
   g.append(acoesFootprint(it, sym, fpInfo.fp));
 
-  /* ── O QUE FOI PARA O MODAL, e os avisos que viram o ponto no botão ── */
-  const avisos = [];
-  const acNome = ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca');
-  /* "Biblioteca do Altium" é trabalho pendente: o componente ainda não tem par no almoxarifado, e é isso que
-     impede a lista do Odoo de casar a linha por id em vez de por texto. Com o OdooId nos params ele JÁ tem
-     (acervoDoComp) — e o aviso, que era falso nesse caso, não sai mais. */
-  const acPendente = !!ac && /biblioteca do altium|espelho do altium/i.test(String(ac.titulo || ''));
-  if (acPendente) avisos.push({ t:'Acervo: ' + acNome + ' — vincule ao almoxarifado pelo "Trocar componente…" para a lista do Odoo casar por id', nivel:'err' });
-  else if (!ac && sym) avisos.push('Acervo: o símbolo não é de nenhum acervo da casa');
-  const od = odooDoComp(it);
-  const lkOdoo = od && od.alvo ? HubOdooLink.link(od.alvo, { nome: od.nome, texto: 'Abrir no Odoo ↗' }) : null;
-  /* CRIADO LOCALMENTE (Biblioteca, botão Novo componente): vai com a ficha no "Enviar para o Odoo" */
-  const loc = localDoComp(it);
-  let odooTxt = null;
-  if (!lkOdoo){
-    odooTxt = loc && !loc.integrado ? 'ainda não está no Odoo: vai com a ficha no "Enviar para o Odoo"'
-      : od && od.motivo ? od.motivo
-      : od ? 'o espelho não diz qual é o Odoo — rode a sincronização do almoxarifado'
-      : 'sem ficha: vincule ao almoxarifado pelo "Trocar componente…"';
-    if (!(loc && !loc.integrado)) avisos.push('Odoo: ' + odooTxt);
-  }
-  /* o desenho emprestado precisa se ANUNCIAR: o corpo âmbar na folha diz que algo é diferente */
-  let desenhoTxt = null;
-  if (!sym){
-    const emg = desenhoDeEmergencia(it);
-    desenhoTxt = emg ? 'emprestado de "' + emg.nome + '" (Biblioteca de símbolos, por ' + emg.how + ') — só para ver'
-                     : 'nenhum: a folha mostra o quadrado vermelho';
-    avisos.push({ t:'Desenho: ' + desenhoTxt, nivel: emg ? 'warn' : 'err' });
-  }
-  if (nparts < totalPartes) avisos.push('Partes: o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham');
-  for (const a of fpInfo.avisos) avisos.push(a);
+  /* ── O QUE FOI PARA O MODAL, e os avisos que viram o ponto no botão ── (1.95.0: a conta mora em avisosDoComp, que o
+     DRC do esquema também usa — uma regra só) */
+  const { avisos, acNome, acPendente, od, lkOdoo, loc, odooTxt, desenhoTxt } = avisosDoComp(it, { rsym, sym, ac, nparts, totalPartes, fpInfo });
 
   const abreParametros = () => {
     const rs = String(it.ref);
@@ -5137,6 +5161,8 @@ if (typeof HubVariantes !== 'undefined' && HubIO.canPost){
     if (typeof HubSchTemplate !== 'undefined' && HubSchTemplate.setVariante) HubSchTemplate.setVariante(v);
     document.body.classList.toggle('variante-on', Boolean(v));
     if (v && tool !== 'select') setTool('select');
+    /* o suprimido nesta variante não gera aviso no DRC do esquema (1.95.0) */
+    if (typeof ercDepois === 'function') ercDepois();
     renderProps(); cam.draw(); pintaMiniaturas();
   };
   HubVariantes.monta($('pane-cfg'), { projeto: SCH_P, vista: 'sch', antes: document.querySelector('#pane-cfg .cfg-pe'), selecionados: selRefs, foca: acha });
@@ -5412,6 +5438,117 @@ function desenhaFolha(ctx, si, o){
   for (const n of s.noercs)    D.drawNoERC(ctx, n.x, n.y, n.color);
 
 }
+/* ══ O DRC DO ESQUEMA (1.95.0, hub-scherc.js) ══
+   Pedido do dono: "se o componente no esquema estiver desconectado de uma net, eu quero que apareça um triângulo
+   amarelo, e quero um DRC no esquema também ... componente fora do almoxarifado também; quero que os componentes que
+   estiverem fora do almoxarifado fiquem vermelhinhos, em volta dizendo que estão fora".
+   A conta roda depois de cada mudança (o reapply), com folga: o botão DRC da barra mostra a contagem, o painel lista,
+   e a folha mostra o triângulo no pino solto e o vermelho no fora do almoxarifado — SÓ na tela (o PDF do esquema e as
+   miniaturas desenham pelo desenhaFolha, que não passa por aqui). A variante ativa: o suprimido não conta. */
+/* `var` de propósito: o reapply e o desenho podem rodar antes desta linha (na abertura), e um `let` daria TDZ */
+var ERC = typeof HubSchErc !== 'undefined' ? HubSchErc : null;
+var ERC_MARCAS_KEY = 'schframe.ercMarcas';
+var ercMarcas = true;
+try { ercMarcas = localStorage.getItem(ERC_MARCAS_KEY) !== '0'; } catch (e) {}
+var ERC_RES = null, ercPainel = null, ercTimer = null;
+function ercRoda(){
+  if (!ERC) return null;
+  try {
+    const supr = VAR.on && VAR.refs ? VAR.refs : new Set();
+    const T = typeof HubSchTemplate !== 'undefined' ? HubSchTemplate : null;
+    const nd = T && T.projetoNaoDefinido ? T.projetoNaoDefinido(schematic.params, schematic.project || '') : '';
+    const cacheAv = new Map();
+    const av = c => { if (!cacheAv.has(c)) cacheAv.set(c, avisosDoComp(c)); return cacheAv.get(c); };
+    ERC_RES = ERC.rodar({
+      hc: HubCore, schematic, nets, slib: SLIB, plib: PLIB, suprimidos: supr,
+      caixaDoComp: c => compBBox(c),
+      footprintExiste: nome => !!HubCore.footprintOf(PLIB, nome),
+      foraDoAlmox: c => av(c).fora,
+      /* os avisos do botão Parâmetros, menos os que já têm regra própria (o sem ficha = fora do almoxarifado; o
+         footprint que não existe) e o "não é de nenhum acervo" do componente que já sai como fora do almoxarifado */
+      avisosDoComp: c => av(c).avisos.filter(a => !['sem-ficha', 'footprint-inexistente'].includes(a.cod)
+                                             && !(a.cod === 'acervo' && !a.nivel && av(c).fora)),
+      projetoNaoDefinido: nd || false,
+    });
+  } catch (e) { console.warn('DRC do esquema:', e); ERC_RES = null; }
+  pintaBotaoErc();
+  if (ercPainel && ERC_RES) ercPainel.mostra(ERC_RES);
+  return ERC_RES;
+}
+function ercDepois(){ clearTimeout(ercTimer); ercTimer = setTimeout(() => { ercRoda(); cam.draw(); }, 200); }
+function pintaBotaoErc(){
+  const b = $('btnErc'), n = $('ercN');
+  if (!b || !n) return;
+  const r = ERC_RES;
+  n.className = 'lb erc-n' + (r && r.erros ? ' erro' : r && r.total ? ' aviso' : '');
+  n.textContent = r && r.total ? String(r.total) : '';
+  b.title = 'DRC do esquema' + (r ? ': ' + r.erros + ' erro(s), ' + r.avisos + ' aviso(s)' + (r.porRegra.length ? '\n' + r.porRegra.map(c => '• ' + c.titulo + ': ' + c.n).join('\n') : '') : '')
+    + '\n(o clique abre a lista; a folha mostra o triângulo no pino solto e o vermelho no fora do almoxarifado)';
+}
+function abreErc(){
+  if (!ERC){ HubDialog.toast('o DRC do esquema (hub-scherc.js) não carregou — atualize a página', 'err'); return; }
+  if (ercPainel){ ercPainel.fecha(); return; }
+  const host = $('cv').parentElement;
+  ercPainel = ERC.painel(host, {
+    rodar: () => ercRoda(),
+    irPara: v => ercIrPara(v),
+    aoFechar: () => { ercPainel = null; cam.draw(); },
+  });
+  const r = ercRoda();
+  if (r) ercPainel.mostra(r);
+  ercPainel.el.focus();
+}
+/* o clique na violação: a folha dela, a câmera em cima e o componente marcado (o projeto não definido abre o Definir) */
+function ercIrPara(v){
+  if (v.regra === 'projeto-nao-definido'){
+    if (window.HubCatalogo && typeof HubCatalogo.abreDaFolha === 'function') HubCatalogo.abreDaFolha();
+    return;
+  }
+  const si = v.sheet != null ? model.sheets.findIndex(s => s.name === v.sheet) : -1;
+  if (si >= 0 && si !== sheetIdx) setSheet(si);
+  const comp = v.ref ? (model.sheets[sheetIdx] || { comps:[] }).comps.find(c => String(c.ref) === String(v.ref)) : null;
+  if (comp && v.regra !== 'pino-solto' && v.regra !== 'net-um-pino') focusComp(comp);
+  else if (v.x != null){
+    if (comp){ selSo([alvoAll(comp)]); aplicaSel(''); }
+    cam.fit({ x1:v.x - 600, y1:v.y - 600, x2:v.x + 600, y2:v.y + 600 });
+  }
+  ercFoco = v;
+  cam.draw();
+}
+var ercFoco = null;
+/* as marcas do DRC na folha ativa (só na tela) */
+function desenhaErcNaTela(ctx, cam){
+  if (!ERC || !ERC_RES) return;
+  const sh = model.sheets[sheetIdx];
+  if (!sh) return;
+  const px = 1 / cam.scale;
+  if (ercMarcas){
+    const feitos = new Set();
+    for (const v of ERC_RES.violacoes){
+      if (v.sheet !== sh.name) continue;
+      if (v.regra === 'fora-almox' && !feitos.has(v.ref)){
+        feitos.add(v.ref);
+        /* um contorno só em volta de todas as partes do componente nesta folha (o conector de N vias é um componente) */
+        let u = null;
+        for (const c of sh.comps) if (String(c.ref) === String(v.ref)){
+          const b = compBBox(c);
+          u = u ? { x1:Math.min(u.x1, b.x1), y1:Math.min(u.y1, b.y1), x2:Math.max(u.x2, b.x2), y2:Math.max(u.y2, b.y2) } : b;
+        }
+        if (u) ERC.foraDoAlmox(ctx, u, px);
+      }
+    }
+    for (const v of ERC_RES.violacoes)
+      if (v.sheet === sh.name && v.regra === 'pino-solto' && v.x != null) ERC.triangulo(ctx, v.x, v.y, px);
+  }
+  /* a violação escolhida na lista: um anel em volta */
+  if (ercPainel && ercFoco && ercFoco.sheet === sh.name && ercFoco.x != null){
+    ctx.save();
+    ctx.strokeStyle = ercFoco.sev === 'erro' ? '#ef4444' : '#f59e0b';
+    ctx.lineWidth = 3 * px; ctx.setLineDash([8 * px, 5 * px]);
+    ctx.beginPath(); ctx.arc(ercFoco.x, ercFoco.y, 26 * px + 40, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+}
 /* o que a camera do canvas grande desenha: a folha ATIVA com os tres estados dela, mais o
    que so existe aqui — o contorno da selecao e a ferramenta na mao */
 /* os textos (designador/comment) que a mao esta arrastando AGORA — so eles ganham o tracinho */
@@ -5424,6 +5561,7 @@ function textosNaMao(){
 function drawWorld(ctx, cam){
   desenhaFolha(ctx, sheetIdx, { grid: showState.grid, foco: selNet, esc: cam.scale, textosNaMao: textosNaMao(),
                                 antesDosFios: tool === 'wire' ? c => desenhaCruzDoFio(c, 1 / cam.scale) : null });
+  desenhaErcNaTela(ctx, cam);
   drawSelection(ctx, cam);
   drawFerramenta(ctx, cam);
 }
@@ -6879,6 +7017,7 @@ function fazAcao(id){
     case 'salvar':    saveAll(); return;
     case 'autosave':  alternaAutosaveSch(); return;
     case 'pdf':       exportaPdfEsquema(); return;
+    case 'drc':       abreErc(); return;
   }
   return false;
 }
@@ -7886,6 +8025,20 @@ $('btnGuias').addEventListener('click', () => {
   HubDialog.toast(showState.guias ? 'guias de alinhamento ligadas' : 'guias de alinhamento desligadas', 'info', 2200);
 });
 pintaGuias();
+$('btnErc').addEventListener('click', () => abreErc());
+function pintaBotaoErcMarcas(){
+  const b = $('btnErcMarcas');
+  b.classList.toggle('active', ercMarcas); b.setAttribute('aria-pressed', String(ercMarcas));
+  b.title = ercMarcas ? 'Avisos do DRC na folha visíveis (triângulo no pino solto, vermelho no fora do almoxarifado) — clique para esconder'
+                      : 'Avisos do DRC na folha escondidos — clique para mostrar';
+}
+$('btnErcMarcas').addEventListener('click', () => {
+  ercMarcas = !ercMarcas;
+  try { localStorage.setItem(ERC_MARCAS_KEY, ercMarcas ? '1' : '0'); } catch (e) {}
+  pintaBotaoErcMarcas(); cam.draw();
+});
+pintaBotaoErcMarcas();
+setTimeout(() => { ercRoda(); cam.draw(); }, 400);
 $('btnGrid').addEventListener('click', () => {
   showState.grid = !showState.grid; $('btnGrid').classList.toggle('active', showState.grid); cam.draw();
 });
