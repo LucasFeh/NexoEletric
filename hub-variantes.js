@@ -165,10 +165,12 @@ const CSS = `
 .vr-selo{position:fixed; top:8px; left:50%; transform:translateX(-50%); z-index:40; pointer-events:none;
   font:600 11px var(--font, "Segoe UI", sans-serif); letter-spacing:.04em; padding:3px 10px; border-radius:10px;
   background:rgba(245,158,11,.92); color:#1a1205; box-shadow:0 2px 8px rgba(0,0,0,.35);}
-.vr-barra{position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:30; display:flex; gap:6px; align-items:center;
-  padding:5px 8px; border-radius:7px; background:var(--panel2, var(--surface, #222)); border:1px solid rgba(245,158,11,.7);
-  box-shadow:0 4px 14px rgba(0,0,0,.4); font:12px var(--font, "Segoe UI", sans-serif); color:var(--fg, var(--text, #ddd));}
-.vr-barra .vr-nome{font-weight:600; color:#f59e0b; white-space:nowrap;}
+/* 1.89.2 (pedido do dono, 2026-11-10: "não precisa, só precisa de um top dizendo que é variante"): só a etiqueta no topo,
+   sem o contador nem o botão; suprimir/montar fica no Shift+S e no botão direito */
+.vr-barra{position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:30; max-width:calc(100% - 24px);
+  padding:3px 12px; border-radius:10px; background:rgba(245,158,11,.92); color:#1a1205; box-shadow:0 2px 8px rgba(0,0,0,.35);
+  font:600 11px var(--font, "Segoe UI", sans-serif); letter-spacing:.04em; pointer-events:auto;}
+.vr-barra .vr-nome{display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .vr-barra button{cursor:pointer; padding:4px 10px; border-radius:5px; border:1px solid #f59e0b; background:rgba(245,158,11,.16);
   color:var(--fg, var(--text, #eee)); font:600 12px var(--font, sans-serif);}
 .vr-barra button:disabled{opacity:.45; cursor:default;}
@@ -401,22 +403,21 @@ function instalaTecla(projeto, selecionados){
     alterna(projeto, selecionados ? selecionados() : []);
   }, true);
 }
-/* a barra que sobra na vista com a variante ativa: o nome, o código e o Suprimir / Montar */
-function barra(container, projeto, selecionados){
+/* a etiqueta no topo da vista com a variante ativa: "VARIANTE <nome> · <código>" (1.89.2: sem contador e sem botão; o
+   suprimir/montar é o Shift+S e o botão direito; `selecionados` fica na assinatura para quem já chama) */
+function barra(container, projeto, selecionados){ // eslint-disable-line no-unused-vars
   css();
   let b = null;
   const pinta = () => {
     const v = ativa(projeto);
     document.body.classList.toggle('variante-on', Boolean(v));
     if (!v) { if (b) { b.remove(); b = null; } return; }
-    if (!b) { b = el('div', 'vr-barra'); b.setAttribute('role', 'toolbar'); b.setAttribute('aria-label', 'Variante de projeto'); container.append(b); }
+    if (!b) { b = el('div', 'vr-barra'); b.setAttribute('role', 'status'); b.setAttribute('aria-label', 'Variante de projeto'); container.append(b); }
     b.replaceChildren();
     const nm = el('span', 'vr-nome', textoVariante(v));
-    nm.title = 'variante de projeto ativa nesta máquina: a PCB é a mesma, só se suprime ou monta componente (Configurações › Variante de projeto)';
-    const s = bt('Suprimir / Montar', 'tira (ou devolve) os componentes selecionados desta variante (' + TECLA + ')', () => alterna(projeto, selecionados ? selecionados() : []));
-    s.append(el('kbd', null, TECLA));
-    if (!podeEditar(projeto)) { s.disabled = true; s.title = 'suprimir é edição — ' + motivo(projeto); }
-    b.append(nm, el('span', null, (v.suprimidos || []).length + ' suprimido(s)'), s);
+    b.title = textoVariante(v) + ' — ' + (v.suprimidos || []).length + ' suprimido(s). A PCB é a mesma; suprimir ou montar: '
+      + TECLA + ' ou botão direito no componente (Configurações › Variante de projeto)';
+    b.append(nm);
   };
   ouve(p => { if (p === projeto) pinta(); });
   pinta();

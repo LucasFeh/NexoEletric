@@ -4,6 +4,14 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.89.2 — 2026-11-10
+
+**A barra da variante vira só uma etiqueta no topo.**
+- Com uma variante de projeto ativa, o esquema e a PCB mostram no alto só **"VARIANTE <nome> · <código>"**, numa etiqueta
+  laranja que corta com "…" quando o nome é comprido. O contador de suprimidos e o botão **Suprimir / Montar** saíram da
+  barra (o contador está no título da etiqueta, ao passar o mouse, e em Configurações › Variante de projeto).
+- Suprimir e montar continuam pelo **Shift+S** e pelo **botão direito** no componente (e pela caixa nas Propriedades da PCB).
+
 ## 1.89.1 — 2026-11-10
 
 **A árvore de projetos mostra o código da PCB, não o nome.**
