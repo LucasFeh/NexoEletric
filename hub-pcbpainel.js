@@ -89,6 +89,13 @@ const CSS = `
 .pp .pr-par > .k{color:var(--fg-dim); font-size:11px;}
 .pp .pr-par-c{display:flex; align-items:center; gap:3px; min-width:0;}
 .pp .pr-par-c .s{flex:none; font-size:10px; color:var(--fg-dim); text-transform:uppercase; letter-spacing:.04em;}
+/* 1.90.0: a ficha do componente em GRADE ({ grade:[campos] }): o rótulo pequeno em cima de cada campo, várias
+   colunas por linha; e o ponto de aviso num botão ({ botoes:[{ aviso:{ err, dica } }] }) */
+.pp .pr-grade{display:grid; gap:4px 8px; margin:2px 0 6px;}
+.pp .pr-gc{display:flex; flex-direction:column; gap:1px; min-width:0;}
+.pp .pr-gc > .s{font-size:10px; color:var(--fg-dim); text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.pp .btn .pt{flex:none; width:7px; height:7px; border-radius:50%; background:var(--warn);}
+.pp .btn .pt.err{background:var(--err);}
 .pp .pr-bool{display:inline-flex; align-items:center; gap:6px; cursor:pointer;}
 .pp .pr-bool input{accent-color:var(--accent); margin:0;}
 .pp .pr-nota{font-size:11px; color:var(--fg-dim); line-height:1.45; margin-top:6px;}
@@ -304,7 +311,7 @@ function instala(aside, V) {
     cab.append(el('div', 'pr-title', f.titulo || ''));
     if (f.sub) cab.append(el('div', 'pr-sub', f.sub));
     if (f.aviso) cab.append(el('div', 'pr-aviso', f.aviso));
-    if (!V.editOn() && f.tipo !== 'ferramenta' && !f.semTrava && (f.campos || []).some(c => c.k && c.tipo !== 'ro'))
+    if (!V.editOn() && f.tipo !== 'ferramenta' && !f.semTrava && (f.campos || []).some(c => (c.k && c.tipo !== 'ro') || (c.grade && c.grade.some(x => x.k && x.tipo !== 'ro'))))
       cab.append(el('div', 'pr-nota', 'Só leitura: mudar um campo destrava a edição (' + (V.teclaDe('editar') || 'E') + ' trava de novo).'));
     let box = sec(pag);
     for (const c of f.campos || []) {
@@ -315,6 +322,7 @@ function instala(aside, V) {
         for (const x of c.botoes) {
           const bt = el('button', 'btn', x.rot);
           bt.type = 'button'; if (x.dica) bt.title = x.dica; if (x.off) bt.disabled = true;
+          if (x.aviso) { const pt = el('span', 'pt' + (x.aviso.err ? ' err' : '')); pt.setAttribute('aria-label', 'aviso'); bt.append(pt); if (x.aviso.dica) bt.title = x.aviso.dica; }
           bt.addEventListener('click', () => V.acao(x.id));
           b.append(bt);
         }
@@ -328,6 +336,18 @@ function instala(aside, V) {
         const tb = el('tbody');
         for (const l of c.tab.linhas) { const tr = el('tr'); l.forEach((v, i) => tr.append(el('td', i ? '' : 'n', v))); tb.append(tr); }
         t.append(tb); box.append(t); continue;
+      }
+      if (c.grade) {
+        const r = el('div', 'pr-grade');
+        r.style.gridTemplateColumns = 'repeat(' + (c.cols || c.grade.length) + ',minmax(0,1fr))';
+        for (const x of c.grade) {
+          const cc = el('div', 'pr-gc');
+          cc.append(el('span', 's', x.rot + (x.tipo === 'dist' ? ' (' + V.unidade() + ')' : x.tipo === 'ang' ? ' (°)' : '')));
+          cc.append(controle(x, true));
+          if (x.dica) cc.title = x.dica;
+          r.append(cc);
+        }
+        box.append(r); continue;
       }
       if (c.par) {
         const r = el('div', 'pr-par');

@@ -12,6 +12,10 @@
      await HubDialog.texto('texto', { title, v, rotulo, ok, cancel, valida })
                                                                     -> o texto digitado | null
        valida(texto) -> '' (aceita) | a mensagem que aparece embaixo do campo (e o OK espera)
+     await HubDialog.ficha({ title, sub, avisos:[texto|{t, nivel}], secoes:[{ titulo, kv:[[k, v, cls]],
+                            tab:{ cab:[...], linhas:[[...]] }, vazio }] })    -> undefined
+       1.90.0: um modal LARGO, só leitura (o "Parâmetros" do componente nas vistas Esquema e PCB). O v de
+       um par pode ser texto ou um nó (o link do Odoo); cls 'warn'|'dim'|'mono'|'err'.
      HubDialog.toast('texto', 'ok'|'warn'|'err'|'info', ms)          -> { close }
        ms omitido: some sozinho (erro fica mais); ms = 0: fica ate clicar.                  */
 "use strict";
@@ -51,6 +55,30 @@ const CSS = `
 .hd-btns button.ok.danger{color:var(--err,#ff5252); border-color:var(--err,#ff5252);}
 .hd-btns button.ok.danger:hover{background:var(--err-soft,rgba(255,82,82,.15));}
 .hd-btns button:focus-visible{outline:2px solid var(--hi,#4fc3f7); outline-offset:1px;}
+/* a ficha (1.90.0): largura de leitura, as seções rolam dentro da caixa; o cabeçalho e o OK ficam */
+.hd-box.hd-larga{width:min(640px, 94vw); max-height:86vh; display:flex; flex-direction:column;}
+.hd-box .hd-sub{margin:-4px 0 10px; font-size:12px; color:var(--text-dim,#a8a8a8); word-break:break-word;}
+.hd-ficha{flex:1 1 auto; min-height:0; overflow:auto; margin:0 -6px; padding:0 6px;}
+.hd-avisos{display:flex; flex-direction:column; gap:4px; margin:0 0 10px;}
+.hd-aviso{display:flex; gap:7px; align-items:flex-start; font-size:12px; padding:6px 9px; border-radius:var(--r-sm,4px);
+  background:var(--warn-soft,rgba(255,213,79,.10)); color:var(--text,#d8d8d8); border-left:3px solid var(--warn,#ffd54f);}
+.hd-aviso.err{background:var(--err-soft,rgba(255,82,82,.12)); border-left-color:var(--err,#ff5252);}
+.hd-aviso .tri{flex:none; color:var(--warn,#ffd54f); font-size:10px; line-height:1.6;}
+.hd-aviso.err .tri{color:var(--err,#ff5252);}
+.hd-fsec{padding:8px 0 10px; border-top:1px solid var(--line,#3a3a3a);}
+.hd-fsec:first-child{border-top:0; padding-top:2px;}
+.hd-fsec h4{margin:0 0 6px; font-size:10px; font-weight:400; text-transform:uppercase; letter-spacing:.09em; color:var(--text-dim,#a8a8a8);}
+.hd-kv{display:grid; grid-template-columns:150px minmax(0,1fr); gap:3px 12px; font-size:12px;}
+.hd-kv .k{color:var(--text-dim,#a8a8a8); word-break:break-word;}
+.hd-kv .v{color:var(--text,#d8d8d8); word-break:break-word; user-select:text;}
+.hd-kv .v.mono, .hd-tab td{font-family:var(--mono,Consolas,monospace); font-size:11px;}
+.hd-kv .v.warn{color:var(--warn,#ffd54f);} .hd-kv .v.err{color:var(--err,#ff5252);} .hd-kv .v.dim{color:var(--text-dim,#a8a8a8);}
+.hd-tab{width:100%; border-collapse:collapse; font-size:11px;}
+.hd-tab th{text-align:left; font-weight:400; font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim,#a8a8a8);
+  padding:2px 6px; border-bottom:1px solid var(--line,#3a3a3a);}
+.hd-tab td{padding:2px 6px; border-bottom:1px solid var(--line,#3a3a3a); color:var(--text,#d8d8d8); user-select:text;}
+.hd-tab td.dim{color:var(--text-dim,#a8a8a8);}
+.hd-vazio{font-size:12px; color:var(--text-dim,#a8a8a8);}
 .hd-toasts{position:fixed; top:12px; right:12px; z-index:10000; display:flex; flex-direction:column; gap:8px;
   align-items:flex-end; pointer-events:none; font:13px/1.4 var(--font,"Segoe UI",system-ui,sans-serif);}
 /* a borda e transparente e o contorno e o anel do --shadow-menu, como na caixa; so a faixa da
@@ -89,7 +117,8 @@ function abre(msg, o, temCancelar){
     const box = el('div', 'hd-box');
     box.setAttribute('role', temCancelar ? 'alertdialog' : 'dialog'); box.setAttribute('aria-modal', 'true');
     if (o.title){ const h = el('h3', o.danger ? 'danger' : null, o.title); box.append(h); }
-    box.append(el('p', null, String(msg == null ? '' : msg)));
+    if (o.corpo){ box.classList.add('hd-larga'); if (o.sub) box.append(el('div', 'hd-sub', o.sub)); box.append(o.corpo); }
+    else box.append(el('p', null, String(msg == null ? '' : msg)));
     /* escolhe(): um seletor embaixo do texto; o OK devolve o valor escolhido */
     let sel = null;
     if (Array.isArray(o.opcoes)){
@@ -158,6 +187,52 @@ function alert(msg, o){ return enfileira(() => abre(msg, o || {}, false)).then((
 function confirm(msg, o){ return enfileira(() => abre(msg, o || {}, true)); }
 function escolhe(msg, o){ return enfileira(() => abre(msg, Object.assign({ opcoes:[] }, o || {}), true)); }
 function texto(msg, o){ return enfileira(() => abre(msg, Object.assign({}, o || {}, { texto:true }), true)); }
+/* a ficha só de leitura (1.90.0): avisos em cima, depois as seções (pares rótulo/valor ou tabela) */
+function corpoDaFicha(d){
+  const c = el('div', 'hd-ficha');
+  const av = (d.avisos || []).filter(Boolean);
+  if (av.length){
+    const box = el('div', 'hd-avisos');
+    for (const a of av){
+      const t = typeof a === 'string' ? a : a.t, n = typeof a === 'string' ? 'warn' : (a.nivel || 'warn');
+      const x = el('div', 'hd-aviso' + (n === 'err' ? ' err' : ''));
+      x.append(el('span', 'tri', '▲'), el('span', null, t));
+      box.append(x);
+    }
+    c.append(box);
+  }
+  for (const s of d.secoes || []){
+    if (!s) continue;
+    const sec = el('div', 'hd-fsec');
+    if (s.titulo) sec.append(el('h4', null, s.titulo));
+    const kv = (s.kv || []).filter(Boolean);
+    if (kv.length){
+      const g = el('div', 'hd-kv');
+      for (const [k, v, cls] of kv){
+        const vv = el('span', 'v' + (cls ? ' ' + cls : ''));
+        if (v && typeof v === 'object' && v.nodeType) vv.append(v);
+        else vv.textContent = v == null || v === '' ? '—' : String(v);
+        g.append(el('span', 'k', k == null ? '' : String(k)), vv);
+      }
+      sec.append(g);
+    }
+    if (s.tab && (s.tab.linhas || []).length){
+      const t = el('table', 'hd-tab'), th = el('tr');
+      for (const h of s.tab.cab || []) th.append(el('th', null, h));
+      const thead = el('thead'); thead.append(th); t.append(thead);
+      const tb = el('tbody');
+      for (const l of s.tab.linhas){ const tr = el('tr'); l.forEach((v, i) => tr.append(el('td', (s.tab.dim || []).indexOf(i) >= 0 ? 'dim' : null, v == null || v === '' ? '—' : String(v)))); tb.append(tr); }
+      t.append(tb); sec.append(t);
+    }
+    if (!kv.length && !(s.tab && (s.tab.linhas || []).length)) sec.append(el('div', 'hd-vazio', s.vazio || '—'));
+    c.append(sec);
+  }
+  return c;
+}
+function ficha(d){
+  const x = d || {};
+  return enfileira(() => { prepara(); return abre('', { title: x.title, sub: x.sub, ok: x.ok || 'Fechar', corpo: corpoDaFicha(x) }, false); }).then(() => undefined);
+}
 
 const DURACAO = { ok: 3000, info: 3200, warn: 4500, err: 6500 };
 function toast(msg, kind, ms){
@@ -181,6 +256,6 @@ function toast(msg, kind, ms){
   return { close };
 }
 
-return { alert, confirm, escolhe, texto, toast, ocioso };
+return { alert, confirm, escolhe, texto, ficha, toast, ocioso };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubDialog;

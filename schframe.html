@@ -346,6 +346,17 @@
   .pr-par{display:flex; gap:8px; margin:3px 0 1px;}
   .pr-par-c{flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:1px;}
   .pr-par-c .k{font-size:10px; color:var(--fg-dim); text-transform:uppercase; letter-spacing:.04em;}
+  /* 1.90.0: a ficha do componente em GRADE (só o que se edita; o resto no modal Parâmetros) */
+  .pr-grade{display:grid; gap:5px 8px; margin:0 0 7px;} .pr-grade:last-child{margin-bottom:0;}
+  .pr-g1{grid-template-columns:minmax(0,1fr);} .pr-g2{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .pr-g3{grid-template-columns:repeat(3,minmax(0,1fr));} .pr-g4{grid-template-columns:repeat(3,minmax(0,1fr)) auto;}
+  .pr-gc{min-width:0; display:flex; flex-direction:column; gap:1px;} .pr-grade .larga{grid-column:1 / -1;}
+  .pr-gc > .k{font-size:10px; color:var(--fg-dim); text-transform:uppercase; letter-spacing:.04em; white-space:nowrap;}
+  .pr-grade > .wide{margin:0; min-width:0; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; padding:4px 6px;}
+  .pr-grade > .pr-bpar{display:flex; align-items:center; justify-content:center; gap:6px;}
+  .pr-bpar .rt{min-width:0; overflow:hidden; text-overflow:ellipsis;}
+  .pr-pt{flex:none; width:7px; height:7px; border-radius:50%; background:var(--warn);}
+  .pr-pt.err{background:var(--err);}
   .pr-lab{display:flex; align-items:center; gap:4px;}
   .pr-lab>span{font-size:10px; color:var(--fg-dim); text-transform:uppercase; letter-spacing:.04em;}
   .pr-olho{flex:none; width:16px; height:16px; padding:0; background:transparent; border:0;

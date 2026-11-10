@@ -4813,6 +4813,9 @@ function extrasDoHub(w){
     const todos = rs.every(r => VAR.refs.has(r));
     it.push({ rot:(todos ? 'Montar ' : 'Suprimir ') + rs.join(', ') + ' (variante ' + VAR.on.nome + ')', tecla:HubVariantes.TECLA, f:() => HubVariantes.alterna(PROJ, rs) });
   }
+  /* 1.90.0: o "Não montar" do projeto (fora da variante), que saiu do painel */
+  const nm = itemNaoMontar();
+  if (nm) it.push(nm);
   const muda = SEL.filter(CAMADA_LIVRE);
   if (muda.length) {
     const ks = new Set(muda.map(a => a.m.eff.layer));
@@ -6577,28 +6580,26 @@ function furosDosCirculos(alvos, manter){
 function fichaDe(a){
   switch (a.t) {
     case 'comp': {
-      /* o Properties do Altium para Component: Location, Properties, Footprint e Primitives */
-      const m = a.m, e = m.eff, s = m.src, bb = s.bbox;
+      /* 1.90.0 (pedido do dono, o mesmo da ficha do Esquema): só o que se EDITA, em grade — posição, rotação,
+         face, designador, comment e o mostrar dos dois textos — e as ações. O que é só leitura (Type, Footprint
+         Name, Dimensions, 3D Body, a tabela de pads, os parâmetros do componente que vão para o Odoo) foi para o
+         modal Parâmetros (abreParametrosComp), que abre para todos; o "Não montar" foi para o botão direito
+         (extrasDoHub » itemNaoMontar). O que é problema vira o ponto no botão Parâmetros (avisosDoComp). */
+      const m = a.m, e = m.eff, s = m.src;
       const est = [m.changed ? 'movido' : '', m.attrChanged ? 'atributos mudados' : ''].filter(Boolean).join(' · ');
+      const av = avisosDoComp(m);
+      const mostra = camposMostra(m);
       return { titulo:'Component', sub:(e.designator || s.ref) + (est ? ' · ' + est : ''), campos:[
-        { sec:'Location' },
-        par('(X/Y)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
-        { k:'rot', rot:'Rotation', tipo:'ang', v:e.rot },
-        { sec:'Properties' },
-        { k:'layer', rot:'Layer', tipo:'enum', v:e.layer, opc:opcFaces(), dica:'trocar de face espelha o componente como olhar a placa por baixo (a rotação vira 180 − r), igual ao L no arrasto' },
-        { k:'designator', rot:'Designator', tipo:'texto', v:e.designator || s.ref, dica:'renomear na PCB dessincroniza do esquema — o ECO vai acusar' },
-        { k:'comment', rot:'Comment', tipo:'texto', v:e.comment !== undefined ? e.comment : (s.comment || '') },
-        ...camposMostra(m),
-        ...camposNaoMontar(m),
-        { k:'tipo', rot:'Type', tipo:'ro', v:'Standard' },
-        { sec:'Footprint' },
-        { k:'footprint', rot:'Footprint Name', tipo:'ro', v:s.footprint || '—' },
-        { k:'dim', rot:'Dimensions', tipo:'ro', v:bb && isNum(bb.x1) ? fmtDist(bb.x2 - bb.x1) + ' × ' + fmtDist(bb.y2 - bb.y1) + ' ' + unidade : '—' },
-        { k:'corpo3d', rot:'3D Body', tipo:'ro', v:corpos3dDe(s.footprint) },
-        { botoes:[{ id:'girar', rot:'Rotate 90°' }, { id:'virar', rot:'Flip Component' }, { id:'enquadrar', rot:'Zoom' }] },
+        { grade:[{ k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }, { k:'rot', rot:'Rotation', tipo:'ang', v:e.rot }] },
+        { grade:[{ k:'layer', rot:'Layer', tipo:'enum', v:e.layer, opc:opcFaces(), dica:'trocar de face espelha o componente como olhar a placa por baixo (a rotação vira 180 − r), igual ao L no arrasto' },
+                 { k:'designator', rot:'Designator', tipo:'texto', v:e.designator || s.ref, dica:'renomear na PCB dessincroniza do esquema — o ECO vai acusar' }] },
+        { grade:[{ k:'comment', rot:'Comment', tipo:'texto', v:e.comment !== undefined ? e.comment : (s.comment || '') }] },
+        ...(mostra.length ? [{ grade:mostra }] : []),
+        { botoes:[{ id:'parametros', rot:'Parâmetros',
+                    aviso:av.length ? { err:av.some(x => x.nivel === 'err'), dica:'Parâmetros — ' + av.length + (av.length === 1 ? ' aviso' : ' avisos') + ':\n' + av.map(x => '• ' + x.t).join('\n') } : null,
+                    dica:'todos os parâmetros e informações do componente (footprint, 3D, pads, os parâmetros que vão para o Odoo) — só leitura' },
+                  { id:'girar', rot:'Rotate 90°' }, { id:'virar', rot:'Flip' }, { id:'enquadrar', rot:'Zoom' }] },
         { botoes:[{ id:'editarFp', rot:'Edit Footprint…' }, { id:'vista3d', rot:'View 3D' }] },
-        { sec:'Primitives — Pads (' + (s.pads || []).length + ')' },
-        { tab:{ cab:['Pad', 'Net'], linhas:(s.pads || []).map(p => [p.name, p.net || '—']) } },
       ] };
     }
     case 'pad': {
@@ -7092,6 +7093,7 @@ function acaoPainel(id){
     case 'enquadrar_placa': enquadra(); return;
     case 'fpPadsTodos': { const a = SEL[0]; if (a && a.t === 'pad' && a.comp) padNoFootprint(a, camadasDoPad(a.eb, IDX.ebComp.get(a.comp)), true); return; }
     case 'selComp': { const cs = compsDaSel(); if (cs.length) { selSo(cs.map(m => ALVO_COMP.get(m)).filter(Boolean)); aoMudarSel(); pede(); } return; }
+    case 'parametros': { const L = compsDaSel(); if (L.length) abreParametrosComp(L[0]); return; }
   }
   fazAcao(id);
 }
@@ -7521,6 +7523,7 @@ async function verGerberSalvo(){
 const SCH_SRC = PROJ ? 'Projects/' + encodeURIComponent(PROJ) + '/schematic.js' : null;
 const SCH_REL = PROJ ? 'Projects/' + PROJ + '/schematic.js' : null;
 let DNP = new Set(), dnpSemEsquema = true;
+let SCH_COMPS = null;          /* ref -> o item do esquema (1.90.0: os parâmetros do modal e o aviso "não está no esquema") */
 const refDnp = c => (c && c.eff && c.eff.designator) || (c && c.src && c.src.ref) || '';
 async function leNaoMontar(){
   if (!SCH_SRC) return;
@@ -7533,39 +7536,103 @@ async function leNaoMontar(){
     /* a revisão ou o código mudaram: os textos da placa são refeitos por inteiro recarregando a vista */
     if (!chDirty && !annDirty) HubDialog.ocioso().then(() => location.reload());
   }
+  SCH_COMPS = sch ? new Map((sch.items || []).filter(it => it && it.t === 'comp' && it.ref != null).map(it => [String(it.ref), it])) : null;
   const novo = HC.dnpRefs(sch);
   const mudou = novo.size !== DNP.size || [...novo].some(r => !DNP.has(r));
   DNP = novo;
   if (mudou) { pede(); if (SEL.length) aoMudarSel(); }
 }
-async function marcaNaoMontar(ref, on){
+/* 1.90.0: aceita um designador ou a lista deles (o botão direito marca a seleção inteira de uma vez) */
+async function marcaNaoMontar(refOuRefs, on){
+  const refs = (Array.isArray(refOuRefs) ? refOuRefs : [refOuRefs]).map(String).filter(Boolean);
+  if (!refs.length) return;
   if (LEAN || !HubIO.canPost || !SCH_SRC) { HubDialog.toast('abra a vista pelo hub para mudar a marca de não montar', 'warn'); return; }
   const sch = await globalDe('schematic', SCH_SRC, true);
   if (!sch) { HubDialog.toast('este projeto não tem schematic.js — a marca de não montar mora no esquema', 'warn'); return; }
-  if (!(sch.items || []).some(it => it && it.t === 'comp' && String(it.ref) === String(ref))) {
-    HubDialog.toast(ref + ' não está no esquema: a marca de não montar mora lá (rode o ECO ou acerte o designador)', 'warn'); return;
+  const fora = refs.filter(ref => !(sch.items || []).some(it => it && it.t === 'comp' && String(it.ref) === ref));
+  if (fora.length) {
+    HubDialog.toast(fora.join(', ') + (fora.length === 1 ? ' não está' : ' não estão') + ' no esquema: a marca de não montar mora lá (rode o ECO ou acerte o designador)', 'warn'); return;
   }
-  if (!HC.marcaDnp(sch, [ref], on).length) { await leNaoMontar(); return; }
+  if (!HC.marcaDnp(sch, refs, on).length) { await leNaoMontar(); return; }
   const out = HC.serializeSchematic(sch);
   if (!out.text) { await HubDialog.alert(out.errors.map(e => (e.idx >= 0 ? '#' + (e.idx + 1) + ' ' : '') + e.msg).join('\n'), { title:'schematic.js inválido — nada foi gravado' }); return; }
   try { await HubIO.saveFile(SCH_REL, out.text); }
   catch (e) { HubDialog.toast('não gravou o schematic.js: ' + e.message, 'err'); return; }
   DNP = HC.dnpRefs(sch); dnpSemEsquema = false;
   pede(); aoMudarSel();
-  HubDialog.toast(ref + (on ? ': não montar — marcado no esquema (sai do BOM, da Neoden e da lista do Odoo)' : ': volta a ser montado'), 'ok');
+  HubDialog.toast(refs.join(', ') + (on ? ': não montar — marcado no esquema (sai do BOM, da Neoden e da lista do Odoo)' : ': volta a ser montado'), 'ok');
 }
-function camposNaoMontar(c){
-  if (!SCH_SRC) return [];
-  if (dnpSemEsquema) return [{ k:'naoMontarRo', rot:'Não montar', tipo:'ro', v:'sem schematic.js (a marca mora no esquema)' }];
-  /* 1.88.0: na variante a caixa é a do Suprimir (grava o variantes.json; o "não montar" do esquema vale para todas) */
-  if (VAR.on) {
-    const r = String(refDnp(c));
-    if (DNP.has(r)) return [{ k:'naoMontarRo', rot:'Não montar', tipo:'ro', v:'marcado no esquema (vale para todas as variantes)' }];
-    return [{ k:'naoMontar', rot:'Suprimido (' + VAR.on.nome + ')', tipo:'bool', v:VAR.refs.has(r),
-              dica:'suprimido nesta variante: a placa é a mesma (cobre, pads e furos), mas o componente sai do BOM, da Neoden e da lista do Odoo (' + HubVariantes.TECLA + ')' }];
+/* o "Não montar" no botão direito (1.90.0: saiu do painel). Fora da variante; na variante o menu tem o Suprimir /
+   Montar dela. Desligado, com o motivo, para quem não grava o esquema (visualizador, fora da equipe, sem hub). */
+function itemNaoMontar(){
+  const rs = [...new Set(compsDaSel().map(m => String(refDnp(m))).filter(Boolean))];
+  if (!rs.length || VAR.on || !SCH_SRC) return null;
+  const todos = rs.every(r => DNP.has(r));
+  const nao = (LEAN || !HubIO.canPost) ? 'abra a vista pelo hub para mudar a marca de não montar'
+    : dnpSemEsquema ? 'este projeto não tem schematic.js — a marca de não montar mora no esquema'
+    : (typeof HubEquipe !== 'undefined' && HubEquipe.bloqueia ? HubEquipe.bloqueia(SCH_REL) : null)
+    || (SCH_COMPS && rs.some(r => !SCH_COMPS.has(r)) ? rs.filter(r => !SCH_COMPS.has(r)).join(', ') + ' não está no esquema: a marca de não montar mora lá (rode o ECO ou acerte o designador)' : null);
+  const lista = rs.length > 4 ? rs.slice(0, 4).join(', ') + ' +' + (rs.length - 4) : rs.join(', ');
+  return { rot:'Não montar ' + lista, check:todos, off:!!nao, porque:nao || undefined,
+           dica:nao ? nao : todos ? 'marcado como não montar (DNP) no esquema — clique para voltar a montar'
+                      : 'DNP: o componente fica na placa (footprint e nets), mas sai do BOM, da Neoden e da lista do Odoo — grava no esquema',
+           f:() => marcaNaoMontar(rs, !todos) };
+}
+/* o que é PROBLEMA no componente, para o ponto no botão Parâmetros. A vista PCB não carrega os acervos do
+   almoxarifado: o aviso de acervo / ficha do Odoo mora na ficha do Esquema; aqui, o que a placa sabe. */
+function avisosDoComp(m){
+  const L = [];
+  const r = String(refDnp(m));
+  if (SCH_COMPS && r && !SCH_COMPS.has(r)) L.push({ t:r + ' não está no esquema — o ECO acusa, e os parâmetros (e a lista do Odoo) não chegam a ele', nivel:'err' });
+  if (m.src && !m.src.footprint) L.push({ t:'sem footprint', nivel:'err' });
+  return L;
+}
+/* os parâmetros do esquema no formato "K=V;K=V" (o mesmo prParams do schframe) */
+function paresDosParams(s){
+  const out = [];
+  for (const par of String(s || '').split(';')) {
+    const i = par.indexOf('=');
+    if (i > 0 && par.slice(0, i).trim()) out.push([par.slice(0, i).trim(), par.slice(i + 1).trim()]);
   }
-  return [{ k:'naoMontar', rot:'Não montar', tipo:'bool', v:DNP.has(String(refDnp(c))),
-            dica:'DNP: o componente fica na placa (footprint e nets), mas sai do BOM, da Neoden e da lista do Odoo — grava no esquema' }];
+  return out;
+}
+function abreParametrosComp(m){
+  const e = m.eff, s = m.src, bb = s.bbox, r = String(refDnp(m));
+  const it = SCH_COMPS ? SCH_COMPS.get(r) : null;
+  const est = [m.changed ? 'movido' : '', m.attrChanged ? 'atributos mudados' : ''].filter(Boolean).join(' · ');
+  const comp = [
+    ['Designator', e.designator || s.ref, 'mono'],
+    ['Comment', e.comment !== undefined ? e.comment : (s.comment || '')],
+    ['Layer', e.layer],
+    ['Type', 'Standard', 'dim'],
+  ];
+  if (est) comp.push(['Estado', est, 'warn']);
+  comp.push(['Não montar', dnpSemEsquema ? 'sem schematic.js (a marca mora no esquema)' : DNP.has(r) ? 'sim — marcado no esquema (vale para todas as variantes)' : 'não', DNP.has(r) ? 'warn' : null]);
+  if (VAR.on) comp.push(['Suprimido (' + VAR.on.nome + ')', VAR.refs.has(r) ? 'sim — nesta variante' : 'não', VAR.refs.has(r) ? 'warn' : null]);
+  if (it) {
+    if (it.sym) comp.push(['Símbolo (esquema)', it.sym, 'mono']);
+    if (it.sheet) comp.push(['Folha', it.sheet]);
+    /* o vínculo com o almoxarifado, pela identidade da peça (o mesmo acervoDoComp do Esquema começa por ela); sem
+       ela, quem diz o acervo é a ficha do Esquema, que tem os acervos carregados */
+    const ids = /(?:^|;)\s*(OdooId|LocalId)\s*=\s*([^;]*)/i.exec(String(it.params || ''));
+    comp.push(['Almoxarifado', ids ? 'vinculado (' + ids[1] + ' ' + ids[2].trim() + ')' : 'sem OdooId nos parâmetros — o acervo e a ficha do Odoo estão no Parâmetros do Esquema', ids ? null : 'dim']);
+  }
+  HubDialog.ficha({
+    title:(e.designator || s.ref) + ' — Parâmetros',
+    sub:[s.footprint, e.layer].filter(Boolean).join(' · '),
+    avisos:avisosDoComp(m),
+    secoes:[
+      { titulo:'componente', kv:comp },
+      { titulo:'parâmetros (vão para o Odoo)', kv:it ? paresDosParams(it.params).map(([k, v]) => [k, v, /^(OdooId|ValorId|LocalId|Custo|Estoque)$/i.test(k) ? 'mono' : null]) : [],
+        vazio:it ? 'o componente não tem parâmetros gravados no esquema' : SCH_COMPS ? 'não está no esquema' : 'sem schematic.js' },
+      { titulo:'footprint', kv:[
+        ['Footprint Name', s.footprint || '—', 'mono'],
+        ['Dimensions', bb && isNum(bb.x1) ? fmtDist(bb.x2 - bb.x1) + ' × ' + fmtDist(bb.y2 - bb.y1) + ' ' + unidade : '—', 'mono'],
+        ['3D Body', corpos3dDe(s.footprint)],
+      ] },
+      { titulo:'pads (' + (s.pads || []).length + ')', tab:{ cab:['Pad', 'Net'], linhas:(s.pads || []).map(p => [p.name, p.net || '—']), dim:[0] }, vazio:'sem pads' },
+    ],
+  });
 }
 function desenhaNaoMontar(){
   /* 1.88.0: o suprimido da variante ativa: esmaecido (um véu sobre o componente; o cobre e os pads continuam lá) e o X */

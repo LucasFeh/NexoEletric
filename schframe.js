@@ -121,7 +121,51 @@ function montaAcervos(globais, velhos){
       symbols.push(final);
     }
   }
-  return { acervos, symbols, acervoDe, valorDe };
+  /* A IDENTIDADE DA PEÇA, e não o nome do desenho (1.90.0): o OdooId de cada item do almoxarifado e o id
+     de cada componente criado localmente apontam para o acervo dele. É o que o acervoDoComp consulta antes
+     do nome — ver lá por quê. O primeiro acervo ganha, na mesma ordem do ACERVO_DEFS. */
+  const acervoPorOdoo = new Map(), acervoPorLocal = new Map();
+  for (const a of acervos){
+    if (!a.almox) continue;
+    for (const sy of a.syms){
+      const cl = sy && sy.criadoLocal;
+      if (cl && cl.id != null && !acervoPorLocal.has(String(cl.id))) acervoPorLocal.set(String(cl.id), a);
+      for (const v of (sy.valores || [])) for (const i of ((v && v.itens) || [])){
+        const id = i && i.odoo != null ? String(i.odoo).trim() : '';
+        if (id && !acervoPorOdoo.has(id)) acervoPorOdoo.set(id, a);
+      }
+    }
+  }
+  return { acervos, symbols, acervoDe, valorDe, acervoPorOdoo, acervoPorLocal };
+}
+/* ── O ACERVO DE UM COMPONENTE DA FOLHA (1.90.0) ──
+   Bug do dono: "mesmo o produto estando no acervo correto, aparece como biblioteca do altium". O acervo
+   saía só do NOME DO SÍMBOLO (ACERVO_DE.get(it.sym)), e o nome é do DESENHO: um componente vinculado ao
+   almoxarifado pelo "Trocar componente…" leva o OdooId nos params, mas pode continuar desenhado por um
+   símbolo da SchLib do Altium (o CONE PADRAO do conector de 80 vias, o "CAP [ SMD ]" renomeado). A ficha
+   dizia "▲ Biblioteca do Altium" em vermelho — "vincule ao almoxarifado" — numa peça que já estava
+   vinculada e que a lista do Odoo já casava por id (odoolista.py » resolve começa pelo OdooId).
+   A ordem agora é a da identidade da peça, a mesma do HubOdooLink.fichaDoComp:
+     1. o LocalId dos params: o componente criado localmente;
+     2. o OdooId dos params: o acervo do almoxarifado que tem esse produto;
+     3. o nome do símbolo (o de antes): os alias por valor do almoxarifado e a SchLib do Altium.
+   Devolve { acervo, por:'local'|'odoo'|'nome', odoo? } ou null. `m` é a montagem do montaAcervos (ou
+   qualquer objeto com acervoDe / acervoPorOdoo / acervoPorLocal). */
+function acervoDoComp(comp, sym, m){
+  if (!comp || !m) return null;
+  const p = String(comp.params || '');
+  const lm = /(?:^|;)\s*LocalId\s*=\s*([^;]*)/i.exec(p);
+  const loc = lm && m.acervoPorLocal ? m.acervoPorLocal.get(lm[1].trim()) : null;
+  if (loc) return { acervo: loc, por: 'local' };
+  const om = /(?:^|;)\s*OdooId\s*=\s*([^;]*)/i.exec(p);
+  const ids = om ? om[1].split(/[\s,]+/).filter(Boolean) : [];
+  if (m.acervoPorOdoo) for (const id of ids){
+    const a = m.acervoPorOdoo.get(String(id).trim());
+    if (a) return { acervo: a, por: 'odoo', odoo: String(id).trim() };
+  }
+  const de = m.acervoDe;
+  const a = de ? (de.get(comp.sym) || (sym && de.get(sym.name)) || null) : null;
+  return a ? { acervo: a, por: 'nome' } : null;
 }
 /* A impressao digital de uma montagem: e o que diz se a recarga trouxe algo novo. O
    `generated` do espelho muda a cada gravacao do editor de simbolos; a contagem pega o
@@ -1243,7 +1287,7 @@ function reachaValor(grupos, nome, valorAntes, symAntes){
   return ach.length === 1 ? ach[0] : null;
 }
 
-const PURE = { LIBS, ACERVO_DEFS, montaAcervos, partesDe, nPartes, refDaParte, trocaDeParte, desenhoCabe,
+const PURE = { LIBS, ACERVO_DEFS, montaAcervos, acervoDoComp, partesDe, nPartes, refDaParte, trocaDeParte, desenhoCabe,
                assinaturaDesenho, desenhoIgual, casoDoSimbolo, partesDaDecisao,
                carimbo, decideTroca, montaPartsTrocando,
                valorDoComp, tipoDoComp,
@@ -1294,6 +1338,7 @@ const ACERVOS = [];
 const SLIB = { symbols: [] };
 const ACERVO_DE = new Map();
 const VALOR_DE = new Map();
+const ACERVO_POR = { acervoDe: ACERVO_DE, acervoPorOdoo: new Map(), acervoPorLocal: new Map() };   /* o acervoDoComp (1.90.0) */
 let PLIB = { footprints:[] };
 /* ── RESGATE DE DESENHO (só para a vista) ──
    Componente cujo símbolo nenhum acervo tem vira quadrado vermelho — a folha fica ilegível
@@ -1360,6 +1405,8 @@ function aplicaAcervos(){
   SLIB.symbols = r.symbols.slice();   /* array NOVO de proposito: ver a nota acima */
   ACERVO_DE.clear(); r.acervoDe.forEach((v, k) => ACERVO_DE.set(k, v));
   VALOR_DE.clear(); r.valorDe.forEach((v, k) => VALOR_DE.set(k, v));
+  ACERVO_POR.acervoPorOdoo.clear(); r.acervoPorOdoo.forEach((v, k) => ACERVO_POR.acervoPorOdoo.set(k, v));
+  ACERVO_POR.acervoPorLocal.clear(); r.acervoPorLocal.forEach((v, k) => ACERVO_POR.acervoPorLocal.set(k, v));
   /* a PcbLib nao tem acervo: ou veio agora, ou fica a de antes — um 404 no meio de uma
      recarga nao pode zerar a lista de footprints da ficha */
   if (window.pcblib && window.pcblib.footprints) PLIB = window.pcblib;
@@ -1425,12 +1472,6 @@ const VER_PINOS_KEY = 'altiumhub.sch.pinos';
    (vale para a folha inteira, fica nesta máquina), e não um campo do componente: um campo
    por componente seria mudança de formato, com os dois .pas atrás. */
 const VER_REF_KEY = 'altiumhub.sch.ref';
-/* QUAL SUB-ABA DA FICHA estava aberta. Ela precisa sobreviver ao renderProps, que roda a cada
-   selecao e a cada commit: sem isso, arrastar um componente com a aba Pinos aberta devolvia a
-   Geral no meio do gesto. Fica nesta maquina, como as outras preferencias da vista. */
-const PR_ABA_KEY = 'schframe.prAba';
-let prAba = 'geral';
-try { prAba = localStorage.getItem(PR_ABA_KEY) === 'pinos' ? 'pinos' : 'geral'; } catch (e) {}
 /* AS GUIAS DO ARRASTO nascem LIGADAS, e o botao delas mora na secao Vista das Configuracoes
    (pedido de 2026-09-24). Desligadas, o arrasto volta a ser o de antes: o cursor, a grade ao
    soltar e o ima do pino — que nao e guia, e continua. Preferencia de vista, desta maquina. */
@@ -3099,28 +3140,78 @@ window.addEventListener('contextmenu', e => {
   if (!arrastou && wireDraw) endWire();
   else if (!arrastou && (tool === 'wire' || tool === 'forma' || tool === 'texto')) setTool('select');
   else if (!arrastou && VAR.on) menuDaVariante(e);
+  else if (!arrastou) menuDoComponente(e);
 });
+/* o menu do botão direito na folha (1.90.0): a mesma caixa do da variante, com itens { rot, sub, check, off, dica, f } */
+function menuSimples(e, itens){
+  const velho = document.getElementById('vrMenu'); if (velho) velho.remove();
+  if (!itens.length) return;
+  const m = document.createElement('div');
+  m.id = 'vrMenu';
+  m.style.cssText = 'position:fixed; z-index:90; left:' + e.clientX + 'px; top:' + e.clientY + 'px; padding:4px; border-radius:6px; background:var(--panel2, #222); border:1px solid var(--border, #444); box-shadow:0 6px 20px rgba(0,0,0,.45); font:12px var(--font, sans-serif)';
+  for (const it of itens){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.style.cssText = 'display:flex; align-items:center; gap:8px; width:100%; text-align:left; border:0; background:transparent; color:var(--fg, #ddd); padding:6px 10px; cursor:pointer; font:inherit';
+    if (it.check != null){
+      const ck = document.createElement('span');
+      ck.style.cssText = 'flex:none; width:12px; text-align:center; color:var(--accent, #ff8a1f)';
+      ck.textContent = it.check ? '✓' : '';
+      b.append(ck);
+    }
+    const t = document.createElement('span'); t.textContent = it.rot; b.append(t);
+    if (it.sub){ const x = document.createElement('span'); x.style.cssText = 'margin-left:auto; padding-left:14px; color:var(--fg-dim, #999); font-family:var(--mono, monospace); font-size:11px'; x.textContent = it.sub; b.append(x); }
+    if (it.dica) b.title = it.dica;
+    if (it.off){ b.disabled = true; b.style.opacity = '.45'; b.style.cursor = 'not-allowed'; b.title = it.off; }
+    else {
+      b.addEventListener('mouseenter', () => { b.style.background = 'rgba(var(--tint, 255,255,255), .08)'; });
+      b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; });
+      b.addEventListener('click', () => { m.remove(); it.f(); });
+    }
+    m.append(b);
+  }
+  document.body.append(m);
+  /* nao sai da tela pela direita/por baixo */
+  const R = m.getBoundingClientRect();
+  if (R.right > window.innerWidth - 4) m.style.left = Math.max(4, window.innerWidth - R.width - 4) + 'px';
+  if (R.bottom > window.innerHeight - 4) m.style.top = Math.max(4, window.innerHeight - R.height - 4) + 'px';
+  const fora = ev => { if (!m.contains(ev.target)){ m.remove(); window.removeEventListener('mousedown', fora, true); } };
+  setTimeout(() => window.addEventListener('mousedown', fora, true), 0);
+}
+/* 1.90.0: o "Não montar" saiu da ficha (pedido do dono: "vira só opção quando clica com lado direito em cima do
+   componente no esquema") e mora aqui, fora da variante. Vale para a seleção inteira de uma vez (todas as partes,
+   de todas as folhas: HubCore.marcaDnp); o ✓ diz que todos estão marcados, e o clique desmarca — com a seleção
+   misturada, o clique marca todos. Quem não edita o projeto (visualizador, fora da equipe) vê a opção desligada,
+   com o motivo na dica. Na variante o botão direito continua sendo o Suprimir / Montar dela (menuDaVariante). */
+function menuDoComponente(e){
+  const w = worldOf(e), h = hitTest(w.x, w.y);
+  if (!h || !h.item || h.item.t !== 'comp') return;
+  if (!selAlvos().some(a => a.it === h.item)){ sel.clear(); selAdd(alvoDoHit(h)); updateSelStatus(); renderProps(); cam.draw(); }
+  const rs = [...new Set(selAlvos().filter(a => a.it && a.it.t === 'comp' && a.it.ref).map(a => String(a.it.ref)))];
+  if (!rs.length) return;
+  const dnp = HubCore.dnpRefs(schematic);
+  const todos = rs.every(r => dnp.has(r));
+  const nao = typeof HubEquipe !== 'undefined' && HubEquipe.bloqueia ? HubEquipe.bloqueia(SCH_REL) : null;
+  const lista = rs.length > 4 ? rs.slice(0, 4).join(', ') + ' +' + (rs.length - 4) : rs.join(', ');
+  menuSimples(e, [{ rot:'Não montar', sub:lista, check:todos, off:nao,
+    dica: todos ? 'marcado como não montar (DNP) — clique para voltar a montar'
+                : 'não montar (DNP): o componente continua no esquema e na placa, mas sai da lista do Odoo, do BOM e da Neoden',
+    f: () => {
+      HubCore.marcaDnp(schematic, rs, !todos);       // todas as partes, de todas as folhas
+      commit();
+      HubDialog.toast(lista + (!todos ? ': não montar — sai da lista do Odoo, do BOM e da Neoden' : ': volta a ser montado'), 'ok');
+    } }]);
+}
 /* 1.88.0: o botão direito na variante de projeto: Suprimir / Montar o componente debaixo do cursor (ou a seleção) */
 function menuDaVariante(e){
   const w = worldOf(e), h = hitTest(w.x, w.y);
   if (h && h.item && h.item.t === 'comp' && !selAlvos().some(a => a.it === h.item)){ sel.clear(); selAdd(alvoDoHit(h)); updateSelStatus(); renderProps(); cam.draw(); }
   const rs = [...new Set(selAlvos().filter(a => a.it && a.it.t === 'comp' && a.it.ref).map(a => String(a.it.ref)))];
-  const velho = document.getElementById('vrMenu'); if (velho) velho.remove();
   if (!rs.length) return;
-  const m = document.createElement('div');
-  m.id = 'vrMenu';
-  m.style.cssText = 'position:fixed; z-index:90; left:' + e.clientX + 'px; top:' + e.clientY + 'px; padding:4px; border-radius:6px; background:var(--panel2, #222); border:1px solid var(--border, #444); box-shadow:0 6px 20px rgba(0,0,0,.45); font:12px var(--font, sans-serif)';
   const todos = rs.every(r => VAR.refs.has(r));
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.style.cssText = 'display:block; width:100%; text-align:left; border:0; background:transparent; color:var(--fg, #ddd); padding:6px 10px; cursor:pointer; font:inherit';
-  b.textContent = (todos ? 'Montar ' : 'Suprimir ') + rs.join(', ') + '  (' + HubVariantes.TECLA + ')';
-  b.title = 'variante "' + VAR.on.nome + '": ' + (todos ? 'volta a ser montado' : 'sai do BOM, da Neoden e da lista do Odoo; a PCB não muda');
-  b.addEventListener('click', () => { m.remove(); HubVariantes.alterna(SCH_P, rs); });
-  m.append(b);
-  document.body.append(m);
-  const fora = ev => { if (!m.contains(ev.target)){ m.remove(); window.removeEventListener('mousedown', fora, true); } };
-  setTimeout(() => window.addEventListener('mousedown', fora, true), 0);
+  menuSimples(e, [{ rot:(todos ? 'Montar ' : 'Suprimir ') + rs.join(', ') + '  (' + HubVariantes.TECLA + ')',
+    dica:'variante "' + VAR.on.nome + '": ' + (todos ? 'volta a ser montado' : 'sai do BOM, da Neoden e da lista do Odoo; a PCB não muda'),
+    f: () => HubVariantes.alterna(SCH_P, rs) }]);
 }
 window.addEventListener('mousemove', e => {
   if (mouse){ leftMove(e); return; }
@@ -3366,13 +3457,10 @@ cv.addEventListener('dblclick', e => {
   /* o FIO nao tem mais duplo clique: o primeiro clique ja pega o fio inteiro, e o segundo pega o
      trecho (leftClick). Promover aqui desfaria o que o segundo clique acabou de escolher. */
   if (h.kind === 'ref' || h.kind === 'com'){
-    /* o campo do designador vive na aba Geral: se a ficha estiver na aba Pinos, focar um
-       campo escondido nao daria erro nenhum — so nao aconteceria nada, que e pior */
-    prAba = 'geral';
-    try { localStorage.setItem(PR_ABA_KEY, prAba); } catch (e) {}
+    /* 1.90.0: a ficha nao tem mais as abas Geral/Pinos: o campo do designador esta sempre a vista */
     selSo([alvoAll(h.item)]); aplicaSel('');
     mostraDir('props');
-    const campo = $('prBody') && $('prBody').querySelector('input.mono');
+    const campo = $('prBody') && ($('prBody').querySelector('input[data-campo="ref"]') || $('prBody').querySelector('input.mono'));
     if (campo){ campo.focus(); campo.select(); }
   }
 });
@@ -4034,8 +4122,10 @@ async function trocaFootprint(it, sym){
   else if (r.acao === 'editar') abreFootprint(it, { nome:r.nome });
   else if (r.acao === 'novo') abreFootprint(it, { nome:null, aoMontar:c => c.novo() });
 }
-function secFootprint(it, sym, fpNome){
-  const s = prSec('footprint');
+/* 1.90.0: a seção Footprint saiu inteira da ficha. Na ficha fica o que se EDITA — o campo do nome e os
+   três botões (campoFootprint, acoesFootprint); o que só se LÊ (origem, pads, modelo 3D, pinos sem pad)
+   vai para o modal Parâmetros (infoFootprint), e o que é problema vira aviso no botão dele. */
+function campoFootprint(it, fpNome){
   listaFootprints();
   const campo = prCampo(fpNome, 'o footprint deste componente (todas as partes). Escolha da lista ou digite; '
     + 'a PCB recebe no Design » Update PCB', async c => {
@@ -4049,30 +4139,43 @@ function secFootprint(it, sym, fpNome){
     }, { cls:'mono' });
   campo.setAttribute('list', 'prFpLista');
   campo.placeholder = '— sem footprint —';
-  prKvEl(s, 'Footprint', campo);
+  return campo;
+}
+function infoFootprint(it, sym, fpNome){
+  const kv = [], avisos = [];
   const fp = fpNome ? HubCore.footprintOf(PLIB, fpNome) : null;
   const hub = fp && PLIB.hub && typeof HubFpLib !== 'undefined' && window.pcblibHub ? HubFpLib.acha(window.pcblibHub, fp.name) : null;
-  if (fpNome && !fp) prKv(s, '', 'não está na PcbLib espelhada nem na biblioteca do hub — crie no editor (Novo…)', 'warn');
+  kv.push(['Footprint', fpNome || 'sem footprint', fpNome ? 'mono' : 'dim']);
+  if (fpNome && !fp){
+    kv.push(['', 'não está na PcbLib espelhada nem na biblioteca do hub — crie no editor (Novo…)', 'warn']);
+    avisos.push('Footprint "' + fpNome + '" não está na PcbLib espelhada nem na biblioteca do hub — o ECO vai recusar');
+  }
   if (fp){
     const corpos = (fp.bodies || []).length;
-    prKv(s, 'Origem', hub ? 'biblioteca do hub' + (hub.hub && hub.hub.base ? ' (alterado do Altium)' : '') : 'PcbLib do Altium', 'dim');
-    prKv(s, 'Pads', String((fp.pads || []).length), 'mono');
-    prKv(s, 'Modelo 3D', corpos ? corpos + ' corpo(s)' : 'nenhum — prenda o STEP no editor', corpos ? null : 'dim');
+    kv.push(['Origem', hub ? 'biblioteca do hub' + (hub.hub && hub.hub.base ? ' (alterado do Altium)' : '') : 'PcbLib do Altium', 'dim']);
+    kv.push(['Pads', String((fp.pads || []).length), 'mono']);
+    kv.push(['Modelo 3D', corpos ? corpos + ' corpo(s)' : 'nenhum — prenda o STEP no editor (Editar…)', corpos ? null : 'dim']);
     /* os pinos do simbolo (todas as partes) que nao tem pad: o Unknown Pin do ECO */
     if (sym && Array.isArray(sym.parts)){
       const pads = new Set((fp.pads || []).map(p => String(p.name)));
       const falta = [];
       for (const p of sym.parts) for (const q of (p.pins || [])) if (q && q.num != null && !pads.has(String(q.num)) && falta.indexOf(String(q.num)) < 0) falta.push(String(q.num));
-      if (falta.length) prKv(s, 'Sem pad', falta.slice(0, 12).join(', ') + (falta.length > 12 ? '…' : '') + ' — pinos sem pad no footprint (o ECO acusa)', 'warn');
+      if (falta.length){
+        const txt = falta.slice(0, 12).join(', ') + (falta.length > 12 ? '…' : '');
+        kv.push(['Sem pad', txt + ' — pinos sem pad no footprint (o ECO acusa)', 'warn']);
+        avisos.push('Pinos sem pad no footprint: ' + txt + ' (o ECO acusa)');
+      }
     }
   }
-  const linha = el('div', 'pr-fpacoes');
+  return { kv, avisos, fp };
+}
+function acoesFootprint(it, sym, fp){
+  const linha = el('div', 'pr-grade pr-g3');
   const b = (rot, titulo, fn) => { const x = el('button', 'wide sutil', rot); x.type = 'button'; x.title = titulo; x.onclick = fn; linha.append(x); };
-  b('Trocar footprint…', 'a galeria de footprints (PcbLib do Altium + biblioteca do hub), com o desenho e o teste dos pinos — a PCB recebe no Design » Update PCB', () => trocaFootprint(it, sym));
-  b(fp ? 'Editar footprint…' : 'Abrir o editor de footprint…', 'o PCB Library do Altium, no hub: pads, serigrafia e o corpo 3D (STEP). Grava na biblioteca do hub', () => abreFootprint(it));
+  b('Trocar…', 'Trocar footprint: a galeria de footprints (PcbLib do Altium + biblioteca do hub), com o desenho e o teste dos pinos — a PCB recebe no Design » Update PCB', () => trocaFootprint(it, sym));
+  b(fp ? 'Editar…' : 'Novo…', (fp ? 'Editar footprint' : 'Abrir o editor de footprint') + ': o PCB Library do Altium, no hub — pads, serigrafia e o corpo 3D (STEP). Grava na biblioteca do hub', () => abreFootprint(it));
   if (fp) b('Ver em 3D', 'o footprint com o modelo 3D, no editor', () => abreFootprint(it, { modo3d:true }));
-  s.append(linha);
-  return s;
+  return linha;
 }
 /* os parametros viajam num campo plano "K=V;K=V" (o parser do BuildSchematic le linha a linha) */
 function prParams(s){
@@ -4473,7 +4576,10 @@ function renderProps(){
   const rsym = HubCore.resolveSym(SLIB, it.sym);
   const sym = (rsym && rsym.item) || null;
   const part = HubCore.partOf(sym, it.part);
-  const ac = ACERVO_DE.get(it.sym) || (sym && ACERVO_DE.get(sym.name)) || null;
+  /* 1.90.0: o acervo pela IDENTIDADE da peça (LocalId/OdooId) antes do nome do desenho — acervoDoComp */
+  const acx = acervoDoComp(it, sym, ACERVO_POR);
+  const ac = acx ? acx.acervo : null;
+  const acDesenho = (sym && ACERVO_DE.get(sym.name)) || ACERVO_DE.get(it.sym) || null;
   const nparts = sym ? (sym.partcount || (sym.parts || []).length || 1) : 1;
   /* QUANTAS PARTES ESTE COMPONENTE TEM, DE VERDADE. Nao basta perguntar ao simbolo: o
      alias do almoxarifado so conta as partes do desenho do valor (quase sempre uma), e uma
@@ -4490,11 +4596,29 @@ function renderProps(){
   const totalPartes = Math.max(maxNaFolha, it.part || 1);
   const fpNome = it.footprint || '';
 
-  /* ── POSICAO PRIMEIRO ──
-     A ficha começava por "geral" e a posição ficava no fim, depois de dez linhas de
-     procedência do símbolo. Quem abre a ficha de um componente colocado está quase sempre
-     ajustando ONDE ele está — então o que se mexe vem primeiro, e o que se lê vem depois. */
-  const p = prSec('posição');
+  /* ── 1.90.0: A FICHA SÓ COM O QUE SE EDITA, EM GRADE ──
+     Pedido do dono (2026-11-10): "no menu de componente quero resumir muito a quantidade de informações, só vai
+     aparecer no menu o que é editável […] quero que fique em botão 'parametros' que abre um modal com todos os
+     parametros", e "coloque o menu em grid pra caber mais coisas, e o 'não montar' vira só opção quando clica
+     com lado direito em cima do componente no esquema e sai do menu".
+     Ficam: posição, rotação, espelhar, designador (com o olho), parte, os nomes de pino na folha (o olho),
+     footprint e as ações. Comment, Valor e Descrição não se editam aqui (vêm do componente escolhido), e
+     acervo, Odoo, origem/pads/3D do footprint, os parâmetros e a tabela de pinos também são só leitura: tudo
+     isso mora no modal Parâmetros (abreParametros), que abre para todos, inclusive o visualizador. O que é
+     PROBLEMA (acervo do Altium, sem ficha no Odoo, footprint ausente, pinos sem pad…) não some: vira o ponto
+     de aviso no botão, com a lista na dica do mouse e no topo do modal. O "Não montar" foi para o botão
+     direito sobre o componente (menuDoComponente); na variante, o Suprimir / Montar de sempre. */
+  const g = prSec(null);
+  const grade = (cls) => { const d = el('div', 'pr-grade ' + cls); g.append(d); return d; };
+  const cel = (box, rot, node, larga) => {
+    const c = el('div', 'pr-gc' + (larga ? ' larga' : ''));
+    /* o rotulo pode ser um NO (o do designador leva o olho junto) ou so o texto */
+    c.append(rot && rot.nodeType ? rot : el('span', 'k', rot), node);
+    box.append(c);
+    return c;
+  };
+
+  /* LINHA 1: X | Y | Rotação | Espelhar */
   const aplicaXY = (campo, eixo) => {
     const v = parseFloat(String(campo.value).replace(',', '.'));
     if (!isFinite(v)){ campo.value = it[eixo]; return; }
@@ -4503,31 +4627,24 @@ function renderProps(){
     it[eixo] = n;
     commit();
   };
-  prPar(p,
-    ['X', prCampo(it.x, 'posição X em mil — o mesmo número do Altium', c => aplicaXY(c, 'x'), { cls:'mono' })],
-    ['Y', prCampo(it.y, 'posição Y em mil (Y para cima, como no Altium)', c => aplicaXY(c, 'y'), { cls:'mono' })]);
-
-  /* ROTACAO + OS DOIS ESPELHOS na mesma linha. O formato só aceita 0/90/180/270 (o
-     validateSchematic recusa o resto), então valor fora disso é RECUSADO em vez de
-     arredondado calado: arredondar faria a ficha dizer um número e o arquivo guardar outro. */
+  /* O formato só aceita 0/90/180/270 (o validateSchematic recusa o resto), então valor fora disso é
+     RECUSADO em vez de arredondado calado: arredondar faria a ficha dizer um número e o arquivo guardar outro. */
   const rotAtual = () => ((((it.rot || 0) % 360) + 360) % 360);
-  const linhaRot = el('div', 'pr-par');
-  const cRot = el('div', 'pr-par-c');
-  cRot.append(el('span', 'k', 'Rotação'), prCampo(rotAtual(),
-    'graus, anti-horário: só 0, 90, 180 ou 270', campo => {
-      const v = parseInt(String(campo.value).replace(/[^0-9-]/g, ''), 10);
-      const n = ((v % 360) + 360) % 360;
-      if (!isFinite(v) || [0, 90, 180, 270].indexOf(n) < 0){
-        HubDialog.toast('rotação só pode ser 0, 90, 180 ou 270', 'warn');
-        campo.value = rotAtual();
-        return;
-      }
-      if (n === rotAtual()) return;
-      it.rot = n;
-      commit();
-    }, { cls:'mono' }));
-  const cEsp = el('div', 'pr-par-c');
-  cEsp.append(el('span', 'k', 'Espelhar'));
+  const l1 = grade('pr-g4');
+  cel(l1, 'X', prCampo(it.x, 'posição X em mil — o mesmo número do Altium', c => aplicaXY(c, 'x'), { cls:'mono' }));
+  cel(l1, 'Y', prCampo(it.y, 'posição Y em mil (Y para cima, como no Altium)', c => aplicaXY(c, 'y'), { cls:'mono' }));
+  cel(l1, 'Rotação', prCampo(rotAtual(), 'graus, anti-horário: só 0, 90, 180 ou 270', campo => {
+    const v = parseInt(String(campo.value).replace(/[^0-9-]/g, ''), 10);
+    const n = ((v % 360) + 360) % 360;
+    if (!isFinite(v) || [0, 90, 180, 270].indexOf(n) < 0){
+      HubDialog.toast('rotação só pode ser 0, 90, 180 ou 270', 'warn');
+      campo.value = rotAtual();
+      return;
+    }
+    if (n === rotAtual()) return;
+    it.rot = n;
+    commit();
+  }, { cls:'mono' }));
   const caixaEsp = el('div', 'pr-esp');
   const bH = el('button', 'pr-ib'); bH.type = 'button';
   bH.title = 'Espelhar na horizontal (X) — vira esquerda/direita';
@@ -4540,54 +4657,17 @@ function renderProps(){
                + '<path d="M7 14.5 12 19l5-4.5z"/></svg>';
   bV.onclick = () => { selSo([alvoAll(it)]); mirrorSel('y'); };
   caixaEsp.append(bH, bV);
-  cEsp.append(caixaEsp);
-  linhaRot.append(cRot, cEsp);
-  p.append(linhaRot);
-  body.append(p);
+  cel(l1, 'Espelhar', caixaEsp);
 
-  /* ── AS DUAS SUB-ABAS ──
-     "Não ficar tudo junto": com geral, parâmetros e a tabela de pinos empilhados, a ficha
-     virava uma coluna longa em que a lista de pinos empurrava o resto para fora da tela. A
-     POSIÇÃO fica de fora das abas, sempre à vista — ela é pequena e é o que se mexe. */
-  const abas = el('div', 'pr-abas');
-  const paneG = el('div', 'pr-pane');
-  const paneP = el('div', 'pr-pane');
-  const pinsN = (HubCore.compPinsWorld(it, SLIB) || []).length;
-  const mostraAba = () => {
-    paneG.hidden = prAba !== 'geral';
-    paneP.hidden = prAba !== 'pinos';
-    for (const b of abas.children) b.setAttribute('aria-selected', String(b.dataset.aba === prAba));
-  };
-  for (const [id, rot] of [['geral', 'Geral'], ['pinos', 'Pinos (' + pinsN + ')']]){
-    const b = el('button', 'pr-aba', rot);
-    b.type = 'button';
-    b.dataset.aba = id;
-    b.setAttribute('role', 'tab');
-    b.onclick = () => {
-      prAba = id;
-      try { localStorage.setItem(PR_ABA_KEY, id); } catch (e) {}
-      mostraAba();
-    };
-    abas.append(b);
-  }
-  abas.setAttribute('role', 'tablist');
-  body.append(abas, paneG, paneP);
-
-  /* ── GERAL ──
-     Saiu daqui tudo que era PROCEDENCIA e não propriedade: "Por quê", "Resolvido em" e
-     "Prefixo da lib". Eram verdadeiros e ninguém os lia — e empurravam para baixo o que se
-     usa. O nome do componente também saiu: ele agora vive dentro do "Trocar componente…",
-     que é o único lugar onde ele serve para alguma coisa (e lá dá para copiar). */
-  const g = prSec('geral');
   /* o texto do botão de troca (e se ele sai em destaque) é regra pura, provada em
      tests/test-troca-simbolo.js — a ficha só desenha o que ela decide */
   const dec = decideTroca({ sym: sym && sym.name, how: rsym && rsym.how,
                            quantos: contaSym(it.sym), quantosValor: contaTipo(it),
                            valor: valorDoComp(it) });
 
-  /* DESIGNATOR com o olho do lado. Ele é do COMPONENTE, não da parte: renomear CN4 renomeia
-     as 4 partes de uma vez, senão a folha fica com um componente partido ao meio e o ECO do
-     Altium acusa. Recusa nome vazio e nome já usado por OUTRO ref. */
+  /* LINHA 2: Designator (olho) | Parte | nomes de pino (olho).
+     O DESIGNATOR é do COMPONENTE, não da parte: renomear CN4 renomeia as 4 partes de uma vez, senão a folha
+     fica com um componente partido ao meio e o ECO do Altium acusa. Recusa nome vazio e nome já usado. */
   const kRef = el('div', 'pr-lab');
   kRef.append(el('span', null, 'Designator'));
   prOlho(kRef, showState.ref, showState.ref
@@ -4601,24 +4681,20 @@ function renderProps(){
     const novo = String(campo.value || '').trim().toUpperCase();
     if (!novo || novo === it.ref){ campo.value = it.ref; return; }
     if (sheetItems().some(x => x.t === 'comp' && x.ref === novo)){
-      HubDialog.toast('\u201c' + novo + '\u201d já está em uso nesta folha', 'warn');
+      HubDialog.toast('“' + novo + '” já está em uso nesta folha', 'warn');
       campo.value = it.ref; return;
     }
     const antigo = it.ref;
     for (const x of partesDoRef) x.ref = novo;
     commit();
-    HubDialog.toast(antigo + ' \u2192 ' + novo
+    HubDialog.toast(antigo + ' → ' + novo
       + (partesDoRef.length > 1 ? ' (' + partesDoRef.length + ' partes)' : ''), 'ok');
   }, { cls:'mono' });
-  /* A PARTE SE TROCA AQUI, direto na folha (pedido do dono, 2026-09-30: "dentro do esquema eu
-     consigo alterar a parte, so clicar e mudar a parte ja direto no esquema"). Com o simbolo de
-     varias partes o campo vira seletor com TODAS as partes dele, como o Part do Altium. Contar
-     so as da folha escondia justamente o que se queria: o ESP32 desenhado em duas partes, com a
-     1 colocada, dizia "1 de 1". Cada opcao diz os pinos da parte, se ela ja esta colocada noutro
-     item deste designador (escolher uma dessas troca os dois: trocaDeParte) e se os pinos dela
-     nao tem pad no footprint — o cuidado de quando a ficha so contava a folha: o CONE PADRAO tem
-     80 partes, e pousar a 57 num conector de 4 vias abre um buraco que o ECO do Altium reclama.
-     Avisa, nao esconde: sem footprint, ou com o footprint errado, esconder travaria a escolha. */
+  ref.dataset.campo = 'ref';
+  /* A PARTE SE TROCA AQUI, direto na folha (2026-09-30). Com o simbolo de varias partes o campo vira seletor
+     com TODAS as partes dele, como o Part do Altium: os pinos de cada uma, se ela ja esta colocada noutro item
+     deste designador (escolher uma dessas troca os dois: trocaDeParte) e se os pinos dela nao tem pad no
+     footprint. Avisa, nao esconde. Com uma parte so, o seletor aparece travado em "1 de 1" e diz por que. */
   let campoParte = el('span', 'pr-ro mono', (it.part || 1) + ' de ' + totalPartes);
   if (nparts > 1){
     const aqui = it.part || 1;
@@ -4640,10 +4716,6 @@ function renderProps(){
     sel.addEventListener('change', () => trocaParteDoItem(it, +sel.value || 1));
     campoParte = sel;
   } else if (sym && totalPartes <= 1){
-    /* UMA PARTE SO: o seletor aparece assim mesmo, travado em "1 de 1", e diz por que. Sumindo,
-       ele parecia nao existir — o dono procurou a troca de parte num ESP32 de uma parte so
-       (2026-10-01) e concluiu que ela nao tinha chegado. O title mora na caixa e no seletor:
-       sobre um <select> desabilitado o navegador pode nao mostrar o do proprio campo. */
     const caixa = el('span', 'pr-parte-um');
     const sel = el('select', 'pr-inp mono pr-sel');
     sel.append(el('option', null, '1 de 1'));
@@ -4654,94 +4726,136 @@ function renderProps(){
     caixa.append(sel);
     campoParte = caixa;
   }
-  prPar(g, [kRef, ref], ['Parte', campoParte]);
-  if (nparts < totalPartes)
-    prKv(g, '', 'o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham', 'dim');
-
-  prKv(g, 'Comment', it.comment, it.comment ? null : 'dim');
-  { const v = valorExibido(it); prKv(g, 'Valor', v || 'sem valor', v ? null : 'dim'); }
-  prKv(g, 'Descrição', sym && sym.description, sym && sym.description ? null : 'dim');
-  /* NAO MONTAR (1.58.0): o componente fica na folha e na placa, e sai da lista do Odoo, do BOM e
-     da Neoden. Vale para todas as partes do designador; a vista PCB mostra e muda a mesma marca */
-  {
-    const ck = el('input', 'pr-chk');
-    ck.type = 'checkbox';
-    ck.checked = HubCore.dnpRefs(schematic).has(String(it.ref));
-    ck.title = 'não montar (DNP): o componente continua no esquema e na placa, mas sai da lista do Odoo, do BOM e da Neoden';
-    ck.addEventListener('change', () => {
-      HubCore.marcaDnp(schematic, [it.ref], ck.checked);      // todas as partes, de todas as folhas
-      commit();
-      HubDialog.toast(it.ref + (ck.checked ? ': não montar — sai da lista do Odoo, do BOM e da Neoden' : ': volta a ser montado'), 'ok');
+  const pins = HubCore.compPinsWorld(it, SLIB) || [];
+  /* O OLHO DOS PINOS apaga o nome do pino na FOLHA (não a tabela, que foi para o modal) */
+  const kPin = el('div', 'pr-lab');
+  kPin.append(el('span', null, 'Pinos'));
+  prOlho(kPin, showState.pinos, showState.pinos
+    ? 'Nomes e números de pino visíveis na folha — clique para obedecer o símbolo'
+    : 'Pino escondido pelo símbolo fica escondido — clique para mostrar tudo', () => {
+      showState.pinos = !showState.pinos;
+      try { localStorage.setItem(VER_PINOS_KEY, showState.pinos ? '1' : '0'); } catch (e) {}
+      pintaOlhoPinos(); renderProps(); cam.draw(); pintaMiniaturas();
     });
-    /* 1.88.0: na variante, a caixa é a do Suprimir (grava o variantes.json; o "não montar" do esquema fica como está) */
-    if (VAR.on){
-      ck.checked = VAR.refs.has(String(it.ref)) || HubCore.dnpRefs(schematic).has(String(it.ref));
-      ck.disabled = HubCore.dnpRefs(schematic).has(String(it.ref)) || !HubVariantes.podeEditar(SCH_P);
-      ck.title = ck.disabled && HubCore.dnpRefs(schematic).has(String(it.ref)) ? 'marcado como não montar no esquema (vale para todas as variantes)'
-        : 'suprimido nesta variante: fica na placa, sai do BOM, da Neoden e da lista do Odoo (' + HubVariantes.TECLA + ')';
-      ck.addEventListener('change', e => { e.stopImmediatePropagation(); HubVariantes.alterna(SCH_P, [it.ref]); }, true);
-      prKvEl(g, 'Suprimido (' + VAR.on.nome + ')', ck);
-    } else
-    prKvEl(g, 'Não montar', ck);
-  }
+  const nPin = el('span', 'pr-ro mono', String(pins.length));
+  nPin.title = pins.length + (pins.length === 1 ? ' pino' : ' pinos') + ' nesta parte — a tabela com as nets está em Parâmetros';
+  const l2 = grade('pr-g3');
+  cel(l2, kRef, ref);
+  cel(l2, 'Parte', campoParte);
+  cel(l2, kPin, nPin);
 
-  /* ACERVO. "Biblioteca do Altium" sai em VERMELHO com o triângulo: o componente ainda não
-     tem par no almoxarifado, e é isso que impede a lista do Odoo de casar a linha por id em
-     vez de por texto. Não é erro — é trabalho pendente, e a cor diz isso sem abrir modal. */
+  /* LINHA 3: Footprint (a linha toda: o nome é comprido) + Trocar… | Editar… | Ver em 3D */
+  const fpInfo = infoFootprint(it, sym, fpNome);
+  const l3 = grade('pr-g1');
+  cel(l3, 'Footprint', campoFootprint(it, fpNome), true);
+  g.append(acoesFootprint(it, sym, fpInfo.fp));
+
+  /* ── O QUE FOI PARA O MODAL, e os avisos que viram o ponto no botão ── */
+  const avisos = [];
   const acNome = ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca');
+  /* "Biblioteca do Altium" é trabalho pendente: o componente ainda não tem par no almoxarifado, e é isso que
+     impede a lista do Odoo de casar a linha por id em vez de por texto. Com o OdooId nos params ele JÁ tem
+     (acervoDoComp) — e o aviso, que era falso nesse caso, não sai mais. */
   const acPendente = !!ac && /biblioteca do altium|espelho do altium/i.test(String(ac.titulo || ''));
-  if (acPendente){
-    const v = el('span', 'pr-alerta');
-    v.append(el('span', 'tri', '\u25B2'), document.createTextNode(' ' + acNome));
-    v.title = 'este componente ainda vem da biblioteca do Altium — vincule-o ao almoxarifado '
-            + 'pelo "Trocar componente…" para a lista do Odoo casar por id';
-    prKvEl(g, 'Acervo', v);
-  } else prKv(g, 'Acervo', acNome, ac ? null : 'warn');
-
-  /* ODOO: a ficha do produto a um clique, logo abaixo de de onde ele vem. Sem ficha a linha
-     continua lá e diz POR QUÊ — sumir com ela faria parecer que a ficha nem tem esse campo. */
+  if (acPendente) avisos.push({ t:'Acervo: ' + acNome + ' — vincule ao almoxarifado pelo "Trocar componente…" para a lista do Odoo casar por id', nivel:'err' });
+  else if (!ac && sym) avisos.push('Acervo: o símbolo não é de nenhum acervo da casa');
   const od = odooDoComp(it);
   const lkOdoo = od && od.alvo ? HubOdooLink.link(od.alvo, { nome: od.nome, texto: 'Abrir no Odoo ↗' }) : null;
-  /* CRIADO LOCALMENTE (Biblioteca, botão Novo componente ao lado da busca): a peca que o Odoo ainda nao tem vai com a ficha no
-     "Enviar para o Odoo"; integrada (o almoxarifado a criou e o sincronismo a trouxe), a tag sai */
+  /* CRIADO LOCALMENTE (Biblioteca, botão Novo componente): vai com a ficha no "Enviar para o Odoo" */
   const loc = localDoComp(it);
-  if (loc && !loc.integrado){
-    const t = el('span', null, 'criado localmente');
-    t.style.cssText = 'font-size:10px;padding:1px 7px;border-radius:999px;border:1px solid var(--hi,#4fc3f7);color:var(--hi,#4fc3f7);white-space:nowrap;';
-    t.title = 'Componente ' + loc.id + ', criado no NexoEletric: ainda não está no almoxarifado do Odoo. '
-            + 'Vai com a ficha completa no "Enviar para o Odoo"; quando o almoxarifado o criar, ele perde a tag.';
-    prKvEl(g, 'Origem', t);
+  let odooTxt = null;
+  if (!lkOdoo){
+    odooTxt = loc && !loc.integrado ? 'ainda não está no Odoo: vai com a ficha no "Enviar para o Odoo"'
+      : od && od.motivo ? od.motivo
+      : od ? 'o espelho não diz qual é o Odoo — rode a sincronização do almoxarifado'
+      : 'sem ficha: vincule ao almoxarifado pelo "Trocar componente…"';
+    if (!(loc && !loc.integrado)) avisos.push('Odoo: ' + odooTxt);
   }
-  if (lkOdoo) prKvEl(g, 'Odoo', lkOdoo);
-  else if (loc && !loc.integrado) prKv(g, 'Odoo', 'ainda não está no Odoo: vai com a ficha no "Enviar para o Odoo"', 'dim');
-  else prKv(g, 'Odoo', od && od.motivo ? od.motivo
-                     : od ? 'o espelho não diz qual é o Odoo — rode a sincronização do almoxarifado'
-                     : 'sem ficha: vincule ao almoxarifado pelo "Trocar componente…"', 'dim');
-
-  /* o desenho emprestado precisa se ANUNCIAR: o corpo âmbar na folha diz que algo é
-     diferente, e é aqui que se lê O QUÊ. */
+  /* o desenho emprestado precisa se ANUNCIAR: o corpo âmbar na folha diz que algo é diferente */
+  let desenhoTxt = null;
   if (!sym){
     const emg = desenhoDeEmergencia(it);
-    prKv(g, 'Desenho', emg ? 'emprestado de "' + emg.nome + '" (Biblioteca de símbolos, por ' + emg.how + ') — só para ver'
-                           : 'nenhum: a folha mostra o quadrado vermelho', 'warn');
+    desenhoTxt = emg ? 'emprestado de "' + emg.nome + '" (Biblioteca de símbolos, por ' + emg.how + ') — só para ver'
+                     : 'nenhum: a folha mostra o quadrado vermelho';
+    avisos.push({ t:'Desenho: ' + desenhoTxt, nivel: emg ? 'warn' : 'err' });
   }
-  /* O botão existe com símbolo resolvido OU NÃO. Enquanto ele só aparecia com o símbolo
-     ausente, uma escolha errada era definitiva pela interface: assim que ela resolvia o
-     nome, não havia mais caminho nenhum na tela para trocar. */
+  if (nparts < totalPartes) avisos.push('Partes: o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham');
+  for (const a of fpInfo.avisos) avisos.push(a);
+
+  const abreParametros = () => {
+    const rs = String(it.ref);
+    const dnp = HubCore.dnpRefs(schematic).has(rs);
+    const vVal = valorExibido(it);
+    const symTxt = (it.sym || '—') + (sym && sym.name !== it.sym ? ' → ' + sym.name : '')
+      + (rsym && rsym.how && rsym.how !== 'exato' ? ' (por ' + rsym.how + ')' : '');
+    const acTxt = acNome + (acx && acx.por === 'odoo' ? ' (pelo OdooId ' + acx.odoo + ')'
+                          : acx && acx.por === 'local' ? ' (pelo LocalId)' : '');
+    const comp = [
+      ['Designator', it.ref, 'mono'],
+      ['Parte', (it.part || 1) + ' de ' + Math.max(totalPartes, nparts)],
+      ['Comment', it.comment, it.comment ? null : 'dim'],
+      ['Valor', vVal || 'sem valor', vVal ? null : 'dim'],
+      ['Descrição', sym && sym.description, sym && sym.description ? null : 'dim'],
+      ['Símbolo', symTxt, 'mono'],
+      ['Acervo', acTxt, acPendente ? 'err' : (ac ? null : 'warn')],
+    ];
+    /* o desenho de outro acervo que o da peça: verdade que se lê, não problema */
+    if (ac && acDesenho && acDesenho !== ac) comp.push(['Desenho do símbolo', acDesenho.titulo + (sym ? ' (' + sym.name + ')' : ''), 'dim']);
+    if (desenhoTxt) comp.push(['Desenho', desenhoTxt, 'warn']);
+    if (loc && !loc.integrado) comp.push(['Origem', 'criado localmente (' + loc.id + ') — ainda não está no almoxarifado do Odoo', 'dim']);
+    comp.push(['Odoo', lkOdoo ? HubOdooLink.link(od.alvo, { nome: od.nome, texto: 'Abrir no Odoo ↗' }) : odooTxt, lkOdoo ? null : 'dim']);
+    comp.push(['Não montar', dnp ? 'sim — fica na folha e na placa, sai da lista do Odoo, do BOM e da Neoden' : 'não', dnp ? 'warn' : null]);
+    if (VAR.on) comp.push(['Suprimido (' + VAR.on.nome + ')', VAR.refs.has(rs) ? 'sim — nesta variante' : 'não', VAR.refs.has(rs) ? 'warn' : null]);
+    comp.push(['Folha', it.sheet]);
+    const pars = prParams(it.params);
+    const tabPinos = pins.map(pin => {
+      const rede = nets.pinNet[it.ref + '-' + pin.num] || '';
+      return [pin.num, pin.name || '—', rede || 'sem net'];
+    });
+    HubDialog.ficha({
+      title: it.ref + ' — Parâmetros',
+      sub: [sym && sym.description, vVal].filter(Boolean).join(' · ') || (it.sym || ''),
+      avisos,
+      secoes: [
+        { titulo: 'componente', kv: comp },
+        { titulo: 'parâmetros (vão para o Odoo)', kv: pars.map(([k, v]) => [k, v, /^(OdooId|ValorId|LocalId|Custo|Estoque)$/i.test(k) ? 'mono' : null]),
+          vazio: 'o componente não tem parâmetros gravados' },
+        { titulo: 'footprint', kv: fpInfo.kv },
+        { titulo: 'pinos (' + pins.length + ')', tab: { cab: ['#', 'nome', 'net'], linhas: tabPinos, dim: [0] },
+          vazio: sym ? 'a parte não tem pinos' : 'componente ausente na biblioteca — sem pinagem para mostrar' },
+      ],
+    });
+  };
+
+  /* LINHA 4: Parâmetros (com o ponto de aviso) | Trocar componente… */
+  const l4 = grade('pr-g2');
+  const bPar = el('button', 'wide sutil pr-bpar');
+  bPar.type = 'button';
+  bPar.append(el('span', 'rt', 'Parâmetros'));
+  if (avisos.length){
+    const grave = avisos.some(a => a && a.nivel === 'err');
+    const pt = el('span', 'pr-pt' + (grave ? ' err' : ''));
+    pt.setAttribute('aria-label', avisos.length + ' aviso(s)');
+    bPar.append(pt);
+    bPar.title = 'Parâmetros — ' + avisos.length + (avisos.length === 1 ? ' aviso' : ' avisos') + ':\n'
+      + avisos.map(a => '• ' + (typeof a === 'string' ? a : a.t)).join('\n');
+  } else bPar.title = 'todos os parâmetros e informações do componente (acervo, Odoo, footprint, pinos) — só leitura';
+  bPar.onclick = abreParametros;
+  l4.append(bPar);
+  /* O botão de troca existe com símbolo resolvido OU NÃO: uma escolha errada não pode ser definitiva */
   const bTroca = el('button', dec.destaque ? 'wide' : 'wide sutil', dec.rotulo);
   bTroca.type = 'button';
   bTroca.title = dec.title;
   bTroca.onclick = () => abrirEscolhaSimbolo(it);
-  g.append(bTroca);
+  l4.append(bTroca);
   if (dec.desfazer){
-    const bUndo = el('button', 'wide sutil', dec.desfazer);
+    const bUndo = el('button', 'wide sutil larga', dec.desfazer);
     bUndo.type = 'button';
     bUndo.title = 'apaga a linha de Libs/lib-subs.js e volta à resolução natural do nome';
     bUndo.onclick = () => desfazerEscolha(it);
-    g.append(bUndo);
+    l4.append(bUndo);
   }
-  paneG.append(g);
-  paneG.append(secFootprint(it, sym, fpNome));
+  body.append(g);
 
   /* O TEXTO, quando e ele que esta marcado. A posicao do designador e um deslocamento em
      relacao ao lugar de origem (embaixo/em cima do corpo): mostrar o deslocamento, e nao a
@@ -4762,57 +4876,8 @@ function renderProps(){
       };
       t.append(b);
     } else prKv(t, '', 'arraste o texto na folha para afastá-lo do símbolo', 'dim');
-    paneG.append(t);
+    body.append(t);
   }
-
-  const pars = prParams(it.params);
-  if (pars.length){
-    const s = prSec('parâmetros');
-    for (const [k, v] of pars) prKv(s, k, v);
-    paneG.append(s);
-  }
-
-  const pins = HubCore.compPinsWorld(it, SLIB) || [];
-  const s = prSec(null);
-  /* O OLHO DIZ O QUE ELE APAGA. Ele estava colado no título "pinos (2)", e ali dava para ler
-     que apagaria a TABELA; o que ele apaga é o nome do pino na FOLHA. Com a aba assumindo o
-     título, sobrou lugar para a frase inteira. */
-  const linhaOlho = el('div', 'pr-lab pr-olholinha');
-  linhaOlho.append(el('span', null, 'nomes de pino na folha'));
-  prOlho(linhaOlho, showState.pinos, showState.pinos
-    ? 'Nomes e números de pino visíveis na folha — clique para obedecer o símbolo'
-    : 'Pino escondido pelo símbolo fica escondido — clique para mostrar tudo', () => {
-      showState.pinos = !showState.pinos;
-      try { localStorage.setItem(VER_PINOS_KEY, showState.pinos ? '1' : '0'); } catch (e) {}
-      pintaOlhoPinos(); renderProps(); cam.draw(); pintaMiniaturas();
-    });
-  s.append(linhaOlho);
-  if (!pins.length) s.append(el('p', 'pr-empty', sym ? 'a parte não tem pinos' : 'componente ausente na biblioteca — sem pinagem para mostrar'));
-  else {
-    const t = el('table', 'pr-tab');
-    const th = el('tr');
-    for (const c of ['#', 'nome', 'net']) th.append(el('th', null, c));
-    t.append(el('thead', null).appendChild(th).parentNode);
-    const tb = el('tbody');
-    for (const pin of pins){
-      const tr = el('tr');
-      const rede = nets.pinNet[it.ref + '-' + pin.num] || '';
-      /* node() em vez de innerHTML: o <span> da barra vem montado, sem string para escapar */
-      const tdNome = el('td');
-      const ovb = OVB();
-      if (pin.name && ovb) tdNome.append(ovb.node(pin.name));
-      else tdNome.textContent = pin.name || '—';
-      tr.append(el('td', 'n', pin.num), tdNome);
-      const td = el('td', 'net' + (rede ? '' : ' sem'), rede || 'sem net');
-      td.title = rede || 'sem net';
-      tr.append(td);
-      tb.append(tr);
-    }
-    t.append(tb);
-    s.append(t);
-  }
-  paneP.append(s);
-  mostraAba();          /* so agora os dois paineis existem: acende a aba escolhida */
 
   prPreview(sym, part, fpNome);
 }

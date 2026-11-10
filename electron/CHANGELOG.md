@@ -4,6 +4,46 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.90.0 — 2026-11-10
+
+**A ficha do componente fica só com o que se edita, em grade; o resto vai para o botão "Parâmetros". O "Não montar"
+vai para o botão direito. E o acervo deixa de dizer "Biblioteca do Altium" para peça vinculada ao almoxarifado.**
+Pedidos do dono: "no menu de componente quero resumir muito a quantidade de informações, só vai aparecer no menu o que é
+editável […] quero que fique em botão 'parametros' que abre um modal com todos os parametros", "coloque o menu em grid
+pra caber mais coisas, e o 'não montar' vira só opção quando clica com lado direito em cima do componente no esquema e
+sai do menu", e o bug "mesmo o produto estando no acervo correto, aparece como 'biblioteca do altium'".
+- **Esquema › Propriedades do componente**, em grade: X | Y | Rotação | Espelhar; Designator (com o olho) | Parte |
+  Pinos (o olho dos nomes de pino na folha); Footprint (a linha toda) com Trocar… | Editar… | Ver em 3D; e
+  **Parâmetros** | Trocar componente… (mais o Desfazer escolha, quando há). Saíram do painel as abas Geral/Pinos e
+  tudo que é só leitura: Comment, Valor, Descrição, Acervo, Odoo, Origem, Desenho, origem/pads/modelo 3D do
+  footprint, os parâmetros e a tabela de pinos. A posição do texto marcado (Voltar ao lugar de origem) continua.
+- **Botão Parâmetros**: abre um modal só de leitura (para todos, inclusive o visualizador) com o componente
+  (designator, parte, comment, valor, descrição, símbolo e como resolveu, acervo, desenho do símbolo quando é de outro
+  acervo, Odoo com o link, não montar, suprimido na variante, folha), os **parâmetros que vão para o Odoo**
+  (OdooId, MPN, Estoque, Local, Custo…), o footprint (origem, pads, modelo 3D, pinos sem pad) e os pinos com a net.
+- **Os avisos não somem**: acervo da Biblioteca do Altium, sem ficha no Odoo, desenho ausente/emprestado, partes que
+  não desenham, footprint fora da PcbLib e pinos sem pad viram um **ponto no botão Parâmetros** (vermelho quando é
+  grave, âmbar quando é aviso), com a lista na dica do mouse e no topo do modal.
+- **Não montar no botão direito** sobre o componente no Esquema: "✓ Não montar C3" (o ✓ quando todos os
+  selecionados estão marcados; o clique desmarca — com a seleção misturada, marca todos). Vale para a seleção inteira.
+  Visualizador e quem não é da equipe veem a opção desligada, com o motivo. Na variante ativa o botão direito continua
+  sendo só o Suprimir / Montar dela (a caixa "Suprimido (variante)" também saiu do painel).
+- **PCB › Propriedades do componente**, em grade: X | Y | Rotation; Layer | Designator; Comment; Show Designator |
+  Show Comment; e Parâmetros | Rotate 90° | Flip | Zoom, Edit Footprint… | View 3D. Saíram Type, Footprint Name,
+  Dimensions, 3D Body e a tabela de pads, que estão no modal Parâmetros junto com os parâmetros do componente no
+  esquema (os que vão para o Odoo) e o vínculo com o almoxarifado. O ponto de aviso na PCB marca o que a placa sabe:
+  componente que não está no esquema, sem footprint. O "Não montar" foi para o botão direito da PCB (com ✓, para a
+  seleção inteira; desligado com o motivo sem permissão, sem schematic.js ou fora do esquema).
+- **Bug do acervo**: o acervo saía só do nome do SÍMBOLO, que é o do desenho. Um componente vinculado ao almoxarifado
+  (OdooId nos params, pelo "Trocar componente…") e ainda desenhado por um símbolo da SchLib do Altium (ex. o conector
+  de 80 vias do CBM-DI251876, desenhado pelo CONE PADRAO) aparecia "▲ Biblioteca do Altium" em vermelho, "vincule ao
+  almoxarifado", mesmo já vinculado e já casado por id na lista do Odoo. Agora vale a identidade da peça antes do nome:
+  LocalId, depois OdooId, depois o nome (`acervoDoComp`, `tests/test-acervo-comp.js`). Medido nos 25 projetos com
+  esquema da pasta de trabalho: 25 designadores passaram ao acervo certo (6 deles saíram do vermelho falso; os outros
+  19 apareciam "—"). Sem OdooId nem valor do almoxarifado com o nome dele (ex. o C3 do DMB), o aviso continua — ali
+  ele é verdadeiro.
+- `HubDialog.ficha()` (hub-dialog.js): o modal largo e só de leitura das duas vistas.
+
 ## 1.89.4 — 2026-11-10
 
 **O link da BOM é o da placa (com o nome atual dela) e cada variante tem o seu.**
