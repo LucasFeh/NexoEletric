@@ -216,8 +216,10 @@ body.eh-shell .tab[aria-selected="true"]::after {
 .eh-row .tag-n.pend { color: var(--warn); background: var(--warn-soft); }
 /* 1.88.0: a árvore é o controle de PCB -- o nome da PCB, o código dela em mono ao lado; sem placa, a marca discreta */
 .eh-row.proj .nm { flex: 0 1 auto; min-width: 110px; }
-.eh-row .pcb-cod, .eh-row .pcb-nd, .eh-row .pcb-var { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 1.89.1: o CÓDIGO da PCB é o rótulo (.nm) e o nome dela vai em cinza ao lado (.pcb-nome) */
+.eh-row .pcb-cod, .eh-row .pcb-nome, .eh-row .pcb-nd, .eh-row .pcb-var { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .eh-row .pcb-cod { font: 10px var(--mono, ui-monospace, monospace); color: var(--text-4); }
+.eh-row .pcb-nome { font-size: 10.5px; color: var(--text-4); }
 .eh-row .pcb-nd { font-size: 9.5px; padding: 0 4px; border-radius: 3px; color: var(--text-4);
   border: 1px dashed currentColor; opacity: 0.8; }
 .eh-row .pcb-var { font-size: 9.5px; padding: 0 4px; border-radius: 3px; color: var(--text-3);
@@ -408,10 +410,14 @@ body.eh-shell .tab[aria-selected="true"]::after {
     if (r.semNome && !pediuNomes && C.carregaNomes) { pediuNomes = true; C.carregaNomes().then((ok) => { if (ok) renderArvore(); }); }
     return r;
   }
+  /* 1.89.1 (pedido do dono, 2026-11-10: "ao invés de colocar o código, tá colocando o nome da PCB"): o rótulo é o
+     CÓDIGO da placa e o nome dela vai em cinza ao lado; sem código, o nome da pasta como antes (o rotuloProjeto do
+     hub-catalogo.js não mudou: só a ordem do desenho) */
   function pecasDoRotulo(p) {
     const r = rotulo(p);
-    const out = [el('span', 'nm', r.nome)];
-    if (r.codigo && r.codigo !== r.nome) out.push(el('span', 'pcb-cod', r.codigo));
+    const principal = r.codigo || r.nome;
+    const out = [el('span', 'nm', principal)];
+    if (r.codigo && r.nome && r.nome !== r.codigo) out.push(el('span', 'pcb-nome', r.nome));
     if (!r.definida) { const t = el('span', 'pcb-nd', 'sem PCB'); t.title = 'sem código de placa: abra o esquema › Configurações › Definir projeto'; out.push(t); }
     if (p.variantes) { const t = el('span', 'pcb-var', p.variantes + (p.variantes === 1 ? ' variante' : ' variantes')); t.title = 'variantes de projeto desta PCB (a placa é a mesma; muda o que é montado)'; out.push(t); }
     return { pecas: out, titulo: (r.definida ? 'PCB: ' + r.nome + (r.codigo ? ' (' + r.codigo + ')' : '') + '\n' : 'PCB não definida\n') + 'pasta: ' + p.name };

@@ -4,6 +4,13 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.89.1 — 2026-11-10
+
+**A árvore de projetos mostra o código da PCB, não o nome.**
+- Cada projeto com placa definida aparece pelo **código da placa** (ex.: `PMD-DI261946`) e o **nome da PCB** vai em cinza
+  ao lado (`MICONTROLADORA DE DISPLAY`). Na 1.88.0 era o contrário. Sem placa definida, continua o nome da pasta com a
+  marca "sem PCB". A busca continua achando pelo código, pelo nome e pela pasta; o título (passar o mouse) não mudou.
+
 ## 1.89.0 — 2026-11-09
 
 **O Definir projeto fica só com Placas, ⚠ Código de placa errado e Equipamentos; cadastrar e editar o catálogo não dependem
