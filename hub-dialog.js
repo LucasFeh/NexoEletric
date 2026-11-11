@@ -7,8 +7,10 @@
 
      await HubDialog.alert('texto', { title })                      -> undefined
      await HubDialog.confirm('texto', { title, ok, cancel, danger }) -> true | false
-     await HubDialog.escolhe('texto', { title, opcoes:[{v, rot}], v, rotulo, ok, cancel })
+     await HubDialog.escolhe('texto', { title, opcoes:[{v, rot, dica}], v, rotulo, ok, cancel })
                                                                     -> o v escolhido | null
+       1.97.8: rot é curto (cabe no seletor); a explicação da opção vai em dica, numa linha embaixo
+       do seletor que acompanha a escolha.
      await HubDialog.texto('texto', { title, v, rotulo, ok, cancel, valida })
                                                                     -> o texto digitado | null
        valida(texto) -> '' (aceita) | a mensagem que aparece embaixo do campo (e o OK espera)
@@ -39,8 +41,9 @@ const CSS = `
 .hd-box p{margin:0; white-space:pre-wrap; word-break:break-word; color:var(--text,#d8d8d8); max-height:52vh; overflow:auto;}
 .hd-escolha{display:flex; align-items:center; gap:10px; margin-top:12px;}
 .hd-escolha label{color:var(--text-dim,#a8a8a8); font-size:12px;}
-.hd-escolha select{flex:1; background:var(--surface-2,#252525); color:var(--text,#d8d8d8); border:1px solid var(--line,#3a3a3a);
-  border-radius:var(--r-sm,4px); padding:5px 8px; font:inherit;}
+.hd-escolha select{flex:1; min-width:0; background:var(--surface-2,#252525); color:var(--text,#d8d8d8); border:1px solid var(--line,#3a3a3a);
+  border-radius:var(--r-sm,4px); padding:5px 8px; font:inherit; font-size:13px; text-overflow:ellipsis;}
+.hd-dica{margin:6px 0 0 !important; font-size:12px; color:var(--text-dim,#a8a8a8) !important;}
 .hd-escolha select:focus-visible{outline:2px solid var(--hi,#4fc3f7); outline-offset:1px;}
 .hd-escolha input{flex:1; min-width:0; background:var(--surface-2,#252525); color:var(--text,#d8d8d8); border:1px solid var(--line,#3a3a3a);
   border-radius:var(--r-sm,4px); padding:5px 8px; font:inherit;}
@@ -128,6 +131,12 @@ function abre(msg, o, temCancelar){
       if (o.v != null) sel.value = String(o.v);
       if (o.rotulo){ const lb = el('label', null, o.rotulo); linha.append(lb); }
       linha.append(sel); box.append(linha);
+      /* 1.97.8: a dica da opção escolhida, embaixo (o rótulo longo não cabia no seletor) */
+      if (o.opcoes.some(op => op.dica)){
+        const dica = el('p', 'hd-dica', '');
+        const poe = () => { const op = o.opcoes.find(x => String(x.v) === sel.value); dica.textContent = (op && op.dica) || ''; };
+        sel.addEventListener('change', poe); poe(); box.append(dica);
+      }
     }
     /* texto(): um campo de digitar; o OK devolve o texto (sem espaco nas pontas) */
     let inp = null, erro = null;

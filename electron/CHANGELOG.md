@@ -4,6 +4,16 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.97.8 — 2026-11-11
+
+**O seletor de revisão do Aprovar no tamanho certo.** "Olha o dimensionamento do texto": a opção "REV.B — manter a
+atual (substitui a cópia guardada dela)" não cabia no seletor, encostava na seta e saía maior que o texto do diálogo.
+- As opções ficam curtas: "REV.C — nova (padrão)", "REV.B — manter a atual", "Outra revisão…".
+- A explicação de cada uma vai numa linha de dica embaixo do seletor, menor e em cinza, que muda com a escolha (a
+  cópia da revisão que vai ser substituída, a revisão nova no histórico, a letra digitada no passo seguinte).
+- `hub-dialog.js`: `escolhe` aceita `dica` em cada opção; o seletor fica no 13 px do diálogo e corta com reticências
+  o que não couber, em vez de empurrar a seta.
+
 ## 1.97.7 — 2026-11-11
 
 **Ctrl+W desenha fio no Esquema, como no Altium (Place Wire).** Pedido do dono: "o atalho Ctrl+W não tá funcionando no

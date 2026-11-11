@@ -220,9 +220,11 @@ function montaAprovar(g){
     let rev = 'nova';
     if (D){
       const prox = ap.proxima || 'REV.?', atual = String(ap.rev || '').trim(), ja = ap.revisoes || [];
-      const opcoes = [{ v:'nova', rot:prox + ' — revisão nova (padrão)' }];
-      if (atual && atual !== prox) opcoes.push({ v:atual, rot:atual + ' — manter a atual' + (ja.includes(atual) ? ' (substitui a cópia guardada dela)' : '') });
-      opcoes.push({ v:'outra', rot:'Outra revisão…' });
+      /* 1.97.8: o rótulo curto cabe no seletor; a explicação vai na dica, embaixo dele */
+      const opcoes = [{ v:'nova', rot:prox + ' — nova (padrão)', dica:'Guarda uma revisão nova no histórico.' }];
+      if (atual && atual !== prox) opcoes.push({ v:atual, rot:atual + ' — manter a atual',
+        dica:ja.includes(atual) ? 'A cópia guardada da ' + atual + ' no histórico é substituída por este projeto.' : 'Guarda o projeto na ' + atual + '.' });
+      opcoes.push({ v:'outra', rot:'Outra revisão…', dica:'Você digita a letra no passo seguinte.' });
       const v = D.escolhe ? await D.escolhe('Aprovar o projeto ' + g.projeto + ' como ' + u.nome + '? O quadro de título da folha recebe '
           + u.nome + ' como verificador e aprovador, com a data de hoje, e o projeto é guardado na revisão escolhida '
           + '(Histórico › Revisões). Qualquer modificação depois tira a aprovação.',
