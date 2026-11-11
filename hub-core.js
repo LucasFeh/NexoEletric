@@ -2608,28 +2608,38 @@ function footprintOf(pcblib, name){
    onde o NOME DO PINO não existe. Com `pads` (os nomes de pad do footprint de que se fala: o da biblioteca na
    validação, o do componente na placa no ECO), o pino que tem pad de mesmo nome vai nele; só o que não tem vai pelo
    mapa. Assim o mesmo mapa serve contra a biblioteca (1/2) e contra a placa (A/B). */
+/* 1.97.4: o par FORÇADO, "pino=pad!" (o "!" no fim), vale mesmo quando o footprint tem um pad com o nome do pino —
+   o caso do CH2: o pino 2 do símbolo é o pad 3 do FSM2J_1, e o FSM2J_1 também tem um pad 2 (que é de outro pino).
+   Sem o "!", o pad de mesmo nome ganha (a regra da 1.96.1). Os forçados ficam em `mapa.forca` (Set, fora do JSON). */
 function mapaPinoPad(c){
   const txt = c && typeof c.pinoPad === 'string' ? c.pinoPad : '';
   if (!txt.trim()) return null;
-  const m = {};
+  const m = {}, forca = new Set();
   for (const par of txt.split(';')) {
     const i = par.indexOf('=');
     if (i <= 0) continue;
-    const pino = par.slice(0, i).trim(), pad = par.slice(i + 1).trim();
-    if (pino && pad) m[pino] = pad;
+    const pino = par.slice(0, i).trim();
+    let pad = par.slice(i + 1).trim();
+    const f = /!$/.test(pad);
+    if (f) pad = pad.slice(0, -1).trim();
+    if (pino && pad) { m[pino] = pad; if (f) forca.add(pino); else forca.delete(pino); }
   }
-  return Object.keys(m).length ? m : null;
+  if (!Object.keys(m).length) return null;
+  Object.defineProperty(m, 'forca', { value: forca, enumerable: false });
+  return m;
 }
 function padDoPino(c, num, mapa, pads){
   const m = mapa === undefined ? mapaPinoPad(c) : mapa;
   const k = String(num);
+  if (m && m.forca && m.forca.has(k) && m[k] != null) return String(m[k]);
   if (pads && (typeof pads.has === 'function' ? pads.has(k) : pads.indexOf(k) >= 0)) return k;
   return m && m[k] != null ? String(m[k]) : k;
 }
 /* o texto do campo a partir de { pino: pad } (pino que vai no pad de mesmo nome fica de fora); '' = sem mapa */
 function pinoPadCampo(m){
-  return Object.keys(m || {}).filter(k => m[k] != null && String(m[k]) !== '' && String(m[k]) !== k)
-    .sort((a, b) => numPino(a) - numPino(b) || (a < b ? -1 : a > b ? 1 : 0)).map(k => k + '=' + m[k]).join(';');
+  const f = (m && m.forca) || new Set();
+  return Object.keys(m || {}).filter(k => m[k] != null && String(m[k]) !== '' && (String(m[k]) !== k || f.has(k)))
+    .sort((a, b) => numPino(a) - numPino(b) || (a < b ? -1 : a > b ? 1 : 0)).map(k => k + '=' + m[k] + (f.has(k) ? '!' : '')).join(';');
 }
 /* O FOOTPRINT ACHADO POR OUTRO NOME (1.96.0). Pedido do dono: "o rename-map resolve um nome para outro footprint com
    pads de nomes diferentes sem avisar (foi o caso do Barra Prog Atmega)". O resolveFp troca o nome em silêncio pelo
@@ -2937,7 +2947,7 @@ function validateSchematic(schematic, schlib, pcblib, nets){
           else for (const p of (part.pins || []))
             if (!padNames.has(padDoPino(c, p.num, mapa, padNames)))
               warnings.push(`${where}: pino "${p.num}"${mapa && mapa[String(p.num)] != null ? ' (pad "' + mapa[String(p.num)] + '" pelo mapa pino↔pad)' : ''} sem pad correspondente no footprint ${c.footprint}`);
-          if (mapa) for (const k of Object.keys(mapa)) if (!padNames.has(k) && !padNames.has(mapa[k]))
+          if (mapa) for (const k of Object.keys(mapa)) if (!padNames.has(mapa[k]) && (!padNames.has(k) || (mapa.forca && mapa.forca.has(k))))
             warnings.push(`${where}: o mapa pino↔pad leva o pino "${k}" ao pad "${mapa[k]}", que o footprint ${c.footprint} não tem`);
           /* o contrario: pad de cobre que nenhum pino de NENHUMA parte do simbolo leva (a aba
              termica do DDPAK-5 no LM2575: pad 6, 5 pinos) fica sem net na placa. Uma vez por

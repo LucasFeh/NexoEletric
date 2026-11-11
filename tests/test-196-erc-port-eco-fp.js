@@ -357,4 +357,39 @@ caso('ECO da vista: SchLib + acervos do almoxarifado + símbolos do esquema (Hub
   assert.ok(HC.compPinsWorld(s.items[1], { symbols:a.symbols }), 'pinos pelo acervo');
   assert.strictEqual(HC.compPinsWorld(s.items[1], g2.schlib), null, 'só pela SchLib: sem pinos (o caso da 1.97.2)');
 });
+/* ── 1.97.4: a net com cobre não sai pelo ECO; o mapa forçado; o aviso alto no diálogo ── */
+caso('ECO: não apaga net com cobre, e o mapa pino↔pad forçado (CH2: pino 2 = pad 3)', () => {
+  /* a net B some do esquema mas tem a trilha t1 na placa: o ECO recusa apagar */
+  const comp = (r, x, n1) => ({ id:r, ref:r, footprint:'R0805', comment:'', layer:'Top', x, y:10, rot:0, pads:[pad(r, '1', x - 1, n1), pad(r, '2', x + 1, '')] });
+  const B = placa(['B', 'V'], [comp('R1', 10, 'B'), comp('R2', 20, 'V')]);
+  B.tracks = [{ id:'t1', layer:'Top', x1:9, y1:10, x2:9, y2:20, w:0.3, net:'B' }];
+  const s = folha([{ t:'comp', ref:'R1', sym:'RES2', x:1000, y:1000, rot:0, footprint:'R0805' },
+                   { t:'comp', ref:'R2', sym:'RES2', x:3000, y:1000, rot:0, footprint:'R0805' }]);
+  const eco = Eco.compara(s, B, { schlib:SLIB, pcblib:PLIB, changes:[] });
+  const del = eco.acoes.find(a => a.tipo === 'net_del' && a.objeto === 'B');
+  assert.ok(del && del.status === 'err' && !del.ativo && /não apaga net com cobre/.test(del.msg), JSON.stringify(del));
+  Eco.junta(eco, del, true); Eco.valida(eco);
+  assert.strictEqual(del.status, 'err', 'nem marcando');
+  assert.ok(!Eco.aplica(eco).linhas.some(l => l.op === 'net_del' && l.net === 'B'), 'não grava');
+  /* a vazia (sem cobre) sai normal */
+  const delV = eco.acoes.find(a => a.tipo === 'net_del' && a.objeto === 'V');
+  assert.ok(!delV || delV.status !== 'err', 'a net sem cobre não é barrada');
+  /* o CH2: símbolo 1/2/3, footprint FSM2J_1 com pads 1/2/3, e o pino 2 é o pad 3 (o 3 é o pad 2) */
+  const FSM = { name:'FSM2J_1', pads:['1', '2', '3'].map((n, i) => ({ name:n, type:'smd', shape:'rect', x:i, y:0, w:0.5, h:0.5, rot:0, layer:'Top' })), silk:[] };
+  const SW = { name:'PUSH3', parts:[{ part:1, pins:[{ num:'1', name:'1', x:-100, y:0, orient:180, len:100 },
+    { num:'2', name:'2', x:100, y:0, orient:0, len:100 }, { num:'3', name:'3', x:0, y:100, orient:90, len:100 }] }] };
+  const SL = { symbols:[SW] }, PL = { footprints:[FSM] };
+  const B2 = placa(['N2', 'N3'], [{ id:'c', ref:'CH2', footprint:'FSM2J_1', comment:'', layer:'Top', x:10, y:10, rot:0,
+    pads:[pad('CH2', '1', 9, ''), pad('CH2', '2', 10, 'N3'), pad('CH2', '3', 11, 'N2')] }]);
+  const itens = pp => [{ t:'comp', ref:'CH2', sym:'PUSH3', x:1000, y:1000, rot:0, footprint:'FSM2J_1', pinoPad:pp },
+    { t:'netlabel', net:'N2', x:1200, y:1000 }, { t:'netlabel', net:'N3', x:1000, y:1200 }];
+  const pin = e => e.acoes.filter(a => a.tipo === 'pad_net').map(a => a.objeto + '>' + a.para).sort();
+  assert.deepStrictEqual(pin(Eco.compara(folha(itens('2=3;3=2')), B2, { schlib:SL, pcblib:PL, changes:[] })), ['CH2-2>N2', 'CH2-3>N3'],
+    'sem o "!" o pad de mesmo nome ganha: o ECO quer trocar os dois');
+  assert.deepStrictEqual(pin(Eco.compara(folha(itens('2=3!;3=2!')), B2, { schlib:SL, pcblib:PL, changes:[] })), [], 'com o "!" o mapa vale: nada a trocar');
+  assert.strictEqual(HC.pinoPadCampo(HC.mapaPinoPad({ pinoPad:'3=2!; 2=3!' })), '2=3!;3=2!');
+  /* o aviso no topo do diálogo */
+  const ui = require('fs').readFileSync(require('path').join(__dirname, '..', 'hub-pcbeco-ui.js'), 'utf8');
+  assert.ok(ui.includes('sem os pinos conferidos') && ui.includes('não serão removidas') && ui.includes('P.fonteSimbolos'));
+});
 console.log('test-196-erc-port-eco-fp: ' + ok + ' ok');

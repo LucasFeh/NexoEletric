@@ -1271,7 +1271,7 @@ function avisosDoFootprint(hc, plib, sym, fpNome, mapa){
     for (const p of sym.parts) for (const q of (p.pins || [])){
       if (!q || q.num == null) continue;
       const k = String(q.num);
-      const pad = pads.has(k) ? k : (mapa && mapa[k] != null ? String(mapa[k]) : k);
+      const pad = hc.padDoPino ? hc.padDoPino(null, k, mapa || null, pads) : (pads.has(k) ? k : (mapa && mapa[k] != null ? String(mapa[k]) : k));
       if (!pads.has(pad) && falta.indexOf(String(q.num)) < 0) falta.push(String(q.num));
     }
     if (falta.length) avisos.push('Pinos sem pad no footprint: ' + falta.slice(0, 12).join(', ') + (falta.length > 12 ? '…' : '') + ' (o ECO acusa)');
@@ -5034,7 +5034,8 @@ function renderProps(){
   if ((it.pinoPad && String(it.pinoPad).trim()) || fpInfo.kv.some(k => k[0] === 'Sem pad' || k[0] === 'Nome trocado')){
     const l3b = grade('pr-g1');
     const cm = prCampo(it.pinoPad || '', 'o mapa pino↔pad deste componente (todas as partes): pino do símbolo = pad do footprint, '
-      + 'separados por ";" — ex.: 1=A;2=B. O pino fora do mapa vai no pad de mesmo nome. O ECO e o DRC usam o mapa', c => poePinoPad(it.ref, c), { cls:'mono' });
+      + 'separados por ";" — ex.: 1=A;2=B. O pino fora do mapa vai no pad de mesmo nome, e o pad de mesmo nome ganha do mapa; '
+      + 'com "!" no fim (2=3!) o mapa vale mesmo existindo o pad de mesmo nome. O ECO e o DRC usam o mapa', c => poePinoPad(it.ref, c), { cls:'mono' });
     cm.placeholder = 'pino=pad;pino=pad (ex.: 1=A;2=B)';
     cel(l3b, 'Pino↔pad', cm, true);
   }

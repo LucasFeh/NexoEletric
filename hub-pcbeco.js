@@ -238,8 +238,11 @@ function compara(schematic, board, opts){
     /* net com pino de componente de pinagem desconhecida: nao da para dizer que sobrou */
     if ([...netPcbPins.get(bn)].some(k => cegos.has(k.slice(0, k.lastIndexOf('-'))))) continue;
     const usos = contaUsos(eb, bn);
-    acao('netDel', { tipo:'net_del', objeto:bn, para:'PCB', dados:{ net:bn },
-                     msg: usos ? `${usos} objeto(s) da placa ficam sem net` : '' });
+    /* 1.97.4 (pedido do dono: "o ECO deveria recusar, ou pelo menos avisar alto, quando vai apagar uma net que ainda
+       tem cobre — eram 51 e 55 objetos"): a net com cobre não sai pelo ECO. Ela sai desmarcada e com erro (não
+       grava nem marcando): renomeie a net (se for a mesma ligação com outro nome) ou tire o cobre antes. */
+    acao('netDel', { tipo:'net_del', objeto:bn, para:'PCB', dados:{ net:bn, usos }, ativo: !usos, status: usos ? 'err' : 'ok',
+                     msg: usos ? `a net ainda tem ${usos} objeto(s) de cobre na placa — apagar deixaria esse cobre sem net (curto no DRC): o ECO não apaga net com cobre; se é a mesma ligação com outro nome, é renomear` : '' });
   }
   const netFinal = n => (n && n in mapaPcb) ? mapaPcb[n] : n;
 
@@ -490,6 +493,8 @@ function valida(eco, opts){
   };
   for (const a of eco.acoes) {
     if (a.semPad) { a.status = 'err'; continue; }
+    /* a net com cobre não se apaga pelo ECO (1.97.4) */
+    if (a.tipo === 'net_del' && a.dados && a.dados.usos) { a.status = 'err'; a.msgValida = 'recusado: a net tem ' + a.dados.usos + ' objeto(s) de cobre'; continue; }
     if (a.info) { a.status = 'warn'; continue; }
     a.status = 'ok'; a.msgValida = '';
     const ruim = (s, m) => { if (a.status !== 'err') { a.status = s; a.msgValida = m; } };

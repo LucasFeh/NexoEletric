@@ -539,7 +539,7 @@ module.exports = {
     },
     {
       nome: 'sch_editar', titulo: 'Editar item do esquema',
-      descricao: 'Muda campos de um item do schematic.js, achado por índice (sch_ler), por ref (componente) ou pelo lugar (em: {t, x, y} — tem de achar um item só). Ex.: mover {x, y}, girar {rot}, trocar {footprint}, {comment}, {sym}, {soCobre:true} (só de cobre: jumper de solda, ponto de teste — não se compra, o DRC não o acusa como fora do almoxarifado), {pinoPad:"1=A;2=B"} (o mapa pino↔pad do componente, quando o pino do símbolo e o pad do footprint têm nomes diferentes). remover_campos tira campos opcionais.',
+      descricao: 'Muda campos de um item do schematic.js, achado por índice (sch_ler), por ref (componente) ou pelo lugar (em: {t, x, y} — tem de achar um item só). Ex.: mover {x, y}, girar {rot}, trocar {footprint}, {comment}, {sym}, {soCobre:true} (só de cobre: jumper de solda, ponto de teste — não se compra, o DRC não o acusa como fora do almoxarifado), {pinoPad:"1=A;2=B"} (o mapa pino↔pad do componente, quando o pino do símbolo e o pad do footprint têm nomes diferentes; o pad de mesmo nome do pino ganha do mapa, e "2=3!" — com "!" — força o mapa mesmo assim). remover_campos tira campos opcionais.',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, indice: { type: 'integer', minimum: 0 }, ref: { type: 'string' }, part: { type: 'integer' },
         em: Object.assign({}, ALVO_EM.items, { description: 'achar pelo lugar: {t:"netlabel", x, y}' }),
         campos: { type: 'object', additionalProperties: true }, remover_campos: { type: 'array', items: { type: 'string' } } }, COMUNS), required: ['projeto'] },

@@ -4,6 +4,31 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.97.4 — 2026-11-10
+
+**O ECO não apaga net com cobre, avisa alto o que não conferiu, e o mapa pino↔pad forçado.** O dono viu o ECO da tela
+trocar a renomeação EN_4 → EN e Q1 → LATCH_OK_2 por "mudar 9 pads um a um + apagar as nets EN_4 e Q1", e 106 objetos
+da placa ficaram sem net.
+- **Os pinos do almoxarifado na tela.** A página servida pelo hub da 1.97.3, rodada num navegador sobre o
+  MIRBC-DI251885DRV, monta os símbolos com os acervos: 0 componentes sem pinos conferidos (eram 113 só com a SchLib), e o
+  mesmo ECO do `eco_comparar`. O ECO das 23:42 que gravou os pads um a um rodou 3 minutos depois de o instalador da
+  1.97.3 trocar os arquivos (23:39). Tudo indica uma janela que ainda estava com o código anterior na memória. Para
+  que isso não passe calado de novo:
+  - o diálogo do ECO mostra no topo de onde vieram os símbolos ("SchLib 401 · almoxarifado 169 famílias · do esquema
+    32 = 3164 símbolos");
+  - e avisa em vermelho, no topo, quantos componentes ficaram sem os pinos conferidos (antes era uma linha cinza no
+    meio da lista).
+- **Net com cobre não sai pelo ECO** ("deveria recusar, ou pelo menos avisar alto, quando vai apagar uma net que ainda
+  tem cobre — eram 51 e 55 objetos"). O "Remover net" de uma net com trilha, via, plano ou pad solto na placa sai
+  desmarcado e com erro, e não é gravado nem se for marcado. O topo do diálogo lista essas nets com a contagem.
+  Se é a mesma ligação com outro nome, é renomear; se não, tire o cobre antes.
+- **O mapa pino↔pad forçado** (o CH2: o pino 2 do símbolo é o pad 3 do FSM2J_1, que também tem um pad 2).
+  - Sem marca, o pad de mesmo nome do pino ganha do mapa (a regra da 1.96.1, para o `A=1;B=2` do C5).
+  - Com `!` no fim do par, ele vale mesmo assim: `pinoPad:"2=3!;3=2!"`.
+  - Vale no ECO, na validação, na ficha e no DRC; o `sch_editar` aceita.
+- Testes: `tests/test-196-erc-port-eco-fp.js` (18 casos, +1: a net com cobre recusada mesmo marcada, a vazia normal,
+  o CH2 com e sem o "!", e o aviso do diálogo).
+
 ## 1.97.3 — 2026-11-10
 
 **O ECO da vista PCB vê os símbolos como a vista Esquema e o MCP.** Pedido do dono: "o ECO da tela, na 1.97.2, procura

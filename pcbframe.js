@@ -2840,7 +2840,12 @@ async function abreEco(){
   if (pcblib && typeof HC.setPcbLib === 'function') HC.setPcbLib(pcblib);
   if (typeof HubFpLib !== 'undefined') { HUBLIB = await HubFpLib.carrega(); registraLibHub(); }
   const pcblibEco = (typeof HubFpLib !== 'undefined' && HUBLIB) ? HubFpLib.mescla(pcblib, HUBLIB) : pcblib;
-  await HubPcbEcoUI.eco({ board:B, changes:CH, schematic:sch, schlib, pcblib:pcblibEco,
+  /* de onde vieram os símbolos (1.97.4): o diálogo mostra, e avisa alto se algum componente ficou sem pinos */
+  const nSim = o => (o && Array.isArray(o.symbols)) ? o.symbols.length : 0;
+  const fonteSimbolos = 'SchLib ' + nSim(schlibAltium) + ' · almoxarifado ' + (nSim(almoxBasicos) + nSim(almoxEspeciais) + nSim(almoxLocais))
+    + ' famílias' + (Array.isArray(sch.symbols) && sch.symbols.length ? ' · do esquema ' + sch.symbols.length : '') + ' = ' + nSim(schlib) + ' símbolos'
+    + (typeof HC.montaAcervos === 'function' ? '' : ' (sem os acervos: atualize o hub)');
+  await HubPcbEcoUI.eco({ board:B, changes:CH, schematic:sch, schlib, pcblib:pcblibEco, fonteSimbolos,
     gravar:async (linhas) => {
       if (!linhas || !linhas.length) return true;
       if (!garanteEdicao()) return false;

@@ -104,8 +104,20 @@ function eco(par){
       avisa((ligado ? 'Marcada junto: ' : 'Desmarcada junto: ') + nomes + (outras.length > 4 ? ' e mais ' + (outras.length - 4) : '')
         + ' — a ação de pino e a renomeação da net dela vão juntas', 'info');
     };
+    /* 1.97.4: o que o ECO não conferiu e o que ele não vai fazer, NO TOPO e em vermelho — antes era uma linha cinza no
+       meio da lista ("não está na schlib: pinos não conferidos", 115 vezes), e foi o que fez o ECO trocar a renomeação
+       EN_4 → EN por "mudar 9 pads um a um + apagar as nets" */
+    const cegosN = ec.acoes.filter(a => a.info && /não conferidos/.test(a.msg || '')).length;
+    const comCobre = ec.acoes.filter(a => a.tipo === 'net_del' && a.dados && a.dados.usos);
+    const alerta = (cegosN ? `<div style="margin:8px 0;padding:8px 10px;border:1px solid #ef4444;border-radius:6px;background:rgba(239,68,68,.12);color:#fca5a5">
+        ⚠ <b>${cegosN} componente(s) sem os pinos conferidos</b>: o símbolo deles não está na biblioteca que o ECO recebeu.
+        As nets que passam por eles podem sair como trocas de pino em vez de renomeação — confira antes de executar.</div>` : '')
+      + (comCobre.length ? `<div style="margin:8px 0;padding:8px 10px;border:1px solid #f59e0b;border-radius:6px;background:rgba(245,158,11,.12);color:#fcd34d">
+        ⚠ <b>${comCobre.length} net(s) com cobre não serão removidas</b> (${comCobre.slice(0, 4).map(a => esc(a.objeto) + ': ' + a.dados.usos).join(', ')}${comCobre.length > 4 ? '…' : ''} objetos):
+        o ECO não apaga net que ainda tem trilha, via ou plano.</div>` : '');
     M.box.innerHTML = `<h3>Engineering Change Order</h3>
       <div class="eco-sub">Design » Update PCB Document — do esquema para a placa. As linhas marcadas e sem erro viram mudanças no changes.js.</div>
+      ${P.fonteSimbolos ? '<div class="eco-sub">Símbolos: ' + esc(P.fonteSimbolos) + '</div>' : ''}${alerta}
       <div class="eco-tab"><table><thead><tr><th style="width:26px"></th><th>Ação</th><th>Objeto afetado</th><th></th><th>Para</th>
       <th title="Validação (Check)">Check</th><th title="Executada (Done)">Feito</th><th>Mensagem</th></tr></thead><tbody></tbody></table></div>
       <div class="eco-rod"><button data-a="valida">Validar mudanças</button><button data-a="executa" class="pri">Executar mudanças</button>
