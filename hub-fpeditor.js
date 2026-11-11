@@ -1007,6 +1007,13 @@ async function inicia(o, resolve){
   }
 
   /* ---------- 2D: mexer ---------- */
+  /* o retângulo fechado de 4 linhas de silk em volta da linha `o` (HubCore.retanguloDeLinhas), ou null */
+  function retanguloDoSilk(o){
+    const HCx = typeof HubCore !== 'undefined' ? HubCore : null;
+    if (!HCx || !HCx.retanguloDeLinhas || !o || o.kind !== 'line') return null;
+    return HCx.retanguloDeLinhas(E.fp.silk.filter(x => x.kind === 'line' && (x.layer || '') === (o.layer || '')), o);
+  }
+  const esticaRetangulo = (R, lado, v, m) => HubCore.esticaRetangulo(R, lado, v, m);
   function move(x, dx, dy){
     const t = tipo(x);
     if (t === 'pad') { x.x = r4(x.x + dx); x.y = r4(x.y + dy); }
@@ -1158,7 +1165,11 @@ async function inicia(o, resolve){
     if (alvo) {
       if (ev.shiftKey) { if (E.sel.has(alvo)) E.sel.delete(alvo); else E.sel.add(alvo); }
       else if (!E.sel.has(alvo)) { E.sel.clear(); E.sel.add(alvo); }
-      E.arr = { mover:true, w0:g, wc:w, ap:[0, 0], andou:false, id:ev.pointerId };
+      /* o lado de um retângulo fechado (1.99.0): arrastar regula o tamanho — o lado anda e os vizinhos esticam. Com as
+         4 linhas (ou mais coisas) selecionadas, o arrasto continua movendo tudo junto */
+      const R = !ev.shiftKey && E.sel.size === 1 ? retanguloDoSilk(alvo) : null;
+      E.arr = R ? { estica:R, w0:g, sx, sy, base:R.bb[{ x1:0, y1:1, x2:2, y2:3 }[R.lado]], andou:false, id:ev.pointerId }
+                : { mover:true, w0:g, wc:w, ap:[0, 0], andou:false, id:ev.pointerId };
     } else {
       if (!ev.shiftKey) E.sel.clear();
       E.janela = null;
@@ -1177,6 +1188,18 @@ async function inicia(o, resolve){
       if (Math.hypot(sx - a.sx, sy - a.sy) > 3) a.andou = true;
       E.view.cx = a.cx - (sx - a.sx) / E.view.s; E.view.cy = a.cy + (sy - a.sy) / E.view.s; pede(); return;
     }
+    if (a && a.estica) {
+      if (!a.andou && Math.hypot(sx - a.sx, sy - a.sy) <= 3) return;
+      if (!a.andou) { antes(); a.andou = true; for (const l of a.estica.linhas) E.sel.add(l); }
+      const R = a.estica, ix = R.lado[0] === 'x';
+      /* o deslocamento na grade, a partir de onde o lado estava (o retângulo fora da grade não pula para ela) */
+      esticaRetangulo(R, R.lado, r4(a.base + (ix ? g[0] - a.w0[0] : g[1] - a.w0[1])), 0.01);
+      for (const l of R.linhas) { l.x1 = r4(l.x1); l.y1 = r4(l.y1); l.x2 = r4(l.x2); l.y2 = r4(l.y2); }
+      E.sujo = true; titulo();
+      stMsg.textContent = 'retângulo ' + fmt(R.bb[2] - R.bb[0]) + ' × ' + fmt(R.bb[3] - R.bb[1]);
+      pede();
+      return;
+    }
     if (a && a.mover) {
       /* o deslocamento TOTAL desde o comeco do gesto: a grade (como antes) ou a guia que pegou */
       let dx = r4(g[0] - a.w0[0]), dy = r4(g[1] - a.w0[1]);
@@ -1193,6 +1216,12 @@ async function inicia(o, resolve){
       return;
     }
     if (a && a.janela) { E.janela = { x0:a.w0[0], y0:a.w0[1], x1:w[0], y1:w[1] }; pede(); return; }
+    if (E.tool === 'sel' && !a) {
+      /* o cursor de esticar em cima do lado de um retângulo fechado */
+      const o = sob(w[0], w[1])[0];
+      const R = o && tipo(o) === 'silk' && !(E.sel.size > 1 && E.sel.has(o)) ? retanguloDoSilk(o) : null;
+      cv.style.cursor = R ? (R.lado[0] === 'x' ? 'ew-resize' : 'ns-resize') : 'default';
+    }
     if (E.tool !== 'sel') pede();
   });
   cv.addEventListener('pointerup', ev => {
@@ -1203,6 +1232,7 @@ async function inicia(o, resolve){
       if (E.tool !== 'sel') { if (E.draft) { E.draft = null; pede(); } else ferramenta('sel'); return; }
       menu(ev); return;
     }
+    if (a.estica) { stMsg.textContent = ''; if (a.andou) { mudou(); return; } pede(); return; }
     if (a.mover) { stMsg.textContent = ''; pede(); }
     if (a.mover && a.andou) { mudou(); return; }
     if (a.janela && E.janela) {

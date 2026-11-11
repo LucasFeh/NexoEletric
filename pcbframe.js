@@ -4461,6 +4461,32 @@ function escalaGeo(t, g, bb, nb){
   furosDoGeo(n, g, S);
   return n;
 }
+/* O LADO DO RETÂNGULO FECHADO (1.99.0, pedido do dono: "se o formato tiver fechado, dá pra regular o tamanho dele só
+   clicando nas laterais e arrastando pra aumentar ou diminuir o tamanho"). O retângulo de contorno do hub são 4 trilhas
+   (poeForma); apertar numa delas e arrastar vira o mesmo esticar das alças (a borda da caixa, a partir do lado oposto,
+   na grade; Ctrl solta a grade): o lado anda e os vizinhos esticam. Só fora do cobre: no cobre vale o Drag do Altium (a
+   trilha arrasta as vizinhas). Com mais coisas selecionadas e o clique numa delas, o arrasto continua movendo tudo. */
+function alcaDoRetangulo(a, pegaSel){
+  if (!a || a.t !== 'track' || !a.m || a.m.deleted || !HC.retanguloDeLinhas) return null;
+  const lay = a.m.eff.layer;
+  if (!lay || cobre(lay)) return null;
+  if (pegaSel && SEL.length > 1) return null;
+  const vistos = new Set(), linhas = [];
+  let dele = null;
+  for (const h of HITS) {
+    const x = h.a;
+    if (x.t !== 'track' || vistos.has(x) || !x.m || x.m.deleted || x.m.eff.layer !== lay) continue;
+    vistos.add(x);
+    const e = x.m.eff, l = { x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2, a:x };
+    linhas.push(l);
+    if (x === a) dele = l;
+  }
+  const R = dele ? HC.retanguloDeLinhas(linhas, dele) : null;
+  if (!R) return null;
+  const alvos = R.linhas.map(l => l.a);
+  return { A:{ alvos, bases:new Map(alvos.map(x => [x, geoDe(x)])), bb:R.bb, vertices:null },
+           h:{ x1:['x1', null], x2:['x2', null], y1:[null, 'y1'], y2:[null, 'y2'] }[R.lado] };
+}
 function iniciaEstica(g){
   const A = g.al.A;
   arrasto = { estica:true, alvos:A.alvos, bases:A.bases, bb0:A.bb, h:g.al.h || null, vert:g.al.vert, moveu:true, novas:null, nb:null };
@@ -5484,8 +5510,10 @@ window.addEventListener('mousemove', e => {
   cursorW = w; pintaCursor(w);
   if (tool === 'select') {
     const ab = alcaBordaEm(s), al = ab ? null : alcaEm(s);
-    cv.style.cursor = ab ? cursorAlcaBorda(ab) : al ? cursorAlca(al) : 'default';
     const h = hitsEm(w.x, w.y)[0] || null;
+    /* em cima do lado de um retângulo fechado: o cursor de esticar */
+    const ar = !ab && !al && editOn && !LEAN && h && h.t === 'track' ? alcaDoRetangulo(h, SEL.indexOf(h) >= 0) : null;
+    cv.style.cursor = ab ? cursorAlcaBorda(ab) : al ? cursorAlca(al) : ar ? (ar.h[0] ? 'ew-resize' : 'ns-resize') : 'default';
     if (h !== HOVER) { HOVER = h; $('shover').textContent = h ? rotuloAlvo(h) : ''; pede(); }
   } else if (tool === 'medir') {
     if (draft && draft.tipo === 'medida' && draft.b) { SNAP = null; draft.q = { x:w.x, y:w.y }; $('shover').textContent = ''; }
@@ -5513,6 +5541,11 @@ function moveGesto(e, s, w){
   if (g.modo === 'janela') { if (longe || janela) { janela = { a:g.s, b:s }; pede(); } return; }
   if (g.modo === 'nada') { if (longe && !g.avisou) { g.avisou = true; avisoTrava(); } return; }
   if (g.modo === 'ponta') { if (!arrasto && !longe) return; if (!arrasto) iniciaPonta(g); atualizaPonta(e, w); return; }
+  /* o lado do retângulo fechado: o arrasto estica (alcaDoRetangulo) */
+  if (g.modo === 'mover' && !arrasto && longe && !g.shift && g.topo && g.topo.t === 'track') {
+    const al = alcaDoRetangulo(g.topo, g.pegaSel);
+    if (al) { g.modo = 'alca'; g.al = al; }
+  }
   if (g.modo === 'alca') { if (!arrasto && !longe) return; if (!arrasto) iniciaEstica(g); atualizaEstica(e, w); return; }
   /* a borda da placa (1.92.0): arrastar a reta da borda move a aresta; com a borda inteira selecionada, a borda toda */
   if (g.modo === 'mover' && !arrasto && g.topo && g.topo.t === 'contorno') { const ab = alcaDoSegmento(g.topo); if (!ab) { if (longe) { g.modo = 'nada'; HubDialog.toast('O arco da borda acompanha as retas vizinhas: arraste uma reta, um vértice ou (Tab Tab) a borda inteira', 'info', 4000); } return; } g.modo = 'borda'; g.ab = ab; }

@@ -4,6 +4,19 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.99.0 — 2026-11-11
+
+**O retângulo fechado regula o tamanho pelo lado, na PCB e no editor de footprint.** Pedido do dono: "na edição de
+retângulo, tanto na edição de footprint quanto na pcb, se o formato tiver fechado, dá pra regular o tamanho dele só
+clicando nas laterais e arrastando pra aumentar ou diminuir o tamanho".
+- Apertar num lado do retângulo e arrastar: o lado anda (na grade), os dois vizinhos esticam e o lado oposto fica. Em
+  cima do lado o cursor já mostra a seta de esticar. Um Ctrl+Z desfaz.
+- Vale para o retângulo de 4 linhas fechado (cada canto liga exatamente dois lados): o do editor de footprint (linhas de
+  silk) e o de contorno da vista PCB (4 trilhas, fora do cobre — no cobre continua o Drag do Altium, a trilha arrastando
+  as vizinhas). Na PCB é o mesmo esticar das alças do Polygon Pour (Ctrl solta a grade, a medida no rodapé).
+- Com uma linha a mais encostando no canto (o traço do pino 1), não é um retângulo solto: a linha se move sozinha, como
+  antes. Com as 4 linhas (ou mais coisas) selecionadas, o arrasto continua movendo tudo junto.
+
 ## 1.98.0 — 2026-11-11
 
 **Arrumar no DRC do esquema: o componente que veio do Altium deslocado dos fios volta para o lugar.** Pedido do dono:

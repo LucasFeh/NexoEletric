@@ -2879,10 +2879,20 @@ function extractNets(schematicOrModel, schlib){
      encosta (nem outra ponta, nem pino, nem nomeador, nem juncao, nem o meio de outro fio). */
   const naChave = {};
   for (const a of attach) { const k = key(a.si, a.x, a.y); naChave[k] = (naChave[k] || 0) + 1; }
+  /* No ERC NO FIO DO PINO (pedido do dono, 2026-11-11): como no Altium, o No ERC vale para a ligação inteira —
+     o pino com um toco de fio e o No ERC na outra ponta do toco (ou em qualquer ponto dele) é solto de propósito.
+     Antes só valia o No ERC em cima da ponta quente, e o MD1 do PDCD-DI261939 acusava 19 pinos que já tinham o X. */
+  const noercRaiz = new Set();
+  model.sheets.forEach((s, si) => s.noercs.forEach(n => {
+    const k = key(si, n.x, n.y);
+    if (k in nodeMap) { noercRaiz.add(find(nodeMap[k])); return; }
+    for (const g of segs)
+      if (g.si === si && distSeg(n.x, n.y, g.x1, g.y1, g.x2, g.y2) <= STOL) { noercRaiz.add(find(g.node)); break; }
+  }));
   const pinosSoltos = [];
   for (const rec of pinRecs) {
     const g = groups[find(rec.node)];
-    if (g.names.size || g.pins.length > 1 || noercEm.has(key(rec.si, rec.x, rec.y))) continue;
+    if (g.names.size || g.pins.length > 1 || noercEm.has(key(rec.si, rec.x, rec.y)) || noercRaiz.has(find(rec.node))) continue;
     pinosSoltos.push({ ref:rec.ref, num:rec.num, name:rec.name, sheet:model.sheets[rec.si].name, x:rec.x, y:rec.y,
                        fio: segRoots.has(find(rec.node)) });
   }
@@ -2993,12 +3003,14 @@ function validateSchematic(schematic, schlib, pcblib, nets){
         if (!pins){ cegos++; continue; }
         for (const p of pins) quentes.add(p.x + ',' + p.y);
       }
+      /* o No ERC na ponta do toco de fio que sai do pino também vale (o extractNets o conta para a ligação toda) */
+      for (const w of s.wires) for (const p of (w.pts || [])) quentes.add(p[0] + ',' + p[1]);
       if (cegos)
         warnings.push(`${s.noercs.length} No ERC da folha ${s.name} não foram conferidos: `
           + `${cegos} componente(s) sem símbolo, e a pinagem deles é desconhecida`);
       else for (const n of s.noercs)
         if (!quentes.has(n.x + ',' + n.y))
-          warnings.push(`No ERC em (${n.x},${n.y}) não está na ponta de nenhum pino`);
+          warnings.push(`No ERC em (${n.x},${n.y}) não está na ponta de nenhum pino nem de fio`);
     }
   }
   /* A COPIA DO ESQUEMA QUE DIFERE DA BIBLIOTECA (simbolosDoDocumento): vale a da biblioteca, e
@@ -3675,7 +3687,60 @@ function deriveStatus(entry, loaded){
   return 'vazio';
 }
 
-return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
+/* O RETÂNGULO FECHADO (1.99.0, pedido do dono: "na edição de retângulo, tanto na edição de footprint quanto na pcb, se o
+   formato tiver fechado, dá pra regular o tamanho dele só clicando nas laterais e arrastando pra aumentar ou diminuir").
+   O retângulo do hub são 4 segmentos (as linhas de silk do editor de footprint, as trilhas da vista PCB). Dado o segmento
+   clicado, acha os outros três: cada canto liga exatamente dois deles, os lados alternam vertical/horizontal e a volta
+   fecha no ponto de partida. Uma linha a mais encostando num canto (o traço do pino 1, outro desenho) = não é um
+   retângulo solto, devolve null (a linha se move sozinha, como antes).
+   linhas: [{x1,y1,x2,y2}] (do mesmo lugar/camada — o chamador filtra); alvo: um deles.
+   -> { linhas:[4], lado:'x1'|'x2'|'y1'|'y2' (o lado do alvo na caixa), bb:[x1,y1,x2,y2] } | null */
+function retanguloDeLinhas(linhas, alvo, tol){
+  const t = tol > 0 ? tol : 1e-4;
+  const eq = (a, b) => Math.abs(a - b) <= t;
+  const vert = l => eq(l.x1, l.x2) && !eq(l.y1, l.y2);
+  const horiz = l => eq(l.y1, l.y2) && !eq(l.x1, l.x2);
+  const reto = l => l && [l.x1, l.y1, l.x2, l.y2].every(isNum) && (vert(l) || horiz(l));
+  if (!reto(alvo)) return null;
+  const toca = (p, l) => (eq(p[0], l.x1) && eq(p[1], l.y1)) || (eq(p[0], l.x2) && eq(p[1], l.y2));
+  const outras = (linhas || []).filter(l => l !== alvo && reto(l));
+  const cadeia = [alvo], p0 = [alvo.x1, alvo.y1];
+  let p = [alvo.x2, alvo.y2];
+  for (let k = 0; k < 3; k++) {
+    const viz = outras.filter(l => cadeia.indexOf(l) < 0 && toca(p, l));
+    if (viz.length !== 1) return null;
+    const l = viz[0];
+    cadeia.push(l);
+    p = eq(l.x1, p[0]) && eq(l.y1, p[1]) ? [l.x2, l.y2] : [l.x1, l.y1];
+  }
+  if (!(eq(p[0], p0[0]) && eq(p[1], p0[1]))) return null;
+  for (let i = 0; i < 4; i++) if (vert(cadeia[i]) === vert(cadeia[(i + 1) % 4])) return null;
+  const cantos = cadeia.map(l => [l.x1, l.y1]);
+  if (outras.some(l => cadeia.indexOf(l) < 0 && cantos.some(c => toca(c, l)))) return null;
+  const xs = [], ys = [];
+  for (const l of cadeia) { xs.push(l.x1, l.x2); ys.push(l.y1, l.y2); }
+  const bb = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  const lado = vert(alvo) ? (eq(alvo.x1, bb[0]) ? 'x1' : 'x2') : (eq(alvo.y1, bb[1]) ? 'y1' : 'y2');
+  return { linhas: cadeia, lado, bb };
+}
+/* leva o lado `lado` do retângulo para `valor` (mutando as 4 linhas): a ponta que estava naquele lado vai junto, então o
+   lado anda e os dois vizinhos esticam. Não deixa o lado passar do oposto (fica a `min` dele). -> o valor aplicado */
+function esticaRetangulo(R, lado, valor, min){
+  const m = min > 0 ? min : 0.01;
+  const bb = R.bb, ix = lado === 'x1' || lado === 'x2', i = { x1:0, y1:1, x2:2, y2:3 }[lado];
+  const velho = bb[i];
+  let v = valor;
+  if (lado === 'x1') v = Math.min(v, bb[2] - m); else if (lado === 'x2') v = Math.max(v, bb[0] + m);
+  else if (lado === 'y1') v = Math.min(v, bb[3] - m); else v = Math.max(v, bb[1] + m);
+  const eq = a => Math.abs(a - velho) <= 1e-4;
+  for (const l of R.linhas) {
+    if (ix) { if (eq(l.x1)) l.x1 = v; if (eq(l.x2)) l.x2 = v; }
+    else { if (eq(l.y1)) l.y1 = v; if (eq(l.y2)) l.y2 = v; }
+  }
+  bb[i] = v;
+  return v;
+}
+return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR, retanguloDeLinhas, esticaRetangulo,
          SHEET_SIZES, SHEET_ISO, SHEET_PRESETS, SHEET_TOL,
          sheetSize, sheetPreset, sheetMatch, sheetLabel,
          symbolOf, partOf, footprintOf, pinHot, rotEfetiva, compTransform, compPinsWorld,
