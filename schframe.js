@@ -1347,7 +1347,8 @@ function avisosDoFootprint(hc, plib, sym, fpNome, mapa){
     const pads = new Set((fp.pads || []).map(p => String(p.name)));
     for (const p of sym.parts) for (const q of (p.pins || [])){
       if (!q || q.num == null) continue;
-      const pad = mapa && mapa[String(q.num)] != null ? String(mapa[String(q.num)]) : String(q.num);
+      const k = String(q.num);
+      const pad = pads.has(k) ? k : (mapa && mapa[k] != null ? String(mapa[k]) : k);
       if (!pads.has(pad) && falta.indexOf(String(q.num)) < 0) falta.push(String(q.num));
     }
     if (falta.length) avisos.push('Pinos sem pad no footprint: ' + falta.slice(0, 12).join(', ') + (falta.length > 12 ? '…' : '') + ' (o ECO acusa)');
@@ -1356,7 +1357,8 @@ function avisosDoFootprint(hc, plib, sym, fpNome, mapa){
 }
 /* Os avisos de um componente da folha (o ponto do botão Parâmetros e a regra "Componente" do DRC do esquema).
    d = { hc, slib, plib, acervos (o `m` do acervoDoComp), schematic, odoo(c), local(c), emergencia(c),
-         almoxCarregado (o espelho do almoxarifado está carregado), fpAvisos(it, sym) opcional }
+         almoxCarregado (o espelho do almoxarifado está carregado), fpAvisos(it, sym) opcional,
+         soCobre(c) opcional (HubSchErc.ehSoCobre: a peça só de cobre não tem avisos de compra) }
    `pre` traz o que a ficha já calculou. Cada aviso leva `cod` (acervo/odoo/sem-ficha/desenho/partes/footprint/
    footprint-inexistente). */
 function avisosDoCompPuro(it, d, pre){
@@ -1373,14 +1375,19 @@ function avisosDoCompPuro(it, d, pre){
     : (d.fpAvisos ? d.fpAvisos(it, sym) : avisosDoFootprint(hc, d.plib, sym, it.footprint || '').avisos);
   const avisos = [];
   const acNome = ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca');
-  const acPendente = !!ac && /biblioteca do altium|espelho do altium/i.test(String(ac.titulo || ''));
-  if (acPendente) avisos.push({ t:'Acervo: ' + acNome + ' — vincule ao almoxarifado pelo "Trocar componente…" para a lista do Odoo casar por id', nivel:'err', cod:'acervo' });
+  /* SÓ DE COBRE (1.96.1, o dono marcou J2/J5/J6/J7 e o "Acervo: Biblioteca do Altium — vincule ao almoxarifado"
+     continuou): a peça que não se compra não tem acervo nem ficha a vincular — os avisos de compra não saem. Os
+     técnicos (desenho, partes, pinos sem pad) continuam. */
+  const soCobre = !!(d.soCobre && d.soCobre(it));
+  const acPendente = !soCobre && !!ac && /biblioteca do altium|espelho do altium/i.test(String(ac.titulo || ''));
+  if (soCobre) { /* sem acervo a cobrar */ }
+  else if (acPendente) avisos.push({ t:'Acervo: ' + acNome + ' — vincule ao almoxarifado pelo "Trocar componente…" para a lista do Odoo casar por id', nivel:'err', cod:'acervo' });
   else if (!ac && sym) avisos.push({ t:'Acervo: o símbolo não é de nenhum acervo da casa', cod:'acervo' });
   const od = d.odoo ? d.odoo(it) : null;
   const lkOdoo = od && od.alvo ? true : false;
   const loc = d.local ? d.local(it) : null;
   let odooTxt = null;
-  if (!lkOdoo){
+  if (!lkOdoo && !soCobre){
     odooTxt = loc && !loc.integrado ? 'ainda não está no Odoo: vai com a ficha no "Enviar para o Odoo"'
       : od && od.motivo ? od.motivo
       : od ? 'o espelho não diz qual é o Odoo — rode a sincronização do almoxarifado'
@@ -1398,8 +1405,8 @@ function avisosDoCompPuro(it, d, pre){
   for (const a of fpAv) avisos.push({ t:a, cod: /não está na PcbLib/.test(a) ? 'footprint-inexistente' : 'footprint' });
   /* FORA DO ALMOXARIFADO: sem ficha no almoxarifado (sem OdooId, sem LocalId, sem o valor no espelho). Sem o
      espelho carregado não se afirma nada. */
-  const fora = !!d.almoxCarregado && !!d.odoo && !od && !loc;
-  return { avisos, acNome, acPendente, od, lkOdoo, loc, odooTxt, desenhoTxt, fora };
+  const fora = !soCobre && !!d.almoxCarregado && !!d.odoo && !od && !loc;
+  return { avisos, acNome, acPendente, od, lkOdoo, loc, odooTxt, desenhoTxt, fora, soCobre };
 }
 
 const PURE = { LIBS, ACERVO_DEFS, montaAcervos, acervoDoComp, partesDe,
@@ -4183,7 +4190,13 @@ function avisosDoComp(it, pre){
   return avisosDoCompPuro(it, { hc: HubCore, slib: SLIB, plib: PLIB, acervos: ACERVO_POR, schematic,
     odoo: odooDoComp, local: localDoComp, emergencia: desenhoDeEmergencia,
     almoxCarregado: typeof HubOdooLink !== 'undefined' && almox,
+    soCobre: soCobreDoRef,
     fpAvisos: (c, sym) => infoFootprint(c, sym, c.footprint || '').avisos }, pre);
+}
+/* a peça só de cobre (HubSchErc.ehSoCobre), por designador: qualquer parte marcada vale para todas */
+function soCobreDoRef(c){
+  if (typeof HubSchErc === 'undefined' || !HubSchErc.ehSoCobre || !c) return false;
+  return itensDoRef(c.ref).concat([c]).some(x => HubSchErc.ehSoCobre(x, x.footprint ? HubCore.footprintOf(PLIB, x.footprint) : null));
 }
 function localDoComp(comp){ return localDoCompPuro(comp, window.almoxLocais); }
 function odooDoComp(comp){
@@ -4376,7 +4389,8 @@ function infoFootprint(it, sym, fpNome){
     const mapa = HubCore.mapaPinoPad ? HubCore.mapaPinoPad(it) : null;
     const pinosDoSym = [];
     if (sym && Array.isArray(sym.parts)) for (const p of sym.parts) for (const q of (p.pins || [])) if (q && q.num != null) pinosDoSym.push(String(q.num));
-    const renom = HubCore.avisoFootprintRenomeado ? HubCore.avisoFootprintRenomeado(PLIB, fpNome, pinosDoSym.map(n => HubCore.padDoPino(it, n, mapa))) : null;
+    const padsFp = new Set((fp.pads || []).map(p => String(p.name)));
+    const renom = HubCore.avisoFootprintRenomeado ? HubCore.avisoFootprintRenomeado(PLIB, fpNome, pinosDoSym.map(n => HubCore.padDoPino(it, n, mapa, padsFp))) : null;
     if (renom){
       kv.push(['Nome trocado', renom, 'warn']);
       avisos.push('Footprint: ' + renom);

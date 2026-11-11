@@ -4,6 +4,25 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.96.1 — 2026-11-10
+
+**O que ficou pela metade na 1.96.0 (o dono devolveu, testando no MIRBC-DI251885DRV).**
+- **Só de cobre também na regra "Componente (Parâmetros)".** O dono marcou J2, J5, J6 e J7 como só de cobre: o "fora
+  do almoxarifado" sumiu, mas os quatro continuavam com "Acervo: Biblioteca do Altium — vincule ao almoxarifado". A
+  peça que não se compra não tem acervo nem ficha a vincular. Os avisos de compra (acervo e Odoo) não saem mais para
+  ela: nem no ponto do botão Parâmetros, nem no DRC do esquema, nem no `sch_erc`. Os avisos técnicos (desenho
+  emprestado, partes, pinos sem pad) continuam. Basta uma parte do designador estar marcada.
+- **O mapa pino↔pad só vale onde o nome do pino não existe.** O dono pôs `A=1;B=2` no C5: o símbolo e a placa chamam os
+  pads de A/B, e só o footprint da biblioteca de 1/2. O aviso sumiu, mas o ECO passou a dar "Unknown Pin", porque o
+  mapa valia também contra os pads da placa.
+  - Agora o pino que tem pad de mesmo nome vai nele, e só o que não tem vai pelo mapa (`HubCore.padDoPino` com os pads).
+  - A validação compara com o footprint da biblioteca. O ECO compara com o componente que já está na placa (o mesmo
+    footprint) ou, se o componente é novo ou troca de footprint, com o da biblioteca.
+  - O mesmo `A=1;B=2` serve contra a biblioteca (1/2) e contra a placa (A/B). No C5 do MIRBC, com o mapa: a
+    validação não acusa "pino A/B sem pad", e o ECO só traz a troca de comment que já existia.
+- Testes: `tests/test-196-erc-port-eco-fp.js` (14 casos; +2: o só de cobre sem aviso de compra, e o C5 com a
+  biblioteca 1/2 e a placa A/B, com o componente novo entrando pelos pads da biblioteca).
+
 ## 1.96.0 — 2026-11-10
 
 **Port nas duas pontas, o DRC do MCP igual ao da tela, o ECO da placa multi-esquema, o mapa pino↔pad e o Make PCB Library.**

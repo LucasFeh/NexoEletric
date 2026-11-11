@@ -2602,7 +2602,12 @@ function footprintOf(pcblib, name){
    como o CAP 0805 com A/B" — o símbolo numera 1/2 e o footprint chama os pads de A/B (ou o BC337 com B/C/E contra
    1/2/3). O campo `pinoPad` do comp é texto plano "pino=pad;pino=pad" (o parser do BuildSchematic lê linha a linha,
    como o `nets` do comp_add): `{"t":"comp",...,"pinoPad":"1=A;2=B"}`. Pino fora do mapa = o pad de mesmo nome.
-   Vale em todas as partes do componente. mapaPinoPad(c) -> { pino: pad } ou null; padDoPino(c, num) -> o pad. */
+   Vale em todas as partes do componente. mapaPinoPad(c) -> { pino: pad } ou null; padDoPino(c, num) -> o pad.
+   1.96.1 (o dono testou "A=1;B=2" no C5: o símbolo e a placa chamam os pads de A/B, só a biblioteca de 1/2; o aviso
+   sumiu, mas o ECO passou a dar Unknown Pin, porque o mapa valia também contra os pads da placa): o mapa só vale
+   onde o NOME DO PINO não existe. Com `pads` (os nomes de pad do footprint de que se fala: o da biblioteca na
+   validação, o do componente na placa no ECO), o pino que tem pad de mesmo nome vai nele; só o que não tem vai pelo
+   mapa. Assim o mesmo mapa serve contra a biblioteca (1/2) e contra a placa (A/B). */
 function mapaPinoPad(c){
   const txt = c && typeof c.pinoPad === 'string' ? c.pinoPad : '';
   if (!txt.trim()) return null;
@@ -2615,10 +2620,11 @@ function mapaPinoPad(c){
   }
   return Object.keys(m).length ? m : null;
 }
-function padDoPino(c, num, mapa){
+function padDoPino(c, num, mapa, pads){
   const m = mapa === undefined ? mapaPinoPad(c) : mapa;
   const k = String(num);
-  return m && m[k] != null ? m[k] : k;
+  if (pads && (typeof pads.has === 'function' ? pads.has(k) : pads.indexOf(k) >= 0)) return k;
+  return m && m[k] != null ? String(m[k]) : k;
 }
 /* o texto do campo a partir de { pino: pad } (pino que vai no pad de mesmo nome fica de fora); '' = sem mapa */
 function pinoPadCampo(m){
@@ -2923,12 +2929,12 @@ function validateSchematic(schematic, schlib, pcblib, nets){
         else if (part) {
           const padNames = new Set((fp.pads || []).map(p => String(p.name)));
           /* o footprint trocado de nome em silêncio (1.96.0): um aviso só, no lugar dos "sem pad" um a um */
-          const renom = avisoFootprintRenomeado(pcblib, c.footprint, (part.pins || []).map(p => padDoPino(c, p.num, mapa)));
+          const renom = avisoFootprintRenomeado(pcblib, c.footprint, (part.pins || []).map(p => padDoPino(c, p.num, mapa, padNames)));
           if (renom) warnings.push(`${where}: ${renom}`);
           else for (const p of (part.pins || []))
-            if (!padNames.has(padDoPino(c, p.num, mapa)))
+            if (!padNames.has(padDoPino(c, p.num, mapa, padNames)))
               warnings.push(`${where}: pino "${p.num}"${mapa && mapa[String(p.num)] != null ? ' (pad "' + mapa[String(p.num)] + '" pelo mapa pino↔pad)' : ''} sem pad correspondente no footprint ${c.footprint}`);
-          if (mapa) for (const k of Object.keys(mapa)) if (!padNames.has(mapa[k]))
+          if (mapa) for (const k of Object.keys(mapa)) if (!padNames.has(k) && !padNames.has(mapa[k]))
             warnings.push(`${where}: o mapa pino↔pad leva o pino "${k}" ao pad "${mapa[k]}", que o footprint ${c.footprint} não tem`);
           /* o contrario: pad de cobre que nenhum pino de NENHUMA parte do simbolo leva (a aba
              termica do DDPAK-5 no LM2575: pad 6, 5 pinos) fica sem net na placa. Uma vez por
@@ -2936,7 +2942,7 @@ function validateSchematic(schematic, schlib, pcblib, nets){
           if (!avisadoFp.has(c.ref)) {
             avisadoFp.add(c.ref);
             const pinos = new Set();
-            for (const pt of (sym.parts || [])) for (const p of (pt.pins || [])) pinos.add(padDoPino(c, p.num, mapa));
+            for (const pt of (sym.parts || [])) for (const p of (pt.pins || [])) pinos.add(padDoPino(c, p.num, mapa, padNames));
             const sobra = [...new Set((fp.pads || []).filter(q => q && q.name !== '' && q.name != null && q.type !== 'npth' && q.plated !== false)
               .map(q => String(q.name)))].filter(n => !pinos.has(n));
             if (sobra.length)

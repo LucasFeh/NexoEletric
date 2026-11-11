@@ -112,10 +112,28 @@ function compara(schematic, board, opts){
   /* ---- nets do esquema: so as da lista (pino sozinho nao vira net) ---- */
   const netSch = new Map();
   const autoSch = new Set();
-  /* REF-PINO do esquema vira REF-PAD da placa pelo mapa pino↔pad do componente (o CAP 0805 com pads A/B) */
+  /* REF-PINO do esquema vira REF-PAD da placa pelo mapa pino↔pad do componente (o CAP 0805 com pads A/B).
+     1.96.1: contra os pads de VERDADE — o do componente que já está na placa (com o mesmo footprint), ou o do
+     footprint da biblioteca (componente novo, troca de footprint). O pino que tem pad de mesmo nome vai nele; só o
+     que não tem vai pelo mapa (HubCore.padDoPino com os pads). O dono pôs "A=1;B=2" no C5 (a biblioteca chama de
+     1/2, a placa de A/B) e o ECO dava Unknown Pin: o mapa valia contra a placa também. */
+  const naPlaca = new Map();
+  for (const c of (eb.components || [])) if (c && c.ref && !naPlaca.has(c.ref)) naPlaca.set(c.ref, c);
+  const padsAlvo = new Map();
+  const padsDe = ref => {
+    if (padsAlvo.has(ref)) return padsAlvo.get(ref);
+    const s = sch.get(ref), c = naPlaca.get(ref);
+    let pads = null;
+    if (c && (!s.footprint || mesmoFootprint(s.footprint, c.footprint || '', o.pcblib))) pads = new Set((c.pads || []).map(p => String(p.name)));
+    else if (s.footprint) { const g = HC.footprintGeom(s.footprint, eb, { pcblib:o.pcblib }); if (g) pads = new Set((g.fp.pads || []).map(p => String(p.name))); }
+    padsAlvo.set(ref, pads);
+    return pads;
+  };
   const paraPad = k => {
-    const i = k.lastIndexOf('-'), s = i > 0 ? sch.get(k.slice(0, i)) : null;
-    return s && s.mapa && s.mapa[k.slice(i + 1)] != null ? k.slice(0, i) + '-' + s.mapa[k.slice(i + 1)] : k;
+    const i = k.lastIndexOf('-'), ref = i > 0 ? k.slice(0, i) : '', s = ref ? sch.get(ref) : null;
+    if (!s || !s.mapa) return k;
+    const pad = typeof HC.padDoPino === 'function' ? HC.padDoPino(null, k.slice(i + 1), s.mapa, padsDe(ref)) : k.slice(i + 1);
+    return ref + '-' + pad;
   };
   for (const n of ex.nets) { netSch.set(n.name, new Set(n.pins.map(paraPad))); if (n.auto) autoSch.add(n.name); }
   const pinSch = Object.create(null);

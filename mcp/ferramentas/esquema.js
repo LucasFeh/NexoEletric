@@ -768,6 +768,9 @@ module.exports = {
           if (!cache.has(c)) cache.set(c, P.avisosDoCompPuro(c, { hc, slib: L.schlib, plib: L.pcblib, acervos: m, schematic: s,
             odoo: x => HubOdooLink.fichaDoComp(x), local: x => P.localDoCompPuro(x, globais.almoxLocais),
             emergencia: x => P.emergenciaDe(E, x, hc), almoxCarregado: temAlmox,
+            /* a peça só de cobre (qualquer parte marcada) não tem avisos de compra (1.96.1) */
+            soCobre: x => (s.items || []).some(y => y && y.t === 'comp' && y.ref === x.ref
+              && HubSchErc.ehSoCobre(y, y.footprint ? hc.footprintOf(L.pcblib, y.footprint) : null)),
             fpAvisos: (x, sym) => P.avisosDoFootprint(hc, L.pcblib, sym, x.footprint || '', hc.mapaPinoPad ? hc.mapaPinoPad(x) : null).avisos }));
           return cache.get(c);
         };

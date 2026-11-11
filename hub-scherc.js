@@ -100,8 +100,8 @@ function rodar(o){
     for (const [k, n] of partes) if (n > 1 && ref && !/\?$/.test(ref))
       for (const x of cs.filter(y => (y.part || 1) === k)) add('ref-duplicado', ref + (cs.length > 1 && (x.part || 1) > 1 ? ' parte ' + k : '') + ' aparece ' + n + ' vezes', centro(x), { ref, caixa: caixaDe(x) });
     /* o não montar e o só de cobre não se compram: não estão "fora" do almoxarifado (1.96.0) */
-    const naoCompra = (hc && typeof hc.ehDnp === 'function' && cs.some(x => hc.ehDnp(x)))
-      || cs.some(x => ehSoCobre(x, fpDe(x)));
+    const soCobre = cs.some(x => ehSoCobre(x, fpDe(x)));
+    const naoCompra = (hc && typeof hc.ehDnp === 'function' && cs.some(x => hc.ehDnp(x))) || soCobre;
     if (!suprimido && !naoCompra && typeof o.foraDoAlmox === 'function' && o.foraDoAlmox(c))
       add('fora-almox', ref + ' (' + (c.sym || '—') + ') está fora do almoxarifado — sem ficha: vincule pelo "Trocar componente…"', centro(c), { ref, caixa: caixaDe(c) });
     const fp = String(c.footprint == null ? '' : c.footprint).trim();
@@ -112,6 +112,8 @@ function rodar(o){
     }
     if (!suprimido && typeof o.avisosDoComp === 'function')
       for (const a of (o.avisosDoComp(c) || [])) {
+        /* 1.96.1: a peça só de cobre não tem acervo nem ficha a vincular */
+        if (soCobre && a && (a.cod === 'acervo' || a.cod === 'odoo' || a.cod === 'sem-ficha')) continue;
         const txt = typeof a === 'string' ? a : a.t;
         add('componente', ref + ' — ' + txt, centro(c), { ref, caixa: caixaDe(c), sev: (a && a.nivel === 'err') ? 'erro' : sev.componente });
       }

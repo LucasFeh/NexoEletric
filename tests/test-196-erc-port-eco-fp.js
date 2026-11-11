@@ -231,4 +231,56 @@ caso('daPlaca: pads, serigrafia e o 3D na coordenada do footprint', () => {
   assert.ok(so.avisos.some(a => /bottom/.test(a)));
 });
 
+
+/* ── 1.96.1: o que o dono devolveu ── */
+caso('só de cobre: sem os avisos de compra na regra "Componente"', () => {
+  const plib = { footprints:[{ name:'JUMPER 2 VIAS SMD', pads:[{ name:'1' }, { name:'2' }], silk:[], bodies:[] }] };
+  const m = P.montaAcervos({ schlib:{ symbols:[RES2] } });
+  const s = folha([{ t:'comp', ref:'J2', sym:'RES2', x:1000, y:1000, rot:0, footprint:'JUMPER 2 VIAS SMD', soCobre:true },
+                   { t:'comp', ref:'R1', sym:'RES2', x:3000, y:1000, rot:0, footprint:'JUMPER 2 VIAS SMD', soCobre:false }]);
+  const d = { hc:HC, slib:SLIB, plib, acervos:m, schematic:s, odoo: () => null, local: () => null, emergencia: () => null,
+              almoxCarregado:true, soCobre: c => Erc.ehSoCobre(c, null) };
+  const a = P.avisosDoCompPuro(s.items[1], d);
+  assert.ok(!a.avisos.some(x => x.cod === 'acervo' || x.cod === 'odoo' || x.cod === 'sem-ficha'), JSON.stringify(a.avisos));
+  assert.strictEqual(a.fora, false);
+  /* o R1 (sem a marca, mas com o footprint de jumper sem 3D) também é só de cobre pelo nome */
+  const r = Erc.rodar({ hc:HC, schematic:s, slib:SLIB, plib, foraDoAlmox: () => true,
+    avisosDoComp: () => [{ t:'Acervo: Biblioteca do Altium', cod:'acervo', nivel:'err' }, { t:'Desenho: x', cod:'desenho' }] });
+  assert.deepStrictEqual(r.violacoes.filter(v => v.regra === 'componente').map(v => v.ref + ' ' + v.msg.replace(/^\S+ — /, '')),
+    ['J2 Desenho: x', 'R1 Desenho: x'], 'só os técnicos: ' + JSON.stringify(r.violacoes.map(v => v.msg)));
+  assert.ok(!r.violacoes.some(v => v.regra === 'fora-almox'));
+});
+caso('pinoPad contra a biblioteca (1/2) e contra a placa (A/B): o C5', () => {
+  /* símbolo com pinos A/B, footprint da BIBLIOTECA com pads 1/2, o da PLACA (o mesmo nome) com pads A/B */
+  const CAPAB = { name:'CAPAB', designator:'C', parts:[{ part:1, pins:[
+    { num:'A', name:'A', x:-100, y:0, orient:180, len:100 }, { num:'B', name:'B', x:100, y:0, orient:0, len:100 }] }] };
+  const SL = { symbols:[CAPAB] };
+  const LIB12 = { footprints:[{ name:'CAP 0805', pads:[{ name:'1', type:'smd', shape:'rect', x:-1, y:0, w:1, h:1, rot:0, layer:'Top' },
+                                                     { name:'2', type:'smd', shape:'rect', x:1, y:0, w:1, h:1, rot:0, layer:'Top' }], silk:[] }] };
+  const B = placa(['N1', 'N2'], [
+    { id:'c5', ref:'C5', footprint:'CAP 0805', comment:'', layer:'Top', x:10, y:10, rot:0, pads:[pad('C5', 'A', 9, 'N1'), pad('C5', 'B', 11, 'N2')] }]);
+  const itens = pp => [{ t:'comp', ref:'C5', sym:'CAPAB', x:1000, y:1000, rot:0, footprint:'CAP 0805', pinoPad:pp },
+    { t:'comp', ref:'C6', sym:'CAPAB', x:3000, y:1000, rot:0, footprint:'CAP 0805', pinoPad:pp },
+    { t:'netlabel', net:'N1', x:800, y:1000 }, { t:'netlabel', net:'N2', x:1200, y:1000 },
+    { t:'netlabel', net:'N1', x:2800, y:1000 }, { t:'netlabel', net:'N2', x:3200, y:1000 }];
+  const s = folha(itens('A=1;B=2'));
+  /* a validação contra a biblioteca: o mapa leva A/B a 1/2 — sem aviso */
+  const v = HC.validateSchematic(s, SL, LIB12, HC.extractNets(s, SL));
+  assert.ok(!v.warnings.some(w => /sem pad|mapa pino/.test(w)), v.warnings.join(' | '));
+  /* sem o mapa, os avisos de antes (os 20 dos capacitores 0805) */
+  const s0 = folha(itens(undefined));
+  assert.ok(HC.validateSchematic(s0, SL, LIB12, HC.extractNets(s0, SL)).warnings.some(w => /pino "A" sem pad/.test(w)));
+  /* o ECO: o C5 já está na placa com pads A/B — nada de Unknown Pin; o C6 é novo e entra pelos pads 1/2 da biblioteca */
+  const eco = Eco.compara(s, B, { schlib:SL, pcblib:LIB12, changes:[] });
+  assert.ok(!eco.acoes.some(a => a.semPad || (a.objeto || '').startsWith('C5-')), 'C5: ' + JSON.stringify(eco.acoes.filter(a => /C5/.test(a.objeto))));
+  const add = eco.acoes.find(a => a.tipo === 'comp_add' && a.objeto === 'C6');
+  assert.ok(add, 'o C6 entra');
+  const linhas = Eco.aplica(eco).linhas;
+  const c6 = linhas.find(l => l.op === 'comp_add' && l.ref === 'C6');
+  assert.ok(c6 && /1=N1/.test(c6.nets || '') && /2=N2/.test(c6.nets || ''), 'o C6 pelas nets nos pads 1/2: ' + JSON.stringify(c6));
+  /* a ficha e o DRC: avisosDoFootprint com o mapa, contra a biblioteca */
+  assert.deepStrictEqual(P.avisosDoFootprint(HC, LIB12, CAPAB, 'CAP 0805', HC.mapaPinoPad({ pinoPad:'A=1;B=2' })).falta, []);
+  assert.strictEqual(HC.padDoPino(null, 'A', { A:'1' }, new Set(['A', 'B'])), 'A', 'o pad de mesmo nome ganha do mapa');
+  assert.strictEqual(HC.padDoPino(null, 'A', { A:'1' }, new Set(['1', '2'])), '1');
+});
 console.log('test-196-erc-port-eco-fp: ' + ok + ' ok');
