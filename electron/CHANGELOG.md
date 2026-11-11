@@ -4,6 +4,68 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.96.0 — 2026-11-10
+
+**Port nas duas pontas, o DRC do MCP igual ao da tela, o ECO da placa multi-esquema, o mapa pino↔pad e o Make PCB Library.**
+Os pedidos do dono de 2026-11-10, um por um:
+
+- **A port liga nas duas pontas, como no Altium.** Até aqui só a âncora (a ponta da esquerda, ou a de baixo na port em
+  pé) era ponto elétrico (`hub-core.js`, extractNets). Agora a outra ponta, a `w` mil da âncora, também é: o fio que
+  chega na ponta da direita liga, o ímã do esquema pega as duas, e a port só é "solta" sem nada nas duas. A seta e o
+  estilo não mudam isso. A conta é `HubCore.portPontas`, a mesma geometria do desenho (`hub-draw » portGeom`, conferida
+  nos 8 estilos).
+- **O `sch_erc` do MCP conta como o botão DRC da tela** (71 na tela contra 46 no MCP). Faltava a regra "Componente
+  (Parâmetros)" (acervo pendente, desenho emprestado, partes, pinos sem pad, Odoo), que só a vista sabia fazer.
+  - Com a vista Esquema do projeto aberta, o `sch_erc` pergunta a ela (ação `erc` no canal do MCP; o hub Rust e o
+    Python aceitam). É a mesma contagem do botão, na variante ativa.
+  - Sem a vista, ele conta pelo arquivo com as MESMAS regras: a conta dos avisos saiu da vista para a parte pura do
+    `schframe.js` (`avisosDoCompPuro`, `avisosDoFootprint`, `indiceEmergencia`), e a vista e o MCP chamam a mesma.
+  - A resposta diz a fonte (`vista Esquema aberta` ou `arquivo`); `fonte:"arquivo"` força a conta pelo arquivo.
+- **"Fora do almoxarifado" deixa de fora o não montar e o só de cobre.** O DNP (`dnp:true`, `DNP=1`, `Montagem=NAO
+  MONTAR`) e a peça que não se compra (`HubSchErc.ehSoCobre`) não são acusados. Só de cobre:
+  - a marca `"soCobre":true` (o `sch_editar` aceita), ou nos params `SoCobre=1`, `BOM=NAO` ou `ComponentKind` de
+    Net Tie, Jumper, Graphical ou No BOM;
+  - ou o footprint sem corpo 3D com nome de jumper de solda, ponto de solda/teste, test point, fiducial, net tie ou logo.
+  No MIRBC-DI251885DRV: J5, J6 e J7 (DNP) e o J2 (jumper SMD) saíram; sobrou o que é de verdade.
+- **`vista_screenshot` sem "Invalid Base64 string".** O canvas vazio (janela minimizada, vista no meio do redesenho)
+  devolve o dataURL `data:,`, e ele ia como imagem — o cliente recusava a resposta inteira. Agora só vai um dataURL
+  de imagem com base64 válido e maior que 1×1 px; senão o erro diz o porquê. O protocolo do MCP também descarta (e
+  avisa) qualquer imagem com base64 quebrado, de qualquer ferramenta.
+- **O ECO da placa multi-esquema não quer mais apagar dezenas de nets.** No MIRBC-DI251885DRV o Altium, com "Append
+  Sheet Numbers to Local Nets", chama a net local EN da folha 4 de `EN_4`. O esquema daqui a chama de `EN`.
+  - Um ECO antigo tinha gravado `net_add EN` (vazia). O nome igual ganhava, e a `EN_4` — com os pads, as trilhas e o
+    plano — saía como "Remover net" (51 objetos sem net só nela; 15 nets assim).
+  - Agora a net da placa `X_<n>` com os pinos da `X` do esquema é a mesma net, mesmo com 2 pinos (abaixo do mínimo de
+    3 da comparação). A `X` vazia de mesmo nome só casa pelo nome se nenhuma net tiver os pinos. Se alguma tiver, o
+    ECO renomeia `EN_4 → EN`, e a vazia sai antes (`net_del` + `net_rename` juntos, na ordem). As trilhas vão junto.
+  - No MIRBC: 15 renomeações (as do sufixo `_4` e a `Q1 → LATCH_OK_2`), nenhuma net com objeto apagada.
+- **O footprint achado por outro nome avisa** (o caso do "Barra Prog Atmega"). O `rename-map` (ou a chave normalizada)
+  troca o nome em silêncio. Quando o footprint achado não tem os pads que os pinos pedem, as nets cairiam nos pads
+  errados. `HubCore.avisoFootprintRenomeado` avisa em quatro lugares:
+  - na validação do esquema (um aviso, no lugar dos "sem pad" um a um);
+  - na ficha do componente (linha "Nome trocado");
+  - no ECO (a ação de pôr ou trocar o componente fica em aviso);
+  - no `comp_add` da placa.
+- **O mapa pino↔pad por componente** (o "CAP 0805" com pads A/B, o BC337 com B/C/E). O campo `pinoPad` do comp é texto
+  plano `"1=A;2=B"` (`HubCore.mapaPinoPad`/`padDoPino`). O pino fora do mapa vai no pad de mesmo nome. Vale:
+  - no ECO (o pino do esquema vai no pad do mapa: sem o Unknown Pin, sem "remover pino");
+  - na validação e nos "pinos sem pad" da ficha e do DRC.
+  Na ficha do componente aparece o campo **Pino↔pad** quando algum pino não tem pad de mesmo nome (ou já há um mapa).
+  No MCP é o `sch_editar {campos:{pinoPad:"1=A;2=B"}}`. O BuildSchematic do Altium ainda não leva o mapa: lá, o Pin
+  Mapping do footprint continua à mão.
+- **Design » Make PCB Library: os footprints da placa vão para a biblioteca, com os 3D.** A placa importada do PcbDoc
+  traz cada footprint dentro dos componentes, e os que nenhuma biblioteca tem caíam em "fora da PcbLib". Agora o menu
+  Design » Make PCB Library da vista PCB e a ferramenta `fp_da_placa` do MCP os gravam na biblioteca do hub
+  (`HubFpLib.faltandoNaPlaca` + `daPlaca`, a mesma conta nos dois):
+  - pads e serigrafia tirados do componente do Top (a volta do compDelta);
+  - os corpos 3D do `board3d.js` levados à coordenada do footprint (o STEP pela posição e pelo rotz menos a pose do
+    componente; o extrudado pelos pontos), e o STEP do projeto entra na biblioteca 3D do hub;
+  - footprint só do bottom sai sem 3D, avisado;
+  - o que já está na biblioteca do hub fica como está (`substituir:true` troca); `simular:true` só lista.
+  No MIRBC: 4 footprints (GMR320HJBFA10L0, IKCM30F60GAXKMA1, SOP65P640X120-15N/-16N), cada um com o STEP.
+- Testes: `tests/test-196-erc-port-eco-fp.js` (12 casos: port, DRC, só de cobre, imagem, ECO do sufixo e da vazia,
+  mapa pino↔pad, renomeado, Make PCB Library com a volta dos pads).
+
 ## 1.95.1 — 2026-11-10
 
 **DRC do esquema: o contorno de "fora do almoxarifado" do tamanho do componente.**

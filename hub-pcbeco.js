@@ -74,6 +74,8 @@ function compsDoEsquema(sch, schlib){
        pinos dele -- comparar daria "remover pino" em todos. Nao conferido e diferente de errado. */
     if (!HC.compPinsWorld(c, schlib)) r.cego = true;
     if (!r.footprint && typeof c.footprint === 'string') r.footprint = c.footprint;
+    /* o mapa pino↔pad (1.96.0, HubCore.mapaPinoPad): o pino do esquema vai no pad do mapa */
+    if (!r.mapa && typeof HC.mapaPinoPad === 'function') r.mapa = HC.mapaPinoPad(c);
     if (!r.comment && typeof c.comment === 'string') r.comment = c.comment;
   }
   return { comps:out, folhas:M.sheets.map(s => s.name) };
@@ -110,7 +112,12 @@ function compara(schematic, board, opts){
   /* ---- nets do esquema: so as da lista (pino sozinho nao vira net) ---- */
   const netSch = new Map();
   const autoSch = new Set();
-  for (const n of ex.nets) { netSch.set(n.name, new Set(n.pins)); if (n.auto) autoSch.add(n.name); }
+  /* REF-PINO do esquema vira REF-PAD da placa pelo mapa pino↔pad do componente (o CAP 0805 com pads A/B) */
+  const paraPad = k => {
+    const i = k.lastIndexOf('-'), s = i > 0 ? sch.get(k.slice(0, i)) : null;
+    return s && s.mapa && s.mapa[k.slice(i + 1)] != null ? k.slice(0, i) + '-' + s.mapa[k.slice(i + 1)] : k;
+  };
+  for (const n of ex.nets) { netSch.set(n.name, new Set(n.pins.map(paraPad))); if (n.auto) autoSch.add(n.name); }
   const pinSch = Object.create(null);
   for (const [nome, pins] of netSch) for (const p of pins) pinSch[p] = nome;
 
@@ -130,10 +137,53 @@ function compara(schematic, board, opts){
     if (p.net) { if (!netPcbPins.has(p.net)) netPcbPins.set(p.net, new Set()); netPcbPins.get(p.net).add(k); }
   }
 
-  /* ---- nets: nome igual; senao >= 75% dos pinos (min 3) = renomear; senao criar ---- */
+  /* ---- nets: nome igual; senao >= 75% dos pinos (min 3) = renomear; senao criar ----
+     1.96.0 (pedido do dono: "a sincronização com o Altium falha com placa multi-esquema: as nets com sufixo de folha
+     (_4) fazem o ECO querer apagar dezenas de nets"). Duas coisas:
+       - o SUFIXO DE FOLHA: o Altium, com "Append Sheet Numbers to Local Nets", chama a net local EN da folha 4 de
+         EN_4; o esquema daqui a chama de EN. A net da placa X_<n> com os pinos da X do esquema é a mesma net, mesmo
+         com 2 pinos só (abaixo do mínimo de 3 da comparação por pinos);
+       - a net VAZIA de mesmo nome: um ECO antigo pôs `net_add EN` (vazia) e deixou os pads na EN_4; o nome igual
+         ganhava, e a EN_4 — com os pads, as trilhas e o plano — saía como "Remover net" e 51 objetos ficavam sem net.
+         Agora a vazia só casa pelo nome se nenhuma net da placa tiver os pinos; se tiver, a vazia sai e a outra é
+         renomeada (as duas linhas juntas, na ordem). */
   const mapaPcb = Object.create(null);           /* net da placa -> nome final */
   const casadas = new Set();
-  for (const nome of netSch.keys()) if (netPcbPins.has(nome)) { mapaPcb[nome] = nome; casadas.add(nome); }
+  const vaziaComNome = [];
+  for (const nome of netSch.keys()) if (netPcbPins.has(nome)) {
+    if (!netPcbPins.get(nome).size && netSch.get(nome).size) { vaziaComNome.push(nome); continue; }
+    mapaPcb[nome] = nome; casadas.add(nome);
+  }
+  const sufixoDeFolha = (bn, nome) => bn.length > nome.length + 1 && bn.slice(0, nome.length + 1) === nome + '_' && /^\d+$/.test(bn.slice(nome.length + 1));
+  /* a net da placa (ainda sem dono, fora do esquema) que tem os pinos da net `nome` do esquema: { bn, ov, porFolha } */
+  const melhorPorPinos = nome => {
+    const P = netSch.get(nome);
+    let melhor = null, mOv = 0, folha = null;
+    for (const [bn, bp] of netPcbPins) {
+      if (bn in mapaPcb || netSch.has(bn) || !bp.size) continue;
+      let ov = 0; for (const p of P) if (bp.has(p)) ov++;
+      if (ov > mOv) { mOv = ov; melhor = bn; }
+      const pct = ov / Math.max(P.size, bp.size);
+      if (sufixoDeFolha(bn, nome) && ov && pct >= COMP_PCT && (!folha || ov > folha.ov)) folha = { bn, ov };
+    }
+    if (folha) return { bn: folha.bn, ov: folha.ov, porFolha: true };
+    if (melhor && mOv >= COMP_MIN && mOv / Math.max(P.size, netPcbPins.get(melhor).size) >= COMP_PCT) return { bn: melhor, ov: mOv };
+    return null;
+  };
+  const renomeia = (nome, m, apagaVazia) => {
+    const P = netSch.get(nome);
+    mapaPcb[m.bn] = nome; casadas.add(nome);
+    if (apagaVazia) mapaPcb[nome] = nome;        /* a vazia sai: nao e "net que sobrou" */
+    acao('netRename', { tipo:'net_rename', objeto:m.bn, para:nome,
+                        msg: `${m.ov} de ${P.size} pinos iguais` + (m.porFolha ? ' (sufixo de folha do Altium)' : '')
+                           + (apagaVazia ? ` — a "${nome}" vazia da placa sai antes` : ''),
+                        dados:{ net:nome, orig_net:m.bn, apagaVazia: !!apagaVazia } });
+  };
+  for (const nome of vaziaComNome.sort(natural)) {
+    const m = melhorPorPinos(nome);
+    if (m) renomeia(nome, m, true);
+    else { mapaPcb[nome] = nome; casadas.add(nome); }
+  }
   const nomesSch = [...netSch.keys()].sort(natural);
   for (const nome of nomesSch) {
     if (casadas.has(nome)) continue;
@@ -147,17 +197,9 @@ function compara(schematic, board, opts){
         [...bp].filter(k => !cegos.has(k.slice(0, k.lastIndexOf('-')))).sort().join('|') === [...P].sort().join('|'));
       if (igual) { mapaPcb[igual[0]] = nome; casadas.add(nome); continue; }
     }
-    let melhor = null, mOv = 0;
-    for (const [bn, bp] of netPcbPins) {
-      if (bn in mapaPcb || netSch.has(bn)) continue;
-      let ov = 0; for (const p of P) if (bp.has(p)) ov++;
-      if (ov > mOv) { mOv = ov; melhor = bn; }
-    }
-    if (melhor && mOv >= COMP_MIN && mOv / Math.max(P.size, netPcbPins.get(melhor).size) >= COMP_PCT) {
-      mapaPcb[melhor] = nome; casadas.add(nome);
-      acao('netRename', { tipo:'net_rename', objeto:melhor, para:nome,
-                          msg:`${mOv} de ${P.size} pinos iguais`, dados:{ net:nome, orig_net:melhor } });
-    } else {
+    const m = melhorPorPinos(nome);
+    if (m) renomeia(nome, m, false);
+    else {
       acao('netAdd', { tipo:'net_add', objeto:nome, para:'PCB', dados:{ net:nome } });
       casadas.add(nome);
     }
@@ -217,6 +259,17 @@ function compara(schematic, board, opts){
     }
   };
 
+  /* o footprint achado por OUTRO nome (rename-map ou chave) sem os pads que o esquema liga: a acao avisa (1.96.0,
+     o caso do "Barra Prog Atmega") */
+  const avisaRenome = (a, ref, fp) => {
+    if (!o.pcblib || typeof HC.avisoFootprintRenomeado !== 'function') return;
+    const esp = Object.keys(pinSch).filter(k => k.slice(0, ref.length + 1) === ref + '-').map(k => k.slice(ref.length + 1));
+    const t = HC.avisoFootprintRenomeado(o.pcblib, fp, esp);
+    if (!t) return;
+    if (a.status === 'ok') a.status = 'warn';
+    a.msg = (a.msg ? a.msg + ' — ' : '') + t;
+  };
+
   /* ---- componentes ---- */
   const novos = [];
   for (const ref of [...sch.keys()].sort(natural)) {
@@ -224,6 +277,7 @@ function compara(schematic, board, opts){
     if (!c) {
       const a = acao('compAdd', { tipo:'comp_add', objeto:ref, para:'PCB',
                                   dados:{ ref, footprint:s.footprint, comment:ehFormula(s.comment) ? '' : (s.comment || ''), sheet:s.sheet } });
+      avisaRenome(a, ref, s.footprint);
       novos.push(a);
       continue;
     }
@@ -235,6 +289,7 @@ function compara(schematic, board, opts){
                                          x:c.x, y:c.y, rot:c.rot, layer:c.layer, orig_footprint:c.footprint || '',
                                          des:designatorDe(eb, ref) } });
       trocaFp(a, s, c);
+      avisaRenome(a, ref, s.footprint);
       continue;                                    /* os pinos da troca sao do trocaFp */
     }
     if (!ehFormula(s.comment) && s.comment && s.comment !== (c.comment || ''))
@@ -473,7 +528,11 @@ function aplica(eco, opts){
   for (const a of ord) {
     const d = a.dados;
     switch (a.tipo) {
-      case 'net_rename': linhas.push({ op:'net_rename', net:d.net, orig_net:d.orig_net, note:nota(a) }); break;
+      case 'net_rename':
+        /* a net vazia de mesmo nome sai antes (senão o net_rename recusa: "já existe") */
+        if (d.apagaVazia) linhas.push({ op:'net_del', net:d.net, note:'ECO: Remove Nets ' + d.net + ' (vazia; a ' + d.orig_net + ' leva o nome)' });
+        linhas.push({ op:'net_rename', net:d.net, orig_net:d.orig_net, note:nota(a) });
+        break;
       case 'net_add':    linhas.push({ op:'net_add', net:d.net, note:nota(a) }); break;
       case 'net_del':    linhas.push({ op:'net_del', net:d.net, note:nota(a) }); break;
       case 'comp_del':

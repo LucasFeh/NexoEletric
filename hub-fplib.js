@@ -25,7 +25,9 @@
      lib3d(hub) -> {footprints:{nome:{bodies, pads}}, models}   para HubPcb3dModelo.corpos(.., {pcblib3dHub});
                    pads = [{name, x, y}]: o corpo se encaixa nos pads do componente da placa
      bbox(fp) copia(fp) novo(nome) valida(fp) -> [erros] serializa(lib) -> texto
-     carrega() grava(lib) sobeStep(arquivo|ArrayBuffer, nome)            (navegador) */
+     carrega() grava(lib) sobeStep(arquivo|ArrayBuffer, nome)            (navegador)
+     faltandoNaPlaca(hc, board, pcblib) -> [{nome, refs}]   os footprints da placa que nenhuma biblioteca tem
+     daPlaca(hc, board, board3d, nome) -> {fp, ref, modelos:{id:{file, name}}, avisos}   (1.96.0, o Make PCB Library) */
 (function (root, factory) {
   const api = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -39,6 +41,65 @@ const isNum = v => typeof v === 'number' && isFinite(v);
 const r4 = v => { const x = Math.round(v * 1e4) / 1e4; return x === 0 ? 0 : x; };
 
 function vazia(){ return { format:FORMATO, units:'mm', footprints:[], models:{} }; }
+
+/* ── O FOOTPRINT QUE SÓ A PLACA TEM (1.96.0, o "Design » Make PCB Library" do Altium) ──
+   Pedido do dono: "os footprints que vêm embutidos numa placa importada do PcbDoc não entram na biblioteca, e a
+   validação acusa 'fora da PcbLib'. Faltam um 'extrair footprints da placa para a biblioteca' e um jeito de passar
+   os 3D junto". A placa importada traz cada componente com os pads e a serigrafia dele (o PcbDoc guarda o footprint
+   dentro), e o board3d.js os corpos 3D; o comp_add já tirava a geometria de lá (HubCore.fpDoComponente, a volta do
+   compDelta). Aqui ela vira footprint de biblioteca: pads, serigrafia e os corpos 3D levados para a coordenada do
+   footprint (rot 0, Top) — o STEP pela posição e pelo rotz menos a pose do componente, o extrudado pelos pontos.
+   A instância usada é a do TOP (a primeira em ordem natural): o corpo de um componente do bottom vem espelhado, e
+   footprint só do bottom sai sem 3D, avisado. */
+const natural = (a, b) => String(a).localeCompare(String(b), undefined, { numeric:true, sensitivity:'base' });
+function faltandoNaPlaca(hc, board, pcblib){
+  const por = new Map();
+  for (const c of ((board && board.components) || [])) {
+    if (!c || !c.footprint || !Array.isArray(c.pads) || !c.pads.length || (c.arte && typeof c.arte === 'object')) continue;
+    if (hc.footprintOf(pcblib, c.footprint)) continue;
+    if (!por.has(c.footprint)) por.set(c.footprint, []);
+    por.get(c.footprint).push(String(c.ref));
+  }
+  return [...por].sort((a, b) => natural(a[0], b[0])).map(([nome, refs]) => ({ nome, refs: refs.sort(natural) }));
+}
+function daPlaca(hc, board, board3d, nome){
+  const avisos = [];
+  const cs = ((board && board.components) || []).filter(c => c && c.footprint === nome && Array.isArray(c.pads) && c.pads.length)
+    .sort((a, b) => ((a.layer === 'Bottom') - (b.layer === 'Bottom')) || natural(a.ref, b.ref));
+  if (!cs.length) return null;
+  const c = cs[0];
+  const g = hc.fpDoComponente(c, board);
+  if (!g) return null;
+  const fp = { name: nome, description: 'da placa (' + c.ref + ')', pads: g.pads, silk: g.silk || [], bodies: [] };
+  const modelos = {};
+  const corpos = (((board3d && board3d.bodies) || []).filter(b => b && b.owner === c.ref));
+  if (c.layer === 'Bottom' && corpos.length) avisos.push(nome + ': só há o componente do bottom (' + c.ref + '); o 3D não veio — prenda o STEP no editor');
+  else {
+    const rot = isNum(c.rot) ? c.rot : 0, a = -rot * Math.PI / 180, co = Math.cos(a), si = Math.sin(a);
+    const loc = (x, y) => { const dx = x - c.x, dy = y - c.y; return [r4(dx * co - dy * si), r4(dx * si + dy * co)]; };
+    const ang = v => { const x = ((v % 360) + 360) % 360; return r4(x >= 359.9999 ? 0 : x); };
+    for (const b of corpos) {
+      const raw = b.raw || {};
+      if (b.kind === 'step') {
+        if (!b.model || !isNum(raw.x2d) || !isNum(raw.y2d)) { avisos.push(nome + ': um corpo STEP sem posição (raw) ficou de fora'); continue; }
+        const [x, y] = loc(raw.x2d, raw.y2d);
+        const m = board3d.models && board3d.models[b.model];
+        if (!m || !m.file) { avisos.push(nome + ': o STEP "' + (b.name || b.model) + '" não veio com a placa (board3d.js sem o arquivo)'); continue; }
+        modelos[b.model] = { file: m.file, name: m.name || b.name || '' };
+        fp.bodies.push({ kind:'step', model:b.model, name:b.name || m.name || '', side:'top', color:b.color || '#9a9a9a', opacity:isNum(b.opacity) ? b.opacity : 1,
+          raw:{ x2d:x, y2d:y, rot2d:0, rotx:r4(+raw.rotx || 0), roty:r4(+raw.roty || 0), rotz:ang((+raw.rot2d || 0) + (+raw.rotz || 0) - rot),
+                dz:r4(+raw.dz || 0), standoff:r4(+raw.standoff || 0), overall:r4(+raw.overall || 0) } });
+      } else if (b.kind === 'extruded' && Array.isArray(b.pts) && b.pts.length >= 3) {
+        const o = { kind:'extruded', side:'top', pts:b.pts.map(p => loc(p[0], p[1])), standoff:r4(+b.standoff || 0), height:r4(+b.height || 0),
+                    color:b.color || '#808080', opacity:isNum(b.opacity) ? b.opacity : 1 };
+        if (Array.isArray(b.holes) && b.holes.length) o.holes = b.holes.map(h => h.map(p => loc(p[0], p[1])));
+        fp.bodies.push(o);
+      } else avisos.push(nome + ': um corpo "' + (b.kind || '?') + '" não foi levado');
+    }
+  }
+  fp.bbox = bbox(fp);
+  return { fp, ref: c.ref, instancias: cs.length, modelos, avisos };
+}
 function normaliza(lib){
   const o = (lib && typeof lib === 'object') ? lib : vazia();
   if (!Array.isArray(o.footprints)) o.footprints = [];
@@ -210,5 +271,5 @@ async function sobeStep(arq, nome){
 }
 
 return { FORMATO, ARQUIVO, FORMAS, vazia, normaliza, acha, poe, tira, mescla, lib3d, bbox, cantosPad, copia, novo,
-         valida, normalizaPads, repetidos, serializa, carrega, grava, sobeStep };
+         valida, normalizaPads, repetidos, serializa, carrega, grava, sobeStep, faltandoNaPlaca, daPlaca };
 });

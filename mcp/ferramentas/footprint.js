@@ -262,6 +262,57 @@ module.exports = {
       },
     },
     {
+      nome: 'fp_da_placa', titulo: 'Extrair footprints da placa para a biblioteca (Make PCB Library)', destrutiva: true, modulo: 'hub-fplib.js',
+      descricao: 'O "Design » Make PCB Library" do Altium: os footprints que vieram DENTRO da placa importada do PcbDoc (os que a validação acusa "fora da PcbLib") '
+        + 'viram footprints da biblioteca do hub — pads e serigrafia tirados de um componente da placa (o do Top), e os corpos 3D do board3d.js levados junto '
+        + '(o STEP entra na biblioteca 3D do hub). Sem footprints, extrai todos os que nenhuma biblioteca tem. Footprint que já está na biblioteca do hub '
+        + 'fica como está (substituir:true troca). simular:true só lista o que sairia.',
+      entrada: { type: 'object', properties: {
+        projeto: { type: 'string', description: 'o projeto da placa (projeto_listar)' },
+        footprints: { type: 'array', items: { type: 'string' }, description: 'só estes (padrão: os da placa que nenhuma biblioteca tem)' },
+        com_3d: { type: 'boolean', description: 'leva os corpos 3D (padrão true)' },
+        substituir: { type: 'boolean' }, simular: { type: 'boolean' },
+      }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        if (!ctx.temBoard(p)) throw new ErroMcp(`o projeto "${p.nome}" não tem placa (board.js)`);
+        const hf = HF(ctx), hc = ctx.hc;
+        const board = ctx.board(p);
+        const f3 = p.arq('board3d.js');
+        const d3 = fs.existsSync(f3) ? (ctx.lerVarCache(f3, 'pcbmirror3d') || null) : null;
+        const L = ctx.libs();
+        const faltam = hf.faltandoNaPlaca(hc, board, L.pcblib);
+        const nomes = a.footprints && a.footprints.length ? a.footprints.map(String) : faltam.map(x => x.nome);
+        const hub = libHub(ctx);
+        const feitos = [], pulados = [], avisos = [];
+        for (const nome of nomes) {
+          const r = hf.daPlaca(hc, board, d3, nome);
+          if (!r) { pulados.push({ footprint: nome, motivo: 'nenhum componente da placa usa este footprint' }); continue; }
+          if (hf.acha(hub, nome) && !a.substituir) { pulados.push({ footprint: nome, motivo: 'já está na biblioteca do hub (substituir:true troca)' }); continue; }
+          avisos.push(...r.avisos);
+          const fp = r.fp, modelos = {};
+          if (a.com_3d === false) fp.bodies = [];
+          else for (const b of fp.bodies.slice()) {
+            if (b.kind !== 'step') continue;
+            const m = r.modelos[b.model];
+            const abs = m && path.join(p.dir, String(m.file).replace(/\\/g, '/'));
+            if (!abs || !fs.existsSync(abs)) { fp.bodies.splice(fp.bodies.indexOf(b), 1); avisos.push(`${nome}: o STEP "${(m && m.name) || b.model}" não está na pasta do projeto (${(m && m.file) || '?'}): o corpo ficou de fora`); continue; }
+            if (a.simular) continue;
+            const up = poeStep(ctx, fs.readFileSync(abs), m.name || b.name);
+            b.model = up.id; b.name = b.name || up.name;
+            modelos[up.id] = { file: up.file, name: up.name, bytes: up.bytes };
+          }
+          const resumo = { footprint: nome, de: r.ref, instancias: r.instancias, pads: fp.pads.length, silk: fp.silk.length,
+                           corpos3d: fp.bodies.length, step: fp.bodies.filter(b => b.kind === 'step').length };
+          if (!a.simular) { const ss = await salva(ctx, fp, { substituir: true, modelos }, 'fp_da_placa'); resumo.substituiu = ss.substituiu; }
+          feitos.push(resumo);
+        }
+        return { simulado: !!a.simular, extraidos: feitos, pulados: pulados.length ? pulados : undefined, avisos: avisos.length ? avisos : undefined,
+                 faltavam: faltam.length, arquivo: a.simular ? undefined : 'Libs/pcblib-hub.js',
+                 dica: feitos.length && !a.simular ? 'confira no editor (Biblioteca » Footprints, tecla 3 para o 3D); sch_validar/sch_erc não acusam mais "fora da PcbLib" nesses' : undefined };
+      },
+    },
+    {
       nome: 'fp_corpo3d', titulo: 'Prender modelo 3D ao footprint', destrutiva: true, modulo: 'hub-fplib.js',
       descricao: 'Põe um modelo STEP (fp_modelos3d) no footprint e salva na biblioteca do hub. Sem rotação dada, usa a do footprint que já usa o modelo (o STEP do fabricante raramente vem deitado como a placa pede); sem x/y, o centro dos pads. substituir_corpos:true tira os corpos que o footprint tinha. Confira no editor (Biblioteca » Footprints, tecla 3) ou por vista_screenshot.',
       entrada: { type: 'object', properties: {

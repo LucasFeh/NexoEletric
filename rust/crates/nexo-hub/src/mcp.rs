@@ -26,7 +26,7 @@ const MAX_ATIVIDADE: usize = 300;
 /// pedido que a vista JA pegou e ainda esta fazendo (as fotos 3D do render3d esperam os STEP e o Real
 /// View): fica guardado ate isto -- o mesmo PEGO_MAX do mcp/rotas_hub.py (NexoEletric 1.52.0)
 const PEGO_MAX: f64 = 240.0;
-const ACOES: [&str; 7] = ["screenshot", "recarregar", "focar", "selecionar", "comando", "abrir", "render3d"];
+const ACOES: [&str; 8] = ["screenshot", "recarregar", "focar", "selecionar", "comando", "abrir", "render3d", "erc"];
 const ALVOS: [&str; 3] = ["pcb", "sch", "hub"];
 
 struct Pedido {

@@ -1558,7 +1558,8 @@ function applyPcbChanges(board, changes, opts){
         if (!sc.comp.pads.length && !sc.comp.arte) warn(`footprint "${ch.footprint}" sem pad nenhum`);
         const nomes = new Set(sc.comp.pads.map(p => String(p.name)));
         const sobra = Object.keys(nets).filter(k => !nomes.has(k));
-        if (sobra.length) warn(`nets: pad(s) ${sobra.join(', ')} não existe(m) no footprint ${ch.footprint}`);
+        if (sobra.length) warn(`nets: pad(s) ${sobra.join(', ')} não existe(m) no footprint ${ch.footprint}`
+          + (/\((rename|chave): /.test(String(g.fonte || '')) ? ` — ele foi achado por outro nome (${g.fonte}), com pads de outros nomes: confira o footprint ou o mapa pino↔pad` : ''));
         const semNet = temNets ? [...new Set(Object.values(nets).filter(n => n && !netSet.has(n)))] : [];
         if (semNet.length) warn(`net(s) ${semNet.join(', ')} não existe(m) na placa — crie com net_add antes (o ApplyChanges deixa o pad sem net)`);
         break;
@@ -2541,6 +2542,19 @@ function simbolosDoDocumento(schlib, doc){
   if (dv.size) out.divergentes = dv;
   return { schlib: out, extras, divergentes };
 }
+/* AS DUAS PONTAS DA PORT (1.96.0). Pedido do dono: "o port só conecta no ponto (x, y), que é a ponta esquerda. No
+   Altium as duas pontas conectam. A seta ou estilo do port não muda isso." A port é a barra de comprimento `w` que
+   nasce na âncora e cresce na direção dela: deitada (style 0..3) para +X, em pé (style 4..7) para +Y — a mesma conta
+   do hub-draw » portGeom (tests/test-port-pontas.js confere as duas). As duas pontas são ponto elétrico e da mesma
+   net (a port nomeia pelo nome); a seta só desenha. Devolve [[x, y] da âncora, [x, y] da outra ponta]. */
+const PORT_EM_PE = { 4:1, 5:1, 6:1, 7:1 };
+const PORT_DIR = { 0:[1, 0], 90:[0, 1], 180:[-1, 0], 270:[0, -1] };
+function portPontas(p){
+  const w = (typeof p.w === 'number' && isFinite(p.w) && p.w > 0) ? p.w : 400;
+  const ang = ((((PORT_EM_PE[p.style] ? 90 : 0) + (+p.rot || 0)) % 360) + 360) % 360;
+  const d = PORT_DIR[ang] || [1, 0];
+  return [[p.x, p.y], [p.x + d[0] * w, p.y + d[1] * w]];
+}
 /* Quantos pinos dos componentes `comps` (de um simbolo) encostam em fio, rotulo, power, port
    ou juncao da folha, desenhados com `sym`. Para dizer qual de dois desenhos a folha segue. */
 function pinosQueEncostam(sheet, comps, sym){
@@ -2548,6 +2562,7 @@ function pinosQueEncostam(sheet, comps, sym){
   const pts = [];
   for (const w of sheet.wires) for (const p of (w.pts || [])) pts.push(p);
   for (const l of [].concat(sheet.netlabels, sheet.powers, sheet.ports, sheet.junctions)) pts.push([l.x, l.y]);
+  for (const p of sheet.ports) pts.push(portPontas(p)[1]);          /* a outra ponta da port (1.96.0) */
   const lib = { symbols: [sym] };
   let tot = 0, ok = 0;
   for (const c of comps) {
@@ -2582,6 +2597,50 @@ function partOf(sym, part){
 function footprintOf(pcblib, name){
   const r = resolveFp(pcblib, name);
   return (r && r.item) || null;
+}
+/* O MAPA PINO↔PAD DE UM COMPONENTE (1.96.0). Pedido do dono: "falta um mapa pino↔pad por componente, para casos
+   como o CAP 0805 com A/B" — o símbolo numera 1/2 e o footprint chama os pads de A/B (ou o BC337 com B/C/E contra
+   1/2/3). O campo `pinoPad` do comp é texto plano "pino=pad;pino=pad" (o parser do BuildSchematic lê linha a linha,
+   como o `nets` do comp_add): `{"t":"comp",...,"pinoPad":"1=A;2=B"}`. Pino fora do mapa = o pad de mesmo nome.
+   Vale em todas as partes do componente. mapaPinoPad(c) -> { pino: pad } ou null; padDoPino(c, num) -> o pad. */
+function mapaPinoPad(c){
+  const txt = c && typeof c.pinoPad === 'string' ? c.pinoPad : '';
+  if (!txt.trim()) return null;
+  const m = {};
+  for (const par of txt.split(';')) {
+    const i = par.indexOf('=');
+    if (i <= 0) continue;
+    const pino = par.slice(0, i).trim(), pad = par.slice(i + 1).trim();
+    if (pino && pad) m[pino] = pad;
+  }
+  return Object.keys(m).length ? m : null;
+}
+function padDoPino(c, num, mapa){
+  const m = mapa === undefined ? mapaPinoPad(c) : mapa;
+  const k = String(num);
+  return m && m[k] != null ? m[k] : k;
+}
+/* o texto do campo a partir de { pino: pad } (pino que vai no pad de mesmo nome fica de fora); '' = sem mapa */
+function pinoPadCampo(m){
+  return Object.keys(m || {}).filter(k => m[k] != null && String(m[k]) !== '' && String(m[k]) !== k)
+    .sort((a, b) => numPino(a) - numPino(b) || (a < b ? -1 : a > b ? 1 : 0)).map(k => k + '=' + m[k]).join(';');
+}
+/* O FOOTPRINT ACHADO POR OUTRO NOME (1.96.0). Pedido do dono: "o rename-map resolve um nome para outro footprint com
+   pads de nomes diferentes sem avisar (foi o caso do Barra Prog Atmega)". O resolveFp troca o nome em silêncio pelo
+   rename-map (ou pela chave normalizada); quando o footprint achado não tem os pads que se esperam (os pinos do
+   símbolo, pelo mapa pino↔pad), as nets caem nos pads errados. Devolve o texto do aviso, ou null. `esperados` =
+   os nomes de pad que deviam existir. */
+function avisoFootprintRenomeado(pcblib, nome, esperados){
+  const r = nome ? resolveFp(pcblib, nome) : null;
+  if (!r || !r.item || (r.how !== 'rename' && r.how !== 'chave')) return null;
+  const pads = new Set(((r.item.pads) || []).map(p => String(p.name)));
+  const faltam = [...new Set([...(esperados || [])].map(String))].filter(n => !pads.has(n));
+  if (!faltam.length) return null;
+  const por = r.how === 'rename' ? 'pelo rename-map (Libs/rename-map.js)' : 'por aproximação do nome';
+  const tem = [...pads].filter(Boolean).slice(0, 8);
+  return `o footprint "${nome}" foi achado como "${r.name}" ${por}, e ele não tem os pads ${faltam.slice(0, 8).join(', ')}${faltam.length > 8 ? '…' : ''}`
+    + (tem.length ? ` (tem ${tem.join(', ')}${pads.size > 8 ? '…' : ''})` : '')
+    + ' — as nets cairiam nos pads errados: confira o footprint ou faça o mapa pino↔pad (pinoPad)';
 }
 /* ponta quente do pino (onde o fio conecta), em coords locais do simbolo */
 function pinHot(pin){
@@ -2711,8 +2770,9 @@ function extractNets(schematicOrModel, schlib){
     s.powers.forEach(p => { const n = nodeAt(si, p.x, p.y); powerRecs.push({ net:p.net, node:n, x:p.x, y:p.y }); attach.push({ si, x:p.x, y:p.y, node:n, kind:'power' }); });
     /* A Port do Altium conecta pelo NOME, como o rotulo — a diferenca e so grafica (a
        seta) e hierarquica (ela e o pino da folha vista de fora). Para a extracao ela e
-       um nomeador a mais; por isso entra em portRecs e nao ganha regra propria. */
-    s.ports.forEach(p => { const n = nodeAt(si, p.x, p.y); portRecs.push({ net:p.net, node:n, x:p.x, y:p.y }); attach.push({ si, x:p.x, y:p.y, node:n, kind:'port' }); });
+       um nomeador a mais; por isso entra em portRecs e nao ganha regra propria.
+       1.96.0: nas DUAS pontas (portPontas), como no Altium — o fio que chega na ponta da direita liga igual. */
+    s.ports.forEach(p => { for (const [x, y] of portPontas(p)) { const n = nodeAt(si, x, y); portRecs.push({ net:p.net, node:n, x, y, port:p }); attach.push({ si, x, y, node:n, kind:'port' }); } });
   });
 
   /* conexoes em T: ponto de conexao sobre o interior de um segmento */
@@ -2781,11 +2841,16 @@ function extractNets(schematicOrModel, schlib){
     if (!segRoots.has(r) && (!g || !g.pins.length))
       warnings.push(`power "${rec.net}" solto em (${rec.x},${rec.y})`);
   }
+  /* a port so e solta se NENHUMA das duas pontas encosta em fio ou pino (o aviso aponta a ancora) */
+  const portLigada = new Map();
   for (const rec of portRecs) {
     const r = find(rec.node), g = groups[r];
-    if (!segRoots.has(r) && (!g || !g.pins.length))
-      warnings.push(`port "${rec.net}" solta em (${rec.x},${rec.y})`);
+    const liga = segRoots.has(r) || !!(g && g.pins.length);
+    if (!portLigada.has(rec.port)) portLigada.set(rec.port, { rec, liga });
+    else if (liga) portLigada.get(rec.port).liga = true;
   }
+  for (const { rec, liga } of portLigada.values())
+    if (!liga) warnings.push(`port "${rec.net}" solta em (${rec.x},${rec.y})`);
   nets.sort((a, b) => natural(a.name, b.name));
 
   const pinNet = {};
@@ -2853,19 +2918,25 @@ function validateSchematic(schematic, schlib, pcblib, nets){
       else if (!c.footprint) warnings.push(`${where}: sem footprint — vai sem vínculo, defina no Altium`);
       else {
         const fp = footprintOf(pcblib, c.footprint);
+        const mapa = mapaPinoPad(c);
         if (!fp) errors.push(`${where}: footprint "${c.footprint}" não existe na pcblib`);
         else if (part) {
           const padNames = new Set((fp.pads || []).map(p => String(p.name)));
-          for (const p of (part.pins || []))
-            if (!padNames.has(String(p.num)))
-              warnings.push(`${where}: pino "${p.num}" sem pad correspondente no footprint ${c.footprint}`);
+          /* o footprint trocado de nome em silêncio (1.96.0): um aviso só, no lugar dos "sem pad" um a um */
+          const renom = avisoFootprintRenomeado(pcblib, c.footprint, (part.pins || []).map(p => padDoPino(c, p.num, mapa)));
+          if (renom) warnings.push(`${where}: ${renom}`);
+          else for (const p of (part.pins || []))
+            if (!padNames.has(padDoPino(c, p.num, mapa)))
+              warnings.push(`${where}: pino "${p.num}"${mapa && mapa[String(p.num)] != null ? ' (pad "' + mapa[String(p.num)] + '" pelo mapa pino↔pad)' : ''} sem pad correspondente no footprint ${c.footprint}`);
+          if (mapa) for (const k of Object.keys(mapa)) if (!padNames.has(mapa[k]))
+            warnings.push(`${where}: o mapa pino↔pad leva o pino "${k}" ao pad "${mapa[k]}", que o footprint ${c.footprint} não tem`);
           /* o contrario: pad de cobre que nenhum pino de NENHUMA parte do simbolo leva (a aba
              termica do DDPAK-5 no LM2575: pad 6, 5 pinos) fica sem net na placa. Uma vez por
              componente; pad sem nome e furo sem cobre (npth) nao contam. */
           if (!avisadoFp.has(c.ref)) {
             avisadoFp.add(c.ref);
             const pinos = new Set();
-            for (const pt of (sym.parts || [])) for (const p of (pt.pins || [])) pinos.add(String(p.num));
+            for (const pt of (sym.parts || [])) for (const p of (pt.pins || [])) pinos.add(padDoPino(c, p.num, mapa));
             const sobra = [...new Set((fp.pads || []).filter(q => q && q.name !== '' && q.name != null && q.type !== 'npth' && q.plated !== false)
               .map(q => String(q.name)))].filter(n => !pinos.has(n));
             if (sobra.length)
@@ -3464,7 +3535,7 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          arteGeom, ehArte, CAMPOS_ARTE, valorCampoArte, NAO_DEFINIDO_ARTE:NAO_DEFINIDO,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp, assinaturaPinos, simbolosDoDocumento,
          suggestSym,
-         buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp,
+         buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp, portPontas, fpDoComponente, mapaPinoPad, padDoPino, pinoPadCampo, avisoFootprintRenomeado,
          applyPcbChanges, effectiveBoard, deriveStatus,
          PCB_LAYERS, pcbLayer, isCopper, flipLayer, boardLayers,
          serializeChanges, serializeSchematic, serializeAnnotations, serializeLibSubs,

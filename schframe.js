@@ -1287,7 +1287,123 @@ function reachaValor(grupos, nome, valorAntes, symAntes){
   return ach.length === 1 ? ach[0] : null;
 }
 
-const PURE = { LIBS, ACERVO_DEFS, montaAcervos, acervoDoComp, partesDe, nPartes, refDaParte, trocaDeParte, desenhoCabe,
+/* ══ OS AVISOS DE UM COMPONENTE, PARTE PURA (1.96.0) ══
+   Pedido do dono: "o sch_erc do MCP não roda a regra Componente (Parâmetros), por isso conta menos que o botão DRC
+   da tela" (71 na tela, 46 no MCP). A conta morava só na vista (avisosDoComp, abaixo da linha do Node) e o MCP não
+   tinha como fazê-la. Agora a regra é ESTA função, e a vista e o MCP a chamam com o que cada um tem: `d` traz o
+   HubCore (hc), a biblioteca de símbolos (slib), a de footprints (plib), os acervos (acervoDoComp), o esquema e as
+   consultas que dependem do espelho do almoxarifado (odoo, local) e do resgate de desenho (emergencia). */
+/* o índice do resgate de desenho (a Biblioteca de símbolos, só para desenhar): ver a nota do EMERG na vista */
+function indiceEmergencia(lib, hc){
+  const H = hc || (typeof HubCore !== 'undefined' ? HubCore : null);
+  const E = { porNome: new Map(), porChave: new Map(), porId: new Map() };
+  const syms = (lib && lib.symbols) || [];
+  for (const s of syms){
+    if (s.desc && !s.description) s.description = s.desc;
+    if (s.id) E.porId.set(s.id, s);
+    for (const n of [s.name].concat(s.aliases || [])){
+      if (!n) continue;
+      const k = H.normKey(n);
+      const l = E.porChave.get(k) || [];
+      if (l.indexOf(s) < 0) l.push(s);
+      E.porChave.set(k, l);
+    }
+  }
+  /* duas passadas: o nome próprio ganha do apelido de outro (ver a nota na vista) */
+  for (const s of syms) if (s.name && !E.porNome.has(s.name)) E.porNome.set(s.name, s);
+  for (const s of syms) for (const a of (s.aliases || [])) if (a && !E.porNome.has(a)) E.porNome.set(a, s);
+  return E;
+}
+/* { part, nome, how } do desenho emprestado, ou null (ambíguo = null) */
+function emergenciaDe(E, c, hc){
+  const H = hc || (typeof HubCore !== 'undefined' ? HubCore : null);
+  if (!c || !c.sym || !E) return null;
+  let s = E.porNome.get(c.sym), how = 'nome';
+  if (!s){
+    const l = E.porChave.get(H.normKey(c.sym)) || [];
+    if (l.length !== 1) return null;
+    s = l[0]; how = 'chave';
+  }
+  const part = s.parts ? H.partOf(s, c.part) : s;
+  return part ? { part, nome: s.name, how } : null;
+}
+/* o componente local (LocalId do params) e o registro dele nos componentes criados localmente: {id, s, integrado} */
+function localDoCompPuro(comp, locais){
+  const m = /(?:^|;)\s*LocalId\s*=\s*([^;]*)/i.exec(String((comp && comp.params) || ''));
+  if (!m) return null;
+  const id = m[1].trim();
+  const s = locais && (locais.symbols || []).find(x => x && x.criadoLocal && x.criadoLocal.id === id) || null;
+  return { id, s, integrado: !!(s && s.criadoLocal.integrado) };
+}
+/* Os avisos do FOOTPRINT do componente (os do painel Footprint da ficha): o que não está na PcbLib e os pinos do
+   símbolo sem pad. `mapa` (1.96.0) = o mapa pino↔pad do componente (HubCore.mapaPinoPad): o pino mapeado conta
+   pelo pad dele. Devolve { fp, avisos, falta }. */
+function avisosDoFootprint(hc, plib, sym, fpNome, mapa){
+  const avisos = [];
+  const fp = fpNome ? hc.footprintOf(plib, fpNome) : null;
+  if (fpNome && !fp) avisos.push('Footprint "' + fpNome + '" não está na PcbLib espelhada nem na biblioteca do hub — o ECO vai recusar');
+  const falta = [];
+  if (fp && sym && Array.isArray(sym.parts)){
+    const pads = new Set((fp.pads || []).map(p => String(p.name)));
+    for (const p of sym.parts) for (const q of (p.pins || [])){
+      if (!q || q.num == null) continue;
+      const pad = mapa && mapa[String(q.num)] != null ? String(mapa[String(q.num)]) : String(q.num);
+      if (!pads.has(pad) && falta.indexOf(String(q.num)) < 0) falta.push(String(q.num));
+    }
+    if (falta.length) avisos.push('Pinos sem pad no footprint: ' + falta.slice(0, 12).join(', ') + (falta.length > 12 ? '…' : '') + ' (o ECO acusa)');
+  }
+  return { fp, avisos, falta };
+}
+/* Os avisos de um componente da folha (o ponto do botão Parâmetros e a regra "Componente" do DRC do esquema).
+   d = { hc, slib, plib, acervos (o `m` do acervoDoComp), schematic, odoo(c), local(c), emergencia(c),
+         almoxCarregado (o espelho do almoxarifado está carregado), fpAvisos(it, sym) opcional }
+   `pre` traz o que a ficha já calculou. Cada aviso leva `cod` (acervo/odoo/sem-ficha/desenho/partes/footprint/
+   footprint-inexistente). */
+function avisosDoCompPuro(it, d, pre){
+  pre = pre || {};
+  const hc = d.hc;
+  const rsym = pre.rsym || hc.resolveSym(d.slib, it.sym);
+  const sym = pre.sym !== undefined ? pre.sym : ((rsym && rsym.item) || null);
+  const ac = pre.ac !== undefined ? pre.ac : (() => { const x = acervoDoComp(it, sym, d.acervos); return x ? x.acervo : null; })();
+  const nparts = pre.nparts || (sym ? (sym.partcount || (sym.parts || []).length || 1) : 1);
+  const itens = (d.schematic && d.schematic.items) || [];
+  const totalPartes = pre.totalPartes || Math.max(it.part || 1, ...itens
+    .filter(x => x && x.t === 'comp' && x.ref === it.ref && x.sheet === it.sheet).map(x => x.part || 1));
+  const fpAv = pre.fpInfo ? pre.fpInfo.avisos
+    : (d.fpAvisos ? d.fpAvisos(it, sym) : avisosDoFootprint(hc, d.plib, sym, it.footprint || '').avisos);
+  const avisos = [];
+  const acNome = ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca');
+  const acPendente = !!ac && /biblioteca do altium|espelho do altium/i.test(String(ac.titulo || ''));
+  if (acPendente) avisos.push({ t:'Acervo: ' + acNome + ' — vincule ao almoxarifado pelo "Trocar componente…" para a lista do Odoo casar por id', nivel:'err', cod:'acervo' });
+  else if (!ac && sym) avisos.push({ t:'Acervo: o símbolo não é de nenhum acervo da casa', cod:'acervo' });
+  const od = d.odoo ? d.odoo(it) : null;
+  const lkOdoo = od && od.alvo ? true : false;
+  const loc = d.local ? d.local(it) : null;
+  let odooTxt = null;
+  if (!lkOdoo){
+    odooTxt = loc && !loc.integrado ? 'ainda não está no Odoo: vai com a ficha no "Enviar para o Odoo"'
+      : od && od.motivo ? od.motivo
+      : od ? 'o espelho não diz qual é o Odoo — rode a sincronização do almoxarifado'
+      : 'sem ficha: vincule ao almoxarifado pelo "Trocar componente…"';
+    if (!(loc && !loc.integrado)) avisos.push({ t:'Odoo: ' + odooTxt, cod: !od && !loc ? 'sem-ficha' : 'odoo' });
+  }
+  let desenhoTxt = null;
+  if (!sym){
+    const emg = d.emergencia ? d.emergencia(it) : null;
+    desenhoTxt = emg ? 'emprestado de "' + emg.nome + '" (Biblioteca de símbolos, por ' + emg.how + ') — só para ver'
+                     : 'nenhum: a folha mostra o quadrado vermelho';
+    avisos.push({ t:'Desenho: ' + desenhoTxt, nivel: emg ? 'warn' : 'err', cod:'desenho' });
+  }
+  if (nparts < totalPartes) avisos.push({ t:'Partes: o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham', cod:'partes' });
+  for (const a of fpAv) avisos.push({ t:a, cod: /não está na PcbLib/.test(a) ? 'footprint-inexistente' : 'footprint' });
+  /* FORA DO ALMOXARIFADO: sem ficha no almoxarifado (sem OdooId, sem LocalId, sem o valor no espelho). Sem o
+     espelho carregado não se afirma nada. */
+  const fora = !!d.almoxCarregado && !!d.odoo && !od && !loc;
+  return { avisos, acNome, acPendente, od, lkOdoo, loc, odooTxt, desenhoTxt, fora };
+}
+
+const PURE = { LIBS, ACERVO_DEFS, montaAcervos, acervoDoComp, partesDe,
+               indiceEmergencia, emergenciaDe, localDoCompPuro, avisosDoFootprint, avisosDoCompPuro, nPartes, refDaParte, trocaDeParte, desenhoCabe,
                assinaturaDesenho, desenhoIgual, casoDoSimbolo, partesDaDecisao,
                carimbo, decideTroca, montaPartsTrocando,
                valorDoComp, tipoDoComp,
@@ -1356,49 +1472,21 @@ let PLIB = { footprints:[] };
    isso os dois entram no índice — só por nome o resgate cai de 50% para 17%. */
 const EMERG_COR = '#b06000';
 const EMERG = { porNome: new Map(), porChave: new Map(), porId: new Map() };
+/* O índice mora na parte pura (indiceEmergencia, 1.96.0: o sch_erc do MCP usa o mesmo). Lá também as duas notas de
+   antes: o `desc` do symlib-v1 vira `description` (727 descrições invisíveis de 897 símbolos), e o índice por nome
+   em DUAS PASSADAS — todo `name` primeiro, `aliases` só depois, senão o APELIDO de um símbolo sequestra o NOME
+   PRÓPRIO de outro (medido: 6 casos em 2661 chaves, "Jumper" caindo em "Conector 2 vias (Jumper)"). */
 function montaEmergencia(){
+  const E = indiceEmergencia(window.symbolsLib, HubCore);
   EMERG.porNome.clear(); EMERG.porChave.clear(); EMERG.porId.clear();
-  const lib = window.symbolsLib;
-  for (const s of ((lib && lib.symbols) || [])){
-    /* O symlib-v1 grava `desc`; toda tela daqui lê `description`. Já custou 727 descrições
-       invisíveis de 897 símbolos por uma letra — o hub-symed normaliza na carga dele e aqui
-       ninguém normalizava. Sem esta linha a busca por descrição nasce morta, justamente nos
-       símbolos cujo NOME é código de catálogo (CMP-0694-00003-2) e a descrição é o que dá
-       para procurar. */
-    if (s.desc && !s.description) s.description = s.desc;
-    if (s.id) EMERG.porId.set(s.id, s);
-    for (const n of [s.name].concat(s.aliases || [])){
-      if (!n) continue;
-      const k = HubCore.normKey(n);
-      const l = EMERG.porChave.get(k) || [];
-      if (l.indexOf(s) < 0) l.push(s);
-      EMERG.porChave.set(k, l);
-    }
-  }
-  /* DUAS PASSADAS para o índice por nome: todo `name` primeiro, `aliases` só depois. Numa
-     passada só, quem vem antes no arquivo leva a chave — e o APELIDO de um símbolo sequestra
-     o NOME PRÓPRIO de outro. Medido: 6 casos em 2661 chaves ("Jumper" caindo em "Conector 2
-     vias (Jumper)", "Trimpot" em "Potenciômetro"). O dono do nome tem de ganhar sempre. */
-  for (const s of ((lib && lib.symbols) || []))
-    if (s.name && !EMERG.porNome.has(s.name)) EMERG.porNome.set(s.name, s);
-  for (const s of ((lib && lib.symbols) || []))
-    for (const a of (s.aliases || [])) if (a && !EMERG.porNome.has(a)) EMERG.porNome.set(a, s);
+  E.porNome.forEach((v, k) => EMERG.porNome.set(k, v));
+  E.porChave.forEach((v, k) => EMERG.porChave.set(k, v));
+  E.porId.forEach((v, k) => EMERG.porId.set(k, v));
 }
 /* { part, nome, how } do desenho emprestado, ou null. AMBÍGUO DEVOLVE NULL de propósito:
    dois candidatos é o mesmo que nenhum, e desenhar um chute com cara de certeza é o erro
    que este resgate existe para não cometer. */
-function desenhoDeEmergencia(c){
-  if (!c || !c.sym) return null;
-  let s = EMERG.porNome.get(c.sym), how = 'nome';
-  if (!s){
-    const l = EMERG.porChave.get(HubCore.normKey(c.sym)) || [];
-    if (l.length !== 1) return null;
-    s = l[0]; how = 'chave';
-  }
-  /* o symlib-v1 guarda pins/graphics no próprio símbolo; multi-part vira uma entrada por parte */
-  const part = s.parts ? HubCore.partOf(s, c.part) : s;
-  return part ? { part, nome: s.name, how } : null;
-}
+function desenhoDeEmergencia(c){ return emergenciaDe(EMERG, c, HubCore); }
 function aplicaAcervos(){
   const r = montaAcervos(globaisDaLib(), ACERVOS.slice());
   ACERVOS.length = 0;      for (const a of r.acervos) ACERVOS.push(a);
@@ -2318,7 +2406,8 @@ function snapPoint(w, comMeio){
   }
   for (const j of s.junctions) tenta(j.x, j.y, 'junction', 'junção', 1, null, rPonto);
   for (const p of s.powers)    tenta(p.x, p.y, 'power', p.net || 'power', 1, null, rPonto);
-  for (const p of s.ports)     tenta(p.x, p.y, 'port', p.net || 'port', 1, null, rPonto);
+  /* as duas pontas da port ligam (1.96.0, HubCore.portPontas): o ímã pega as duas */
+  for (const p of s.ports) for (const q of HubCore.portPontas(p)) tenta(q[0], q[1], 'port', p.net || 'port', 1, null, rPonto);
   for (const wi of s.wires) for (const p of (wi.pts || [])) tenta(p[0], p[1], 'wire', 'fio', 2, null, rPonto);
   /* peso 3: ponta de fio, pino e juncao ganham do meio quando estao no alcance. Ao longo do fio
      o ponto cai no passo da grade (e dentro do trecho); no trecho em diagonal, na projecao.
@@ -2369,7 +2458,7 @@ function alvosDeIma(base){
   }
   for (const j of s.junctions) if (!viaja.has(j)) fora.push({ x:j.x, y:j.y, label:'junção' });
   for (const p of s.powers)    if (!viaja.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'power' });
-  for (const p of s.ports)     if (!viaja.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'port' });
+  for (const p of s.ports)     if (!viaja.has(p)) for (const q of HubCore.portPontas(p)) fora.push({ x:q[0], y:q[1], label:p.net || 'port' });
   /* O que esta EM CIMA de um pino que viaja nao e filtrado aqui: o filtro e POR PAR, no
      imaDoArrasto (o pino nao gruda no que estava debaixo dele mesmo). */
   return fora;
@@ -2655,6 +2744,7 @@ function rotaDoGesto(base){
   }
   for (const arr of [s.junctions, s.powers, s.ports])
     for (const it of arr) if (!anda.has(it)) pontos.push({ x:it.x, y:it.y });
+  for (const it of s.ports) if (!anda.has(it)) { const q = HubCore.portPontas(it)[1]; pontos.push({ x:q[0], y:q[1] }); }
   /* para o trecho novo, o vertice de fio parado tambem e ponto eletrico */
   const eletricos = pontos.slice();
   for (const w of fios) for (const p of (w.pts || [])) eletricos.push({ x:p[0], y:p[1] });
@@ -2848,8 +2938,8 @@ function placeLabel(w){
 /* ── A PORT (1.94.0, pedido do dono: "em 'net' adiciona 'port' também pra adicionar esse tipo de porta, e quero que
    seja completamente estilizável") ──
    O MESMO objeto `port` da port importada do Altium (hub-draw.js » portNova): conecta pelo nome como o rótulo (o
-   extractNets já a trata como nomeador) e a âncora — a ponta da esquerda, onde o fio encosta — vai no ímã do pino ou
-   do fio. O estilo é o padrão da casa (o da imagem do dono) ou o "Usar como padrão" deste projeto (portPadrao). */
+   extractNets já a trata como nomeador) e a âncora vai no ímã do pino ou do fio. As DUAS pontas ligam (1.96.0, como no Altium:
+   HubCore.portPontas). O estilo é o padrão da casa (o da imagem do dono) ou o "Usar como padrão" deste projeto (portPadrao). */
 const PORT_PADRAO_KEY = () => 'schframe.portPadrao.' + (SCH_P || '');
 function portPadrao(){
   try { const j = JSON.parse(localStorage.getItem(PORT_PADRAO_KEY()) || 'null'); return j && typeof j === 'object' ? j : null; }
@@ -4089,58 +4179,13 @@ $('btnPaineis').addEventListener('click', () => { if (painelProps) painelProps.a
    conta é feita aqui. Cada aviso leva `cod` (acervo/odoo/desenho/partes/footprint) — o DRC deixa de fora o que já
    tem regra própria (o "sem ficha", que é o fora do almoxarifado, e o footprint que não existe). */
 function avisosDoComp(it, pre){
-  pre = pre || {};
-  const rsym = pre.rsym || HubCore.resolveSym(SLIB, it.sym);
-  const sym = pre.sym !== undefined ? pre.sym : ((rsym && rsym.item) || null);
-  const ac = pre.ac !== undefined ? pre.ac : (() => { const x = acervoDoComp(it, sym, ACERVO_POR); return x ? x.acervo : null; })();
-  const nparts = pre.nparts || (sym ? (sym.partcount || (sym.parts || []).length || 1) : 1);
-  const totalPartes = pre.totalPartes || Math.max(it.part || 1, ...schematic.items
-    .filter(x => x && x.t === 'comp' && x.ref === it.ref && x.sheet === it.sheet).map(x => x.part || 1));
-  const fpInfo = pre.fpInfo || infoFootprint(it, sym, it.footprint || '');
-  const avisos = [];
-  const acNome = ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca');
-  /* "Biblioteca do Altium" é trabalho pendente: o componente ainda não tem par no almoxarifado, e é isso que
-     impede a lista do Odoo de casar a linha por id em vez de por texto. Com o OdooId nos params ele JÁ tem
-     (acervoDoComp) — e o aviso, que era falso nesse caso, não sai mais. */
-  const acPendente = !!ac && /biblioteca do altium|espelho do altium/i.test(String(ac.titulo || ''));
-  if (acPendente) avisos.push({ t:'Acervo: ' + acNome + ' — vincule ao almoxarifado pelo "Trocar componente…" para a lista do Odoo casar por id', nivel:'err', cod:'acervo' });
-  else if (!ac && sym) avisos.push({ t:'Acervo: o símbolo não é de nenhum acervo da casa', cod:'acervo' });
-  const od = odooDoComp(it);
-  const lkOdoo = od && od.alvo ? true : false;
-  /* CRIADO LOCALMENTE (Biblioteca, botão Novo componente): vai com a ficha no "Enviar para o Odoo" */
-  const loc = localDoComp(it);
-  let odooTxt = null;
-  if (!lkOdoo){
-    odooTxt = loc && !loc.integrado ? 'ainda não está no Odoo: vai com a ficha no "Enviar para o Odoo"'
-      : od && od.motivo ? od.motivo
-      : od ? 'o espelho não diz qual é o Odoo — rode a sincronização do almoxarifado'
-      : 'sem ficha: vincule ao almoxarifado pelo "Trocar componente…"';
-    if (!(loc && !loc.integrado)) avisos.push({ t:'Odoo: ' + odooTxt, cod: !od && !loc ? 'sem-ficha' : 'odoo' });
-  }
-  /* o desenho emprestado precisa se ANUNCIAR: o corpo âmbar na folha diz que algo é diferente */
-  let desenhoTxt = null;
-  if (!sym){
-    const emg = desenhoDeEmergencia(it);
-    desenhoTxt = emg ? 'emprestado de "' + emg.nome + '" (Biblioteca de símbolos, por ' + emg.how + ') — só para ver'
-                     : 'nenhum: a folha mostra o quadrado vermelho';
-    avisos.push({ t:'Desenho: ' + desenhoTxt, nivel: emg ? 'warn' : 'err', cod:'desenho' });
-  }
-  if (nparts < totalPartes) avisos.push({ t:'Partes: o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham', cod:'partes' });
-  for (const a of fpInfo.avisos) avisos.push({ t:a, cod: /não está na PcbLib/.test(a) ? 'footprint-inexistente' : 'footprint' });
-  /* FORA DO ALMOXARIFADO: sem ficha no almoxarifado (sem OdooId, sem LocalId, sem o valor no espelho) — o mesmo
-     "sem ficha: vincule ao almoxarifado" acima. Sem o HubOdooLink ou sem o espelho do almoxarifado carregado não se
-     afirma nada (senão a folha inteira ficaria vermelha por falta do espelho, e não da peça). */
   const almox = ['almoxBasicos', 'almoxEspeciais'].some(v => window[v] && Array.isArray(window[v].symbols) && window[v].symbols.length);
-  const fora = typeof HubOdooLink !== 'undefined' && almox && !od && !loc;
-  return { avisos, acNome, acPendente, od, lkOdoo, loc, odooTxt, desenhoTxt, fora };
+  return avisosDoCompPuro(it, { hc: HubCore, slib: SLIB, plib: PLIB, acervos: ACERVO_POR, schematic,
+    odoo: odooDoComp, local: localDoComp, emergencia: desenhoDeEmergencia,
+    almoxCarregado: typeof HubOdooLink !== 'undefined' && almox,
+    fpAvisos: (c, sym) => infoFootprint(c, sym, c.footprint || '').avisos }, pre);
 }
-function localDoComp(comp){
-  const m = /(?:^|;)\s*LocalId\s*=\s*([^;]*)/i.exec(String((comp && comp.params) || ''));
-  if (!m) return null;
-  const id = m[1].trim(), L = window.almoxLocais;
-  const s = L && (L.symbols || []).find(x => x && x.criadoLocal && x.criadoLocal.id === id) || null;
-  return { id, s, integrado: !!(s && s.criadoLocal.integrado) };
-}
+function localDoComp(comp){ return localDoCompPuro(comp, window.almoxLocais); }
 function odooDoComp(comp){
   return (comp && typeof HubOdooLink !== 'undefined') ? HubOdooLink.fichaDoComp(comp) : null;
 }
@@ -4238,6 +4283,21 @@ function listaFootprints(){
   dl.dataset.n = String(n); dl.dataset.lib = String(!!PLIB.hub);
   return dl;
 }
+/* o mapa pino↔pad (1.96.0) em todas as partes do ref; texto mal formado volta ao que era */
+function poePinoPad(ref, campo){
+  const txt = String(campo.value || '').trim();
+  const partes = itensDoRef(ref);
+  const antes = (partes[0] && partes[0].pinoPad) || '';
+  if (txt && !HubCore.mapaPinoPad({ pinoPad: txt })){
+    HubDialog.toast('mapa pino↔pad mal formado: use pino=pad;pino=pad (ex.: 1=A;2=B)', 'err', 4200);
+    campo.value = antes; return;
+  }
+  const limpo = txt ? HubCore.pinoPadCampo(HubCore.mapaPinoPad({ pinoPad: txt })) : '';
+  if (limpo === antes) { campo.value = antes; return; }
+  for (const x of partes){ if (limpo) x.pinoPad = limpo; else delete x.pinoPad; }
+  commit();
+  HubDialog.toast(ref + ': ' + (limpo ? 'mapa pino↔pad ' + limpo : 'sem mapa pino↔pad') + ' — vale no ECO e no DRC', 'ok', 3200);
+}
 function poeFootprint(ref, nome){
   const partes = itensDoRef(ref);
   for (const x of partes){ if (nome) x.footprint = nome; else delete x.footprint; }
@@ -4311,17 +4371,24 @@ function infoFootprint(it, sym, fpNome){
     kv.push(['Origem', hub ? 'biblioteca do hub' + (hub.hub && hub.hub.base ? ' (alterado do Altium)' : '') : 'PcbLib do Altium', 'dim']);
     kv.push(['Pads', String((fp.pads || []).length), 'mono']);
     kv.push(['Modelo 3D', corpos ? corpos + ' corpo(s)' : 'nenhum — prenda o STEP no editor (Editar…)', corpos ? null : 'dim']);
-    /* os pinos do simbolo (todas as partes) que nao tem pad: o Unknown Pin do ECO */
-    if (sym && Array.isArray(sym.parts)){
-      const pads = new Set((fp.pads || []).map(p => String(p.name)));
-      const falta = [];
-      for (const p of sym.parts) for (const q of (p.pins || [])) if (q && q.num != null && !pads.has(String(q.num)) && falta.indexOf(String(q.num)) < 0) falta.push(String(q.num));
-      if (falta.length){
-        const txt = falta.slice(0, 12).join(', ') + (falta.length > 12 ? '…' : '');
-        kv.push(['Sem pad', txt + ' — pinos sem pad no footprint (o ECO acusa)', 'warn']);
+    /* os pinos do simbolo (todas as partes) que nao tem pad: o Unknown Pin do ECO. 1.96.0: pelo mapa pino↔pad do
+       componente (o CAP 0805 com pads A/B), e o footprint achado por OUTRO nome (rename-map) avisa uma vez só */
+    const mapa = HubCore.mapaPinoPad ? HubCore.mapaPinoPad(it) : null;
+    const pinosDoSym = [];
+    if (sym && Array.isArray(sym.parts)) for (const p of sym.parts) for (const q of (p.pins || [])) if (q && q.num != null) pinosDoSym.push(String(q.num));
+    const renom = HubCore.avisoFootprintRenomeado ? HubCore.avisoFootprintRenomeado(PLIB, fpNome, pinosDoSym.map(n => HubCore.padDoPino(it, n, mapa))) : null;
+    if (renom){
+      kv.push(['Nome trocado', renom, 'warn']);
+      avisos.push('Footprint: ' + renom);
+    } else {
+      const r = avisosDoFootprint(HubCore, PLIB, sym, fpNome, mapa);
+      if (r.falta.length){
+        const txt = r.falta.slice(0, 12).join(', ') + (r.falta.length > 12 ? '…' : '');
+        kv.push(['Sem pad', txt + ' — pinos sem pad no footprint (o ECO acusa; o mapa pino↔pad liga o pino a outro pad)', 'warn']);
         avisos.push('Pinos sem pad no footprint: ' + txt + ' (o ECO acusa)');
       }
     }
+    if (mapa) kv.push(['Pino↔pad', HubCore.pinoPadCampo(mapa) || '—', 'mono']);
   }
   return { kv, avisos, fp };
 }
@@ -5013,6 +5080,15 @@ function renderProps(){
   const fpInfo = infoFootprint(it, sym, fpNome);
   const l3 = grade('pr-g1');
   cel(l3, 'Footprint', campoFootprint(it, fpNome), true);
+  /* O MAPA PINO↔PAD (1.96.0): aparece quando o componente já tem um, ou quando algum pino não tem pad de mesmo nome
+     no footprint (o CAP 0805 com A/B) — "1=A;2=B"; vazio tira o mapa */
+  if ((it.pinoPad && String(it.pinoPad).trim()) || fpInfo.kv.some(k => k[0] === 'Sem pad' || k[0] === 'Nome trocado')){
+    const l3b = grade('pr-g1');
+    const cm = prCampo(it.pinoPad || '', 'o mapa pino↔pad deste componente (todas as partes): pino do símbolo = pad do footprint, '
+      + 'separados por ";" — ex.: 1=A;2=B. O pino fora do mapa vai no pad de mesmo nome. O ECO e o DRC usam o mapa', c => poePinoPad(it.ref, c), { cls:'mono' });
+    cm.placeholder = 'pino=pad;pino=pad (ex.: 1=A;2=B)';
+    cel(l3b, 'Pino↔pad', cm, true);
+  }
   g.append(acoesFootprint(it, sym, fpInfo.fp));
 
   /* ── O QUE FOI PARA O MODAL, e os avisos que viram o ponto no botão ── (1.95.0: a conta mora em avisosDoComp, que o
@@ -5854,7 +5930,7 @@ const cam = D.mkCamera(cv, drawWorld, {
       else $('shover').textContent = snapHit ? '⊙ ' + snapHit.label
         : (tool === 'wire' ? (wireDraw ? 'clique para o próximo ponto · botão direito encerra' : 'clique para começar o fio')
         :  tool === 'label' ? 'clique para pousar o rótulo ' + toolNet
-        :  tool === 'port' ? 'clique para pousar a port ' + toolNet + ' (a ponta da esquerda é a que liga)'
+        :  tool === 'port' ? 'clique para pousar a port ' + toolNet + ' (as duas pontas ligam, como no Altium)'
         :  tool === 'noerc' ? 'clique no pino que fica sem ligar de propósito'
                            : 'clique para pousar ' + (toolPower ? toolPower.net : ''));
       cam.draw();
@@ -7534,6 +7610,17 @@ window.HubMcpVista = {
   },
   comando(nome){ if (typeof nome !== 'string' || !nome) return false; return fazAcao(nome) !== false; },
   captura(){ return cv; },
+  /* 1.96.0: o DRC do esquema EXATAMENTE como o botão DRC da barra o conta (a variante ativa, os avisos do botão
+     Parâmetros, o espelho do almoxarifado carregado na tela) — o sch_erc do MCP pergunta aqui primeiro */
+  erc(){
+    const r = ercRoda();
+    if (!r) throw new Error('o DRC do esquema (hub-scherc.js) não carregou nesta vista');
+    const folha = i => (model.sheets[i] && model.sheets[i].name) || i;
+    return { total: r.total, erros: r.erros, avisos: r.avisos, porRegra: r.porRegra,
+             variante: VAR.on ? (VAR.on.nome || true) : null,
+             violacoes: r.violacoes.map(v => ({ regra: v.regra, titulo: v.titulo, sev: v.sev, msg: v.msg,
+               sheet: typeof v.sheet === 'number' ? folha(v.sheet) : v.sheet, x: v.x, y: v.y, ref: v.ref })) };
+  },
   /* 1.95.1 (conferência, só leitura): os contornos de "fora do almoxarifado" da folha ativa como a tela os desenha, e a
      caixa de seleção de cada componente — para o teste medir que nenhum contorno fica desproporcional */
   contornosErc(){

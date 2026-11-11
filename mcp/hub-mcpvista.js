@@ -88,6 +88,10 @@
       case 'selecionar':
         if (typeof g.selecionar !== 'function') throw new Error('esta vista ainda não oferece selecionar (window.HubMcpVista.selecionar)');
         return { feito: g.selecionar(a) !== false };
+      case 'erc':
+        /* o DRC do esquema como o botão DRC da barra o conta (sch_erc, 1.96.0) */
+        if (typeof g.erc !== 'function') throw new Error('esta vista não responde o DRC do esquema (falta HubMcpVista.erc: atualize o NexoEletric)');
+        return g.erc(a);
       case 'render3d':
         /* as fotos 3D da placa (pcb_render_3d): uma Promise, respondida quando as imagens ficam prontas */
         if (typeof g.render3d !== 'function') throw new Error('esta vista não fotografa em 3D (falta HubMcpVista.render3d: atualize o NexoEletric)');

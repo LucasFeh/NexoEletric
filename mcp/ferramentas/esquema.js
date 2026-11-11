@@ -11,6 +11,13 @@ const HubDraw = require('../../hub-draw.js');
 const HubSchErc = require('../../hub-scherc.js');
 const HubOdooLink = require('../../hub-odoolink.js');
 const HubSchTemplate = require('../../hub-schtemplate.js');
+/* a parte pura da vista Esquema (os acervos, os avisos do componente): o sch_erc conta como o botão DRC (1.96.0).
+   O montaAcervos lê o HubCore global, como na página */
+let _schPuro = null;
+function schPuro(hc) {
+  if (!_schPuro) { if (typeof globalThis.HubCore === 'undefined') globalThis.HubCore = hc; _schPuro = require('../../schframe.js'); }
+  return _schPuro;
+}
 
 const COMUNS = {
   simular: { type: 'boolean', description: 'true = só valida, não grava' },
@@ -532,7 +539,7 @@ module.exports = {
     },
     {
       nome: 'sch_editar', titulo: 'Editar item do esquema',
-      descricao: 'Muda campos de um item do schematic.js, achado por índice (sch_ler), por ref (componente) ou pelo lugar (em: {t, x, y} — tem de achar um item só). Ex.: mover {x, y}, girar {rot}, trocar {footprint}, {comment}, {sym}. remover_campos tira campos opcionais.',
+      descricao: 'Muda campos de um item do schematic.js, achado por índice (sch_ler), por ref (componente) ou pelo lugar (em: {t, x, y} — tem de achar um item só). Ex.: mover {x, y}, girar {rot}, trocar {footprint}, {comment}, {sym}, {soCobre:true} (só de cobre: jumper de solda, ponto de teste — não se compra, o DRC não o acusa como fora do almoxarifado), {pinoPad:"1=A;2=B"} (o mapa pino↔pad do componente, quando o pino do símbolo e o pad do footprint têm nomes diferentes). remover_campos tira campos opcionais.',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, indice: { type: 'integer', minimum: 0 }, ref: { type: 'string' }, part: { type: 'integer' },
         em: Object.assign({}, ALVO_EM.items, { description: 'achar pelo lugar: {t:"netlabel", x, y}' }),
         campos: { type: 'object', additionalProperties: true }, remover_campos: { type: 'array', items: { type: 'string' } } }, COMUNS), required: ['projeto'] },
@@ -550,6 +557,10 @@ module.exports = {
           for (const k of a.remover_campos || []) delete n[k];
           if (n.dnp !== undefined && typeof n.dnp !== 'boolean') throw new ErroMcp('dnp deve ser true (não montar) ou false; para todas as partes de um componente use sch_nao_montar');
           if (n.dnp === false) delete n.dnp;
+          /* só de cobre (1.96.0): o jumper de solda, o ponto de teste — não se compra; o DRC do esquema não o acusa
+             como fora do almoxarifado */
+          if (n.soCobre !== undefined && typeof n.soCobre !== 'boolean') throw new ErroMcp('soCobre deve ser true (só de cobre: jumper de solda, ponto de teste, fiducial — não se compra) ou false');
+          if (n.soCobre === false) delete n.soCobre;
           arq.substitui(i, n);
           return [n];
         }, { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_editar' });
@@ -709,36 +720,70 @@ module.exports = {
     },
     {
       nome: 'sch_erc', titulo: 'DRC do esquema (ERC)', leitura: true,
-      descricao: 'Roda o DRC do esquema — o mesmo da vista Esquema (botão DRC): pino desconectado (No ERC na ponta ou pino NC = de propósito), '
-        + 'componente fora do almoxarifado (sem OdooId/LocalId e sem o valor no espelho do almoxarifado), designador duplicado ou não numerado ("R?"), '
-        + 'net com um pino só / rótulo, port ou power solto, componente sem footprint, footprint fora da PcbLib e projeto não definido (sem o código da placa). '
-        + 'Devolve as violações com severidade (erro/aviso), folha e posição em mil. suprimidos = refs que não contam (os suprimidos da variante).',
+      descricao: 'Roda o DRC do esquema — o MESMO do botão DRC da vista Esquema: pino desconectado (No ERC na ponta ou pino NC = de propósito), '
+        + 'componente fora do almoxarifado (sem OdooId/LocalId e sem o valor no espelho do almoxarifado; o não montar e o só de cobre ficam de fora), designador duplicado ou não numerado ("R?"), '
+        + 'net com um pino só / rótulo, port ou power solto, componente sem footprint, footprint fora da PcbLib, projeto não definido (sem o código da placa) e os avisos do botão Parâmetros (regra "componente": acervo, desenho, partes, pinos sem pad, Odoo). '
+        + 'Com a vista Esquema do projeto aberta, a conta é a da própria vista (a mesma contagem do botão, na variante ativa); sem ela, a do arquivo (fonte diz qual). '
+        + 'Devolve as violações com severidade (erro/aviso), folha e posição em mil. suprimidos = refs que não contam (os suprimidos da variante; força a conta pelo arquivo).',
       entrada: { type: 'object', properties: { projeto: PROJETO, regras: { type: 'array', items: { type: 'string', enum: HubSchErc.REGRAS.map(r => r[0]) }, description: 'só estas regras' },
-        suprimidos: { type: 'array', items: { type: 'string' } }, limite: { type: 'integer', minimum: 1, description: 'máximo de violações na lista (padrão 300)' } }, required: ['projeto'] },
+        suprimidos: { type: 'array', items: { type: 'string' } }, limite: { type: 'integer', minimum: 1, description: 'máximo de violações na lista (padrão 300)' },
+        fonte: { type: 'string', enum: ['auto', 'arquivo', 'vista'], description: 'auto (padrão): a vista aberta, senão o arquivo; arquivo: sempre pelo arquivo; vista: só a vista aberta (erro sem ela)' } }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        const s = ctx.schematic(p), L = ctx.libsDe(s);
-        const n = netsOuNada(ctx.hc, s, L) || { nets: [], pinosSoltos: [], warnings: [] };
-        /* o espelho do almoxarifado como a vista o tem (os globais que o HubOdooLink lê) */
-        for (const [arq, v] of [['almox-index.js', 'almoxIndex'], ['almox-basicos.js', 'almoxBasicos'], ['almox-especiais.js', 'almoxEspeciais'], ['almox-locais.js', 'almoxLocais']]) {
-          const x = ctx.lib(arq, v);
-          if (x !== undefined) globalThis[v] = x;
+        const so = a.regras && a.regras.length ? new Set(a.regras) : null;
+        const lim = a.limite || 300;
+        const entrega = (r, fonte, nota) => {
+          const vs = r.violacoes.filter(v => !so || so.has(v.regra));
+          return { passa: !vs.some(v => v.sev === 'erro'), erros: vs.filter(v => v.sev === 'erro').length, avisos: vs.filter(v => v.sev !== 'erro').length,
+                   fonte, por_regra: r.porRegra.filter(c => !so || so.has(c.regra)),
+                   violacoes: vs.slice(0, lim).map(v => ({ regra: v.regra, sev: v.sev, msg: v.msg, folha: v.sheet, x: v.x, y: v.y, ref: v.ref })),
+                   cortadas: vs.length > lim ? vs.length - lim : undefined, variante: r.variante || undefined, nota };
+        };
+        /* 1. a vista Esquema aberta: o número do botão DRC (pedido do dono: "a contagem do botão na tela (71) não bate com
+              o sch_erc do MCP (46)") */
+        const fonte = a.fonte || 'auto';
+        let semVista = '';
+        if (fonte !== 'arquivo' && !(a.suprimidos || []).length) {
+          let v = null;
+          try { v = await require('./hub.js').pedeVista(ctx, 'sch', p.nome, 'erc', {}, 8, true); } catch (e) { v = { ok: false, erro: e.message }; }
+          if (v && v.ok && v.dados && Array.isArray(v.dados.violacoes)) return entrega(v.dados, 'vista Esquema aberta (a conta do botão DRC)');
+          semVista = (v && v.erro) || 'a vista não respondeu';
+          if (fonte === 'vista') throw new ErroMcp('sem a vista Esquema de ' + p.nome + ' para contar: ' + semVista + ' (vista_abrir abre)');
         }
-        const temAlmox = !!(globalThis.almoxBasicos || globalThis.almoxEspeciais);
+        /* 2. pelo arquivo, com as MESMAS regras da vista (schframe.js, parte pura: os acervos, os avisos do componente) */
+        const s = ctx.schematic(p), L = ctx.libsDe(s), hc = ctx.hc;
+        const n = netsOuNada(hc, s, L) || { nets: [], pinosSoltos: [], warnings: [] };
+        const globais = {};
+        for (const [arqLib, v] of [['schlib.js', 'schlib'], ['almox-index.js', 'almoxIndex'], ['almox-basicos.js', 'almoxBasicos'], ['almox-especiais.js', 'almoxEspeciais'], ['almox-locais.js', 'almoxLocais']]) {
+          const x = ctx.lib(arqLib, v);
+          if (x !== undefined) { globalThis[v] = x; globais[v] = x; }   /* os globais que o HubOdooLink lê */
+        }
+        globais.symbolsLib = ctx.symbolsLib();
+        const temAlmox = ['almoxBasicos', 'almoxEspeciais'].some(v => globais[v] && Array.isArray(globais[v].symbols) && globais[v].symbols.length);
+        const P = schPuro(hc);
+        const m = P.montaAcervos(globais);
+        const E = P.indiceEmergencia(globais.symbolsLib, hc);
+        const cache = new Map();
+        const av = c => {
+          if (!cache.has(c)) cache.set(c, P.avisosDoCompPuro(c, { hc, slib: L.schlib, plib: L.pcblib, acervos: m, schematic: s,
+            odoo: x => HubOdooLink.fichaDoComp(x), local: x => P.localDoCompPuro(x, globais.almoxLocais),
+            emergencia: x => P.emergenciaDe(E, x, hc), almoxCarregado: temAlmox,
+            fpAvisos: (x, sym) => P.avisosDoFootprint(hc, L.pcblib, sym, x.footprint || '', hc.mapaPinoPad ? hc.mapaPinoPad(x) : null).avisos }));
+          return cache.get(c);
+        };
         const nd = HubSchTemplate.projetoNaoDefinido(s.params, s.project || '');
         const r = HubSchErc.rodar({
-          hc: ctx.hc, schematic: s, nets: n, slib: L.schlib, plib: L.pcblib, suprimidos: new Set((a.suprimidos || []).map(String)),
-          foraDoAlmox: temAlmox ? c => !HubOdooLink.fichaDoComp(c) && !/(?:^|;)\s*LocalId\s*=\s*[^;]+/i.test(String(c.params || '')) : null,
+          hc, schematic: s, nets: n, slib: L.schlib, plib: L.pcblib, suprimidos: new Set((a.suprimidos || []).map(String)),
+          foraDoAlmox: temAlmox ? c => av(c).fora : null,
+          /* os avisos do botão Parâmetros, menos os que já têm regra própria — o mesmo filtro da vista (ercRoda) */
+          avisosDoComp: c => av(c).avisos.filter(x => !['sem-ficha', 'footprint-inexistente'].includes(x.cod)
+                                                && !(x.cod === 'acervo' && !x.nivel && av(c).fora)),
           projetoNaoDefinido: nd || false,
         });
-        const so = a.regras && a.regras.length ? new Set(a.regras) : null;
-        const vs = r.violacoes.filter(v => !so || so.has(v.regra));
-        const lim = a.limite || 300;
-        return { passa: !vs.some(v => v.sev === 'erro'), erros: vs.filter(v => v.sev === 'erro').length, avisos: vs.filter(v => v.sev !== 'erro').length,
-                 por_regra: r.porRegra.filter(c => !so || so.has(c.regra)),
-                 violacoes: vs.slice(0, lim).map(v => ({ regra: v.regra, sev: v.sev, msg: v.msg, folha: v.sheet, x: v.x, y: v.y, ref: v.ref })),
-                 cortadas: vs.length > lim ? vs.length - lim : undefined,
-                 nota: temAlmox ? undefined : 'sem o espelho do almoxarifado nesta pasta: a regra "fora do almoxarifado" não foi conferida' };
+        const notas = [];
+        if (!temAlmox) notas.push('sem o espelho do almoxarifado nesta pasta: a regra "fora do almoxarifado" não foi conferida');
+        if (semVista && fonte === 'auto' && !(a.suprimidos || []).length) notas.push('contado pelo arquivo (' + semVista + '); com a vista Esquema aberta a conta é a dela, na variante ativa');
+        return entrega(r, 'arquivo', notas.length ? notas.join(' · ') : undefined);
       },
     },
     {

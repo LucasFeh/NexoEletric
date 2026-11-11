@@ -53,7 +53,9 @@ function enxuga(v, prof) {
   return v;
 }
 
-async function pedeVista(ctx, alvo, proj, acao, args, segundos) {
+/* soAberta (1.96.0): sem vista daquele projeto aberta, volta na hora em vez de esperar os segundos todos (o sch_erc
+   pergunta à vista primeiro e, sem ela, conta pelo arquivo) */
+async function pedeVista(ctx, alvo, proj, acao, args, segundos, soAberta) {
   const hub = await hubNoAr(ctx);
   if (!hub) return { ok: false, erro: 'nenhum hub HTTP no ar (hub_status)' };
   if (!hub.mcp) return { ok: false, erro: 'o hub no ar não tem as rotas /api/mcp/* (mcp/rotas_hub.py ainda não foi ligado no hubserver.py)', hub: hub.url };
@@ -61,6 +63,7 @@ async function pedeVista(ctx, alvo, proj, acao, args, segundos) {
     body: JSON.stringify({ alvo, proj, acao, args: args || {} }), signal: AbortSignal.timeout(3000) });
   const j = await r.json();
   if (!j.ok) return { ok: false, erro: j.error || 'pedido recusado', hub: hub.url };
+  if (soAberta && j.vista_aberta === false) return { ok: false, erro: 'nenhuma vista ' + alvo + ' de ' + proj + ' aberta', semVista: true, hub: hub.url };
   const s = Math.min(20, segundos || 8);
   const q = await fetch(`${hub.url}/api/mcp/resposta/${encodeURIComponent(j.id)}?espera=${s}`, { signal: AbortSignal.timeout((s + 3) * 1000) });
   const resp = await q.json();
@@ -68,7 +71,16 @@ async function pedeVista(ctx, alvo, proj, acao, args, segundos) {
   return resp;
 }
 
+/* { base64, mime } de um dataURL de imagem, ou null (vazio, "data:,", base64 quebrado, 1 x 1 px) */
+function imagemDoDataUrl(url, largura, altura) {
+  const m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(String(url || '').replace(/\s+/g, ''));
+  if (!m || m[2].length % 4 !== 0 || m[2].length < 200) return null;
+  if ((+largura || 0) > 0 && (+altura || 0) > 0 && (+largura <= 1 || +altura <= 1)) return null;
+  return { base64: m[2], mime: m[1] };
+}
+
 module.exports = {
+  pedeVista, imagemDoDataUrl,
   grupo: 'hub',
   ordem: 90,
   titulo: 'Hub — status, ajuda, módulos e vista aberta',
@@ -138,8 +150,11 @@ module.exports = {
         const alvo = a.vista || 'pcb';
         let r;
         try { r = await pedeVista(ctx, alvo, p.nome, 'screenshot', {}, 8); } catch (e) { r = { ok: false, erro: e.message }; }
-        if (r.ok && r.dados && r.dados.png) return { fonte: 'vista aberta no hub', hub: r.hub, largura: r.dados.largura, altura: r.dados.altura,
-          _imagem: { base64: String(r.dados.png).replace(/^data:image\/png;base64,/, ''), mime: 'image/png' } };
+        /* 1.96.0: "Invalid Base64 string" — o canvas vazio (vista escondida ou no meio do redesenho) devolve o dataURL
+           "data:," e ele ia como imagem. Só vale um dataURL de imagem com base64 de verdade e mais que 1 x 1 px */
+        const im = r.ok && r.dados ? imagemDoDataUrl(r.dados.png, r.dados.largura, r.dados.altura) : null;
+        if (im) return { fonte: 'vista aberta no hub', hub: r.hub, largura: r.dados.largura, altura: r.dados.altura, _imagem: im };
+        if (r.ok && r.dados) r = { ok: false, erro: 'a vista respondeu sem imagem (' + (r.dados.largura || 0) + ' x ' + (r.dados.altura || 0) + ' px: a janela está minimizada ou a vista escondida?)' };
         if (alvo !== 'pcb') throw new ErroMcp('sem vista Esquema aberta para capturar: ' + (r.erro || 'sem resposta') + '. Abra ' + (((await hubNoAr(ctx)) || {}).url || 'o hub') + '/schframe.html?p=' + encodeURIComponent(p.nome));
         const f = srv.reg.get('pcb_render');
         const img = await f.executa({ projeto: p.nome }, ctx, srv);

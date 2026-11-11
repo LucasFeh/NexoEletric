@@ -49,7 +49,7 @@ ESPERA_MAX = 20.0
 # pedido que a vista JA pegou e ainda esta fazendo (as fotos 3D do render3d esperam os STEP e o
 # Real View): fica guardado ate isto, e o MCP pergunta pela resposta em varias esperas de ESPERA_MAX
 PEGO_MAX = 240.0
-ACOES = ('screenshot', 'recarregar', 'focar', 'selecionar', 'comando', 'abrir', 'render3d')
+ACOES = ('screenshot', 'recarregar', 'focar', 'selecionar', 'comando', 'abrir', 'render3d', 'erc')
 ALVOS = ('pcb', 'sch', 'hub')
 SESSAO_VIVA = 60.0       # IA que nao da sinal ha mais que isso e dada como desconectada
 MAX_ATIVIDADE = 300

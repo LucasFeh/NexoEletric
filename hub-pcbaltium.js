@@ -97,6 +97,8 @@ const MAPA = {
   'PLPCB:CreateCommentThread': A('sinalizar', 'edit'),
   /* Design / Tools / Reports */
   'PLPCB:CompareAndUpdateMe': A('atualizarPcb', 'edit'), 'PLPCB:DesignRules': A('regras'),
+  /* 1.96.0: os footprints que só a placa tem viram footprints da biblioteca do hub, com os 3D */
+  'PLPCB:MakeLibrary': A('makeLibrary', 'edit'),
   'PLPCB:DesignRuleCheck': A('drc'),
   'PLPCB:RepourAllPolygonsNoContext': A('repour', 'edit'), 'PLPCB:RepourPolygonsNoContext': A('repour', 'edit'),
   'PLPCB:RepourModified': A('repour', 'edit'),

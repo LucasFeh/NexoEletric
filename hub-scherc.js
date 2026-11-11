@@ -10,7 +10,8 @@
                            pino chamado NC também fica de fora)
      fora-almox            o componente sem ficha no almoxarifado: sem OdooId/LocalId e sem o valor no espelho do
                            almoxarifado (HubOdooLink.fichaDoComp null e sem LocalId) — o mesmo "sem ficha: vincule ao
-                           almoxarifado" do botão Parâmetros (o chamador injeta `foraDoAlmox`)
+                           almoxarifado" do botão Parâmetros (o chamador injeta `foraDoAlmox`). O não montar (DNP)
+                           e o só de cobre (ehSoCobre: jumper de solda, ponto de teste, fiducial…) ficam de fora
      ref-duplicado         dois componentes com o mesmo designador e a mesma parte (o validateSchematic)
      ref-sem-numero        "R?", "U?" — designador não numerado
      net-um-pino           a net com nome (rótulo, port ou power) que liga um pino só, e o rótulo/port/power solto
@@ -45,6 +46,24 @@ const TITULO = {}, SEVERIDADE = {};
 for (const [k, t, s] of REGRAS) { TITULO[k] = t; SEVERIDADE[k] = s; }
 const ehNC = nome => /^n\.?\s*c\.?$/i.test(String(nome || '').trim());
 
+/* SÓ DE COBRE (1.96.0, pedido do dono: o "fora do almoxarifado" deveria ignorar componente marcado como não montar ou
+   só de cobre). É a peça que não se compra: o jumper de solda, o ponto de solda/teste, o fiducial, o net tie, o
+   logo — o footprint é só cobre na placa. Vale:
+     - a marca explícita: "soCobre":true no comp, ou nos params SoCobre=1 / BOM=NAO / ComponentKind=Net Tie,
+       Jumper, Graphical, Standard (No BOM) (os tipos do Altium que não vão para o BOM);
+     - o reconhecimento: footprint SEM corpo 3D cujo nome (ou o do símbolo) diz que é só cobre (jumper, ponte de
+       solda, ponto de solda/teste, test point, fiducial, net tie, logo). Com corpo 3D é peça de verdade (o jumper
+       de barra com o shunt), e o nome sozinho não basta. */
+const SO_COBRE_PARAM = /^\s*(SoCobre\s*=\s*(1|true|sim)|BOM\s*=\s*N[AÃ]O|ComponentKind\s*=\s*(net\s*tie.*|jumper|graphical|.*no\s*bom.*))\s*$/i;
+const SO_COBRE_NOME = /jumper|jump\b|ponte\s*(de\s*)?solda|ponto\s*(de\s*)?(solda|teste)|test\s*-?\s*point|\bTP\b|fiducial|net\s*-?\s*tie|\blogo\b|solder\s*(jumper|bridge)/i;
+function ehSoCobre(c, fp){
+  if (!c || typeof c !== 'object') return false;
+  if (c.soCobre === true) return true;
+  if (typeof c.params === 'string' && c.params.split(';').some(p => SO_COBRE_PARAM.test(p))) return true;
+  if (!fp || (fp.bodies || []).length) return false;
+  return SO_COBRE_NOME.test(String(fp.name || c.footprint || '')) || SO_COBRE_NOME.test(String(c.sym || ''));
+}
+
 function rodar(o){
   const t0 = Date.now();
   o = o || {};
@@ -59,6 +78,7 @@ function rodar(o){
     sheet: lugar && lugar.sheet != null ? lugar.sheet : null, x: lugar && isFinite(lugar.x) ? lugar.x : null,
     y: lugar && isFinite(lugar.y) ? lugar.y : null }, extra || {}));
   const caixaDe = c => (o.caixaDoComp ? o.caixaDoComp(c) : null);
+  const fpDe = c => { const n = String(c.footprint == null ? '' : c.footprint).trim(); return n && hc && o.plib ? hc.footprintOf(o.plib, n) : null; };
   const centro = c => { const b = caixaDe(c); return b ? { sheet: c.sheet, x: (b.x1 + b.x2) / 2, y: (b.y1 + b.y2) / 2 } : { sheet: c.sheet, x: c.x, y: c.y }; };
 
   /* pino desconectado */
@@ -79,7 +99,10 @@ function rodar(o){
     for (const x of cs) { const k = x.part || 1; partes.set(k, (partes.get(k) || 0) + 1); }
     for (const [k, n] of partes) if (n > 1 && ref && !/\?$/.test(ref))
       for (const x of cs.filter(y => (y.part || 1) === k)) add('ref-duplicado', ref + (cs.length > 1 && (x.part || 1) > 1 ? ' parte ' + k : '') + ' aparece ' + n + ' vezes', centro(x), { ref, caixa: caixaDe(x) });
-    if (!suprimido && typeof o.foraDoAlmox === 'function' && o.foraDoAlmox(c))
+    /* o não montar e o só de cobre não se compram: não estão "fora" do almoxarifado (1.96.0) */
+    const naoCompra = (hc && typeof hc.ehDnp === 'function' && cs.some(x => hc.ehDnp(x)))
+      || cs.some(x => ehSoCobre(x, fpDe(x)));
+    if (!suprimido && !naoCompra && typeof o.foraDoAlmox === 'function' && o.foraDoAlmox(c))
       add('fora-almox', ref + ' (' + (c.sym || '—') + ') está fora do almoxarifado — sem ficha: vincule pelo "Trocar componente…"', centro(c), { ref, caixa: caixaDe(c) });
     const fp = String(c.footprint == null ? '' : c.footprint).trim();
     if (!fp) add('sem-footprint', ref + ' sem footprint — vai sem vínculo para a placa', centro(c), { ref, caixa: caixaDe(c) });
@@ -265,7 +288,7 @@ function foraDoAlmox(ctx, b, px, texto){
   ctx.restore();
 }
 
-const API = { REGRAS, SEVERIDADE, TITULO, rodar, painel, triangulo, foraDoAlmox, ehNC };
+const API = { REGRAS, SEVERIDADE, TITULO, rodar, painel, triangulo, foraDoAlmox, ehNC, ehSoCobre };
 root.HubSchErc = API;
 if (typeof module === 'object' && module.exports) module.exports = API;
 })(typeof self !== 'undefined' ? self : this);

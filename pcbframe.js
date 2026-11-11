@@ -6103,6 +6103,55 @@ function hubLib(){
   HUBLIB = HubFpLib.normaliza(typeof pcblibHub !== 'undefined' ? pcblibHub : null);
   return HUBLIB;
 }
+/* ── DESIGN » MAKE PCB LIBRARY (1.96.0) ──
+   Pedido do dono: "os footprints que vêm embutidos numa placa importada do PcbDoc não entram na biblioteca, e a
+   validação acusa 'fora da PcbLib'. Faltam um 'extrair footprints da placa para a biblioteca' e um jeito de passar os
+   3D junto". Os footprints da placa que nenhuma biblioteca tem viram footprints da biblioteca do hub, com os pads, a
+   serigrafia e os corpos 3D (HubFpLib.daPlaca, a mesma conta do fp_da_placa do MCP); o STEP do projeto sobe para a
+   biblioteca 3D do hub (POST /api/fp3d). O que já está na biblioteca do hub fica como está. */
+async function extraiFootprints(){
+  if (typeof HubFpLib === 'undefined' || !HubFpLib.daPlaca){ HubDialog.toast('a biblioteca de footprints (hub-fplib.js) não carregou — atualize a página', 'err'); return; }
+  if (D3 === undefined) D3 = PROJ ? await globalDe('pcbmirror3d', 'Projects/' + encodeURIComponent(PROJ) + '/board3d.js') : null;
+  let lib = await HubFpLib.carrega();
+  const alt = typeof pcblib !== 'undefined' ? pcblib : { footprints:[] };
+  const faltam = HubFpLib.faltandoNaPlaca(HC, B, HubFpLib.mescla(alt, lib));
+  if (!faltam.length){ HubDialog.toast('Todos os footprints da placa já estão numa biblioteca (PcbLib do Altium ou a do hub)', 'ok', 3600); return; }
+  const NL = String.fromCharCode(10);
+  const lista = faltam.slice(0, 14).map(f => '• ' + f.nome + ' (' + f.refs.slice(0, 4).join(', ') + (f.refs.length > 4 ? '…' : '') + ')').join(NL)
+    + (faltam.length > 14 ? NL + '• … e mais ' + (faltam.length - 14) : '');
+  if (!(await HubDialog.confirm(faltam.length + (faltam.length === 1 ? ' footprint da placa não está' : ' footprints da placa não estão')
+      + ' em biblioteca nenhuma:' + NL + NL + lista + NL + NL + 'Extrair para a biblioteca do hub, com os pads, a serigrafia e os modelos 3D?',
+      { title:'Design » Make PCB Library', ok:'Extrair' }))) return;
+  const avisos = [];
+  let feitos = 0;
+  for (const f of faltam){
+    const r = HubFpLib.daPlaca(HC, B, D3, f.nome);
+    if (!r) continue;
+    avisos.push(...r.avisos);
+    for (const b of r.fp.bodies.slice()){
+      if (b.kind !== 'step') continue;
+      const m = r.modelos[b.model];
+      try {
+        const resp = await fetch('Projects/' + encodeURIComponent(PROJ) + '/' + String(m.file).split('/').map(encodeURIComponent).join('/'), { cache:'no-store' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const up = await HubFpLib.sobeStep(await resp.arrayBuffer(), m.name || b.name);
+        b.model = up.id; if (!b.name) b.name = up.name;
+        lib.models[up.id] = { file:up.file, name:up.name, bytes:up.bytes };
+      } catch (e) {
+        r.fp.bodies.splice(r.fp.bodies.indexOf(b), 1);
+        avisos.push(f.nome + ': o STEP "' + ((m && m.name) || b.model) + '" não subiu (' + e.message + ') — o corpo ficou de fora');
+      }
+    }
+    const agora = new Date().toISOString();
+    r.fp.hub = { criado:agora, editado:agora, por:'placa ' + PROJ + ' (' + r.ref + ')' };
+    HubFpLib.poe(lib, r.fp);
+    feitos++;
+  }
+  await HubFpLib.grava(lib);
+  HUBLIB = lib; registraLibHub();
+  HubDialog.toast(feitos + (feitos === 1 ? ' footprint extraído' : ' footprints extraídos') + ' para a biblioteca do hub'
+    + (avisos.length ? ' — ' + avisos.length + ' aviso(s): ' + avisos.slice(0, 2).join(' · ') : ''), avisos.length ? 'warn' : 'ok', 6000);
+}
 /* o comp_add (ECO, Update PCB) acha o footprint do hub antes do do Altium com o mesmo nome */
 function registraLibHub(){
   const h = hubLib();
@@ -6703,6 +6752,7 @@ function fazAcao(id, arg){
     case 'atualizarPcb': abreEco(); return;
     case 'drc': abreDrc(); return;
     case 'regras': abreRegras(); return;
+    case 'makeLibrary': extraiFootprints(); return;
     case 'novaPlaca': abreNovaPlaca(); return;
     case 'ratsnest': toggleConexoes(); return;
     case 'realcarNet': if (!limpaRealce() && SEL.length === 1 && SEL[0].m && SEL[0].m.eff && SEL[0].m.eff.net) realcaNet(SEL[0].m.eff.net); return;

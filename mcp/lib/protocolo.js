@@ -165,8 +165,16 @@ function resultado(r, versao) {
   if (r && typeof r === 'object' && (r._imagem || Array.isArray(r._imagens))) {
     obj = Object.assign({}, r); delete obj._imagem; delete obj._imagens;
     /* _imagens: mais de uma imagem (as fotos 3D da placa montada e da virgem) */
-    for (const im of [].concat(r._imagem || [], r._imagens || []))
-      if (im && im.base64) content.push({ type: 'image', data: im.base64, mimeType: im.mime || 'image/png' });
+    for (const im of [].concat(r._imagem || [], r._imagens || [])) {
+      if (!im || !im.base64) continue;
+      /* 1.96.0: base64 inválido derruba a resposta INTEIRA no cliente ("Invalid Base64 string"): fica de fora, avisado */
+      const b = String(im.base64).replace(/\s+/g, '');
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b) || b.length % 4 !== 0) {
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) obj.imagem_descartada = 'a imagem veio com base64 inválido (' + b.slice(0, 24) + '…) e ficou de fora';
+        continue;
+      }
+      content.push({ type: 'image', data: b, mimeType: im.mime || 'image/png' });
+    }
   }
   const texto = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 1);
   content.unshift({ type: 'text', text: texto });
@@ -179,4 +187,4 @@ function resultadoErro(msg, extra) {
   return { content: [{ type: 'text', text: JSON.stringify(obj, null, 1) }], isError: true };
 }
 
-module.exports = { Servidor, VERSOES, ERR, INSTRUCOES };
+module.exports = { Servidor, VERSOES, ERR, INSTRUCOES, resultado };

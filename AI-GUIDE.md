@@ -104,7 +104,7 @@ Um item JSON **plano** por linha (o parser DelphiScript lê linha a linha, como 
 | `t` | obrigatórios | opcionais |
 |---|---|---|
 | `sheet` | `name`, `size` (A4/A3/A2/A1/A0/A/B/C/D/E, ou `Custom`) | `w`,`h` — **medida real da folha, em mil**, como o Altium a reporta. Sem elas vale a tabela por nome, que traz o tamanho *legado* do Altium e **não** o ISO real: a “A4” do template da casa mede 11693×8268, não 11500×7600, e a diferença joga carimbo e fios de borda para fora da página desenhada |
-| `comp` | `sheet`,`ref`,`sym`,`x`,`y`,`rot`,`footprint` | `part` (default 1), `mirror`, `comment`, `dnp` (true = **não montar**; ver abaixo), `params`, `refdx`/`refdy` e `comdx`/`comdy` — deslocamento do texto do designador e do comment em relação à âncora do componente, em mil, na coordenada da folha, medido até o **canto inferior-esquerdo** do texto; par ausente = o hub decide onde pousar o texto — mas o export os emite para todo componente |
+| `comp` | `sheet`,`ref`,`sym`,`x`,`y`,`rot`,`footprint` | `part` (default 1), `mirror`, `comment`, `dnp` (true = **não montar**; ver abaixo), `soCobre` (true = **só de cobre**: jumper de solda, ponto de teste, fiducial — não se compra; o DRC do esquema não o acusa como fora do almoxarifado; 1.96.0), `pinoPad` (o **mapa pino↔pad**, texto plano `"1=A;2=B"`: pino do símbolo = pad do footprint, quando os nomes diferem; o pino fora do mapa vai no pad de mesmo nome; vale no ECO e na validação, todas as partes iguais; 1.96.0), `params`, `refdx`/`refdy` e `comdx`/`comdy` — deslocamento do texto do designador e do comment em relação à âncora do componente, em mil, na coordenada da folha, medido até o **canto inferior-esquerdo** do texto; par ausente = o hub decide onde pousar o texto — mas o export os emite para todo componente |
 | `wire` | `sheet`,`pts` (`[[x,y],...]` ≥2, numa linha só) | — |
 | `netlabel` | `sheet`,`net`,`x`,`y` | `rot` |
 | `power` | `sheet`,`net`,`style`,`x`,`y` | `rot` (`Bar`/`Circle`/`Arrow`/`Wave`/`GndPower`/`GndSignal`/`GndEarth`) |
@@ -263,8 +263,9 @@ Os outros campos `=Nome` (sem diferenciar maiúsculas) se resolvem nesta ordem: 
 - `power` (power port) com o mesmo `net` funde-se numa única rede em **todo o
   projeto**, mesmo em folhas diferentes (é assim que o Altium trata GND/VCC).
 - `port` é o conector de folha do Altium: uma barra com bico levando um nome. Para a
-  extração de nets ele é um nomeador como os outros. A âncora (`x,y`) é o ponto elétrico:
-  é ali que o fio precisa encostar.
+  extração de nets ele é um nomeador como os outros. As **duas pontas** são ponto elétrico,
+  como no Altium (1.96.0): a âncora (`x,y`) e a outra ponta, a `w` mil dela — para +X na port deitada (`style`
+  0..3), para +Y na em pé (4..7); a seta não muda isso (`HubCore.portPontas`). O fio pode encostar em qualquer uma.
   `style` (forma) e `io` (direção, só para o ERC do Altium) viajam como **o inteiro que o
   Altium usa**, não como nome: a tentativa de usar as constantes nomeadas
   (`ePortLeft`, `ePortNone_Vertical`…) foi recusada pelo compilador do Altium com
