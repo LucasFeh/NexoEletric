@@ -4,6 +4,23 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.98.0 — 2026-11-11
+
+**Arrumar no DRC do esquema: o componente que veio do Altium deslocado dos fios volta para o lugar.** Pedido do dono:
+"componente desconectado às vezes é só dar uma arredadinha pro lado". Medido nos projetos: os dois pinos do resistor
+ficam 50 mil fora das pontas dos fios, na mesma direção (o símbolo da nossa biblioteca tem a origem noutro lugar que o
+desenho que o Altium usou) — no PRJ-DI221694D eram 28 resistores assim.
+- O botão **Arrumar** no painel do DRC procura, para cada componente com pino solto, o deslocamento que encaixa os pinos
+  nas pontas de fio, rótulos, ports, power, junções ou pinos ali perto, e aplica tudo num desfazer só (Ctrl+Z).
+- Só move quando é seguro: todo pino ligado cai exatamente num ponto de ligação (não no meio de um fio), pelo menos 2
+  pinos encaixam, além de 100 mil só com 2 ou mais pinos soltos no mesmo vetor, nenhum pino ligado se solta, nenhuma net
+  se junta com outra, o componente não fecha os próprios pinos, e não é ambíguo (dois lados que servem = não mexe). O
+  resto fica para a mão, e o aviso diz quantos.
+- Nos 19 projetos da pasta: 47 componentes arrumados, 75 pinos soltos a menos, nenhum movimento torto (o que ia andar
+  na diagonal ou ligar um pino só de um CI ficou de fora).
+- MCP: `sch_arrumar {projeto, simular?, raio?}` faz o mesmo pelo arquivo (movimentos com ref, dx, dy e pinos ligados;
+  pulados com o motivo).
+
 ## 1.97.8 — 2026-11-11
 
 **O seletor de revisão do Aprovar no tamanho certo.** "Olha o dimensionamento do texto": a opção "REV.B — manter a

@@ -157,6 +157,35 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   await js(`HubMcpVista.comando('desfazer'); HubMcpVista.comando('refazer');`);
   await espera(300);
   void antes;
+  /* 6. o Arrumar (1.98.0): o J2 da DMB veio do Altium 100 mil acima dos fios (os dois pinos soltos); o botão arreda, a
+     contagem cai, e o Ctrl+Z desfaz de uma vez */
+  {
+    const pinoSolto = `[...document.querySelectorAll('.erc .erc-lista tr')].filter(tr => /Pino desconectado/.test(tr.children[1].textContent)).map(tr => tr.children[2].textContent)`;
+    await js(`document.getElementById('btnErc').click()`);
+    await ate(`!!document.querySelector('.erc .erc-lista tr')`, 8000, 'a lista do DRC (Arrumar)');
+    const antesJ2 = await js(`(() => { const c = schematic.items.find(i => i.t === 'comp' && i.ref === 'J2'); return [c.x, c.y]; })()`);
+    const soltos0 = await js(pinoSolto);
+    assert.ok(soltos0.some(t => /^J2 pino/.test(t)), 'antes: o J2 com pino solto: ' + soltos0.join(' | '));
+    const bA = `[...document.querySelectorAll('.erc-hd button')].find(b => b.textContent === 'Arrumar')`;
+    assert.ok(await js(`!!${bA} && !${bA}.disabled`), 'o botão Arrumar no painel, ativo');
+    await espera(300);
+    await print('erc-6-botao-arrumar');
+    await js(`${bA}.click()`);
+    await ate(`(() => { const c = schematic.items.find(i => i.t === 'comp' && i.ref === 'J2'); return c.y !== ${antesJ2[1]}; })()`, 15000, 'o J2 arredado');
+    const depoisJ2 = await js(`(() => { const c = schematic.items.find(i => i.t === 'comp' && i.ref === 'J2'); return [c.x, c.y]; })()`);
+    assert.deepStrictEqual([depoisJ2[0] - antesJ2[0], Math.round(depoisJ2[1] - antesJ2[1])], [0, -100], 'o J2 desce 100 mil');
+    await espera(400);
+    const soltos1 = await js(pinoSolto);
+    assert.ok(!soltos1.some(t => /^J2 pino/.test(t)), 'depois: o J2 ligado: ' + soltos1.join(' | '));
+    assert.ok(soltos1.length < soltos0.length, 'a lista de pinos soltos encolhe: ' + soltos0.length + ' → ' + soltos1.length);
+    await js(`HubMcpVista.focar(${depoisJ2[0]}, ${depoisJ2[1]}, 700)`);
+    await espera(400);
+    await print('erc-7-depois-do-arrumar');
+    await js(`document.querySelector('.erc [title="Fechar (Esc)"]').click()`);
+    await tecla('z', 'KeyZ', 90, 2);
+    const voltou = await js(`(() => { const c = schematic.items.find(i => i.t === 'comp' && i.ref === 'J2'); return [c.x, c.y]; })()`);
+    assert.deepStrictEqual(voltou, antesJ2, 'o Ctrl+Z desfaz o Arrumar de uma vez');
+  }
 
   assert.deepStrictEqual(erros, [], 'erros na página: ' + erros.join(' || '));
   assert.strictEqual(fs.readFileSync(path.join(ORIGEM, 'schematic.js'), 'utf8'), schAntes, 'o projeto de origem não muda');

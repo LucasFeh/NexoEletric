@@ -816,6 +816,35 @@ module.exports = {
       },
     },
     {
+      /* 1.98.0: o botão Arrumar do DRC do esquema, pelo arquivo (o mesmo motor: hub-scherc.js » arrumar) */
+      nome: 'sch_arrumar', titulo: 'Arrumar pinos desconectados (DRC do esquema)',
+      descricao: 'O botão Arrumar do DRC do esquema: o componente que ficou deslocado dos fios (o import do Altium, quando o '
+        + 'símbolo da biblioteca tem a origem noutro lugar) é arredado pelo vetor que encaixa os pinos soltos nas pontas de fio, '
+        + 'rótulos, ports, power, junções ou pinos ali perto. Só move quando o encaixe é EXATO (todo pino ligado em cima de um ponto, '
+        + 'pelo menos 2 pinos encaixados; além de 100 mil só com 2+ pinos soltos no mesmo vetor), nenhum pino se solta, nenhuma net se '
+        + 'junta com outra e não é ambíguo. Devolve os movimentos (ref, dx, dy em mil, pinos ligados) e os pulados com o motivo. Simule antes (simular:true).',
+      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO,
+        raio: { type: 'number', minimum: 1, description: 'até quantos mil procurar o encaixe (padrão 300)' } }, COMUNS), required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        let r = null;
+        const r4 = v => Math.round(v * 1e4) / 1e4;
+        const est = transacao(ctx, p, (arq, L, cab) => {
+          r = HubSchErc.arrumar({ hc: ctx.hc, schematic: Object.assign({}, cab, { items: arq.itens.slice() }), slib: L.schlib, raio: a.raio });
+          return r.movimentos.map(m => {
+            const n = Object.assign({}, arq.itens[m.idx], { x: r4(arq.itens[m.idx].x + m.dx), y: r4(arq.itens[m.idx].y + m.dy) });
+            arq.substitui(m.idx, n);
+            return n;
+          });
+        }, { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_arrumar', semTocados: true });
+        est.soltos = { antes: r.soltosAntes, depois: r.soltosDepois };
+        est.movimentos = r.movimentos.map(m => ({ ref: m.ref, part: m.part > 1 ? m.part : undefined, folha: m.sheet, dx: m.dx, dy: m.dy, liga: m.liga }));
+        est.pulados = r.pulados.slice(0, 100).map(x => ({ ref: x.ref, part: x.part > 1 ? x.part : undefined, folha: x.sheet, motivo: x.motivo }));
+        if (!r.movimentos.length) est.nota = 'nada para arrumar sozinho: nenhum componente encaixa nos fios só arredando';
+        return est;
+      },
+    },
+    {
       nome: 'sch_buscar_simbolo', titulo: 'Buscar símbolo na biblioteca', leitura: true,
       descricao: 'Procura símbolos nas bibliotecas que a vista Esquema usa (SchLib do Altium + almoxarifado, inclusive cada valor do almoxarifado como componente próprio) por nome, descrição, família ou designador. Devolve nome (o "sym" do comp), acervo, pinos e footprint padrão.',
       entrada: { type: 'object', properties: { busca: { type: 'string', description: 'palavras, ex.: "resistor 0805 10k", "NE555", "conector 2 vias"' }, projeto: Object.assign({}, PROJETO, { description: 'opcional: inclui os símbolos guardados no próprio esquema do projeto (os da folha do Altium e os criados com sym_salvar destino "projeto")' }), limite: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['busca'] },

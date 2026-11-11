@@ -5589,12 +5589,33 @@ function abreErc(){
   const host = $('cv').parentElement;
   ercPainel = ERC.painel(host, {
     rodar: () => ercRoda(),
+    arrumar: () => ercArrumar(),
     irPara: v => ercIrPara(v),
     aoFechar: () => { ercPainel = null; cam.draw(); },
   });
   const r = ercRoda();
   if (r) ercPainel.mostra(r);
   ercPainel.el.focus();
+}
+/* O ARRUMAR do DRC (1.98.0, pedido do dono: "componente desconectado às vezes é só dar uma arredadinha pro lado"):
+   o hub-scherc.js » arrumar acha o vetor que encaixa os pinos soltos nas pontas dos fios, confere as nets e devolve os
+   movimentos; aqui eles ficam aplicados e viram UM desfazer (commit). Na variante não mexe (o esquema é o da base). */
+function ercArrumar(){
+  if (!ERC || typeof ERC.arrumar !== 'function') return ERC_RES;
+  if (VAR.on){ recusaNaVariante(); return ERC_RES; }
+  let r = null;
+  try { r = ERC.arrumar({ hc: HubCore, schematic, slib: SLIB, aplicar: true }); }
+  catch (e) { console.warn('Arrumar do DRC:', e); HubDialog.toast('o Arrumar falhou: ' + (e && e.message || e), 'err', 5000); return ERC_RES; }
+  const resto = r.pulados.length ? ' — ' + r.pulados.length + ' ficaram para a mão (o encaixe não é exato ou soltaria/juntaria outra net)' : '';
+  if (!r.movimentos.length){
+    HubDialog.toast('nada para arrumar sozinho: nenhum componente encaixa nos fios só arredando' + resto, 'info', 6000);
+    return ERC_RES;
+  }
+  commit();
+  const refs = [...new Set(r.movimentos.map(m => m.ref))];
+  HubDialog.toast('arrumei ' + refs.length + ' componente' + (refs.length === 1 ? '' : 's') + ' (' + refs.slice(0, 8).join(', ') + (refs.length > 8 ? '…' : '')
+    + '): ' + (r.soltosAntes - r.soltosDepois) + ' pino(s) ligado(s)' + resto + '. Ctrl+Z desfaz', 'ok', 7000);
+  return ercRoda();
 }
 /* o clique na violação: a folha dela, a câmera em cima e o componente marcado (o projeto não definido abre o Definir) */
 function ercIrPara(v){

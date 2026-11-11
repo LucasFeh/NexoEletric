@@ -193,7 +193,7 @@ function css(){
   const s = document.createElement('style'); s.id = 'erc-css'; s.textContent = CSS; document.head.append(s);
 }
 function el(tag, cls, txt){ const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
-/* painel(container, {rodar(), irPara(v), aoFechar()}) -> {mostra(res), el, fecha()} */
+/* painel(container, {rodar(), irPara(v), aoFechar(), arrumar()? -> res}) -> {mostra(res), el, fecha()} */
 function painel(container, opts){
   css();
   opts = opts || {};
@@ -202,8 +202,14 @@ function painel(container, opts){
   const hd = el('div', 'erc-hd');
   const res = el('span', 'res', '');
   const bRodar = el('button', null, 'Rodar de novo'); bRodar.type = 'button';
+  /* 1.98.0: o Arrumar — encaixa nos fios o componente deslocado (o "arredar pro lado"); só com pino solto na lista */
+  const bArrumar = el('button', null, 'Arrumar'); bArrumar.type = 'button';
+  bArrumar.title = 'Arrumar os pinos desconectados: arreda para o lado o componente que ficou deslocado dos fios '
+    + '(no import do Altium) até os pinos encaixarem nas pontas — só quando o encaixe é exato e nada mais se solta, '
+    + 'nem junta net. Ctrl+Z desfaz tudo de uma vez';
+  bArrumar.hidden = typeof opts.arrumar !== 'function';
   const bX = el('button', null, '×'); bX.type = 'button'; bX.title = 'Fechar (Esc)';
-  hd.append(el('b', null, 'DRC do esquema'), res, el('span', 'esp'), bRodar, bX);
+  hd.append(el('b', null, 'DRC do esquema'), res, el('span', 'esp'), bArrumar, bRodar, bX);
   const chips = el('div', 'erc-chips'), lista = el('div', 'erc-lista');
   raiz.append(hd, chips, lista);
   container.append(raiz);
@@ -211,6 +217,7 @@ function painel(container, opts){
   const COR = { erro:'#f87171', aviso:'#facc15' };
   function mostra(r){
     R = r; atual = -1;
+    bArrumar.disabled = !r.porRegra.some(c => c.regra === 'pino-solto');
     if (filtro && !r.porRegra.some(c => c.regra === filtro)) filtro = null;
     res.textContent = r.total ? r.erros + ' erro' + (r.erros === 1 ? '' : 's') + ' · ' + r.avisos + ' aviso' + (r.avisos === 1 ? '' : 's') : 'nada errado';
     chips.textContent = '';
@@ -253,6 +260,12 @@ function painel(container, opts){
   const fecha = () => { raiz.remove(); if (typeof opts.aoFechar === 'function') opts.aoFechar(); };
   bX.onclick = fecha;
   bRodar.onclick = () => { if (typeof opts.rodar === 'function') { const r = opts.rodar(); if (r) mostra(r); } };
+  bArrumar.onclick = () => {
+    if (typeof opts.arrumar !== 'function') return;
+    bArrumar.disabled = true; const txt = bArrumar.textContent; bArrumar.textContent = 'Arrumando…';
+    /* um quadro para o "Arrumando…" aparecer: a conta refaz as nets algumas vezes */
+    setTimeout(() => { try { const r = opts.arrumar(); if (r) mostra(r); } finally { bArrumar.textContent = txt; if (R) bArrumar.disabled = !R.porRegra.some(c => c.regra === 'pino-solto'); } }, 30);
+  };
   return { el: raiz, mostra, fecha, resultado: () => R };
 }
 
@@ -300,7 +313,181 @@ function foraDoAlmox(ctx, b, px, texto){
   ctx.restore();
 }
 
-const API = { REGRAS, SEVERIDADE, TITULO, rodar, painel, triangulo, foraDoAlmox, ehNC, ehSoCobre };
+/* ─── ARRUMAR (1.98.0): o conserto dos erros bobos ───
+   Pedido do dono (2026-11-11): "no DRC do esquema, eu queria que tivesse um botão pra arrumar os erros, que
+   teoricamente são bobos, tipo 'componente desconectado' às vezes é só dar uma arredadinha pro lado, pq por algum
+   motivo na hora de converter o projeto do Altium pro nosso software, alguns componentes ficam desconectados".
+   MEDIDO nos projetos (PRJ-DI221694D R9, R7…): os DOIS pinos do resistor ficam 50 mil fora das pontas dos fios, na
+   MESMA direção — o símbolo da nossa biblioteca tem a origem noutro lugar que o desenho que o Altium usou, então o
+   componente inteiro está deslocado. O conserto é exatamente a "arredadinha": mover o componente pelo vetor que leva
+   os pinos soltos às pontas de fio (ou ao rótulo, port, power, junção, pino) que estão logo ali.
+   O motor procura, para cada parte de componente com pino solto, os vetores pino solto → ponto de ligação a até
+   `raio` mil (além de `perto` só se 2+ pinos soltos encaixam no mesmo vetor); fica com o que encaixa MAIS pinos soltos
+   (empate pelo menor), e só aceita se todo pino ligado cair exatamente num ponto de ligação (não no meio de um fio) e
+   depois de refazer as nets:
+     - o componente fica com menos pinos soltos, e nenhum pino de fora vira solto;
+     - nenhum pino que já estava ligado se solta nem muda de net;
+     - nenhuma net se junta com outra (nem dois pinos do próprio componente na mesma net, o resistor em curto), e
+       nenhum conflito de nome novo;
+     - dois vetores diferentes que empatam e passam os dois = ambíguo: não mexe (vai para `pulados`).
+   Os aceitos se acumulam (o segundo é conferido com o primeiro já movido). Não grava nada: devolve os movimentos e o
+   chamador aplica (a vista num desfazer só, o MCP no arquivo).
+   arrumar(o) -> { movimentos:[{ idx, ref, part, sheet, dx, dy, liga:[num], soltosAntes, soltosDepois }],
+                   pulados:[{ ref, part, sheet, motivo }], soltosAntes, soltosDepois, tempoMs }
+   o: { hc, schematic, slib, suprimidos?, raio? (mil, padrão 300), perto? (mil, padrão 100: além disso só com 2+ pinos
+        encaixando), aplicar? (true = deixa os itens movidos) } */
+function arrumar(o){
+  const t0 = Date.now();
+  o = o || {};
+  const hc = o.hc || root.HubCore;
+  const sch = o.schematic || { items: [] };
+  const L = o.slib;
+  const raio = o.raio > 0 ? o.raio : 300;
+  const perto = o.perto > 0 ? o.perto : 100;
+  const sup = o.suprimidos instanceof Set ? o.suprimidos : new Set(o.suprimidos || []);
+  const items = sch.items || [];
+  const graf = typeof hc.graficoRefs === 'function' ? hc.graficoRefs(sch) : new Set();
+  const nets = () => hc.extractNets(sch, L);
+  const kp = (x, y) => Math.round(x * 2) + '|' + Math.round(y * 2);      /* a mesma chave do extractNets (0,5 mil) */
+  const conta = s => String(s.ref) + '-' + String(s.num) + '@' + s.sheet;
+  const soltosDe = n => (n.pinosSoltos || []).filter(p => !sup.has(String(p.ref)) && !graf.has(String(p.ref)) && !ehNC(p.name));
+  const conflitos = n => (n.warnings || []).filter(w => /^nomes de net conflitantes/.test(w)).length;
+  /* pino -> índice da net (só as nets da lista: as de 2+ pinos ou com nome) */
+  const netDoPino = n => { const m = new Map(); (n.nets || []).forEach((x, i) => { for (const p of x.pins) m.set(p, i); }); return m; };
+  /* os pontos onde um pino pode encaixar, por folha: pontas e vértices de fio, rótulo, power, port (as duas pontas),
+     junção e os pinos dos OUTROS componentes */
+  function pontos(){
+    const porFolha = new Map();
+    const poe = (f, x, y, dono) => {
+      if (!isFinite(x) || !isFinite(y)) return;
+      if (!porFolha.has(f)) porFolha.set(f, []);
+      porFolha.get(f).push({ x, y, dono });
+    };
+    for (const it of items) {
+      if (!it) continue;
+      if (it.t === 'wire') for (const p of (it.pts || [])) poe(it.sheet, p[0], p[1], null);
+      else if (it.t === 'netlabel' || it.t === 'power' || it.t === 'junction') poe(it.sheet, it.x, it.y, null);
+      else if (it.t === 'port') for (const [x, y] of (hc.portPontas ? hc.portPontas(it) : [[it.x, it.y]])) poe(it.sheet, x, y, null);
+      else if (it.t === 'comp') for (const p of (hc.compPinsWorld(it, L) || [])) poe(it.sheet, p.x, p.y, it);
+    }
+    return porFolha;
+  }
+  let n0 = nets();
+  const antesTotal = soltosDe(n0).length;
+  /* as partes com pino solto: o pino solto é achado pela posição (o mesmo ref pode ter várias partes) */
+  function partesComSolto(n){
+    const porChave = new Set();
+    for (const s of soltosDe(n)) porChave.add(s.sheet + '|' + kp(s.x, s.y) + '|' + s.ref);
+    const out = [];
+    items.forEach((it, idx) => {
+      if (!it || it.t !== 'comp' || sup.has(String(it.ref)) || graf.has(String(it.ref))) return;
+      const ps = hc.compPinsWorld(it, L) || [];
+      const soltos = ps.filter(p => porChave.has(it.sheet + '|' + kp(p.x, p.y) + '|' + it.ref));
+      if (soltos.length) out.push({ it, idx, pinos: ps, soltos });
+    });
+    /* quem tem mais pinos soltos primeiro: é a evidência mais forte, e o movimento dele vira ponto para os outros */
+    return out.sort((a, b) => b.soltos.length - a.soltos.length);
+  }
+  /* o movimento passa? (o item já está movido) */
+  function confere(c, nA, nB){
+    const meus = new Set(c.pinos.map(p => String(c.it.ref) + '-' + String(p.num)));
+    const ehMeu = s => meus.has(String(s.ref) + '-' + String(s.num));
+    const sA = new Set(soltosDe(nA).map(conta)), sB = soltosDe(nB);
+    const antes = soltosDe(nA).filter(ehMeu).length, depois = sB.filter(ehMeu).length;
+    if (!(depois < antes)) return { ok: false, motivo: depois > antes ? 'soltaria pinos que estão ligados' : 'arredar não liga mais pinos (o fio do outro lado não chega a nada)' };
+    for (const s of sB) if (!ehMeu(s) && !sA.has(conta(s))) return { ok: false, motivo: 'soltaria ' + s.ref + ' pino ' + s.num };
+    if (conflitos(nB) > conflitos(nA)) return { ok: false, motivo: 'juntaria duas nets com nome' };
+    const mA = netDoPino(nA), mB = netDoPino(nB);
+    /* cada net nova: os pinos dela vêm de UMA net de antes (ou estavam soltos) — senão é curto */
+    const porNetB = new Map();
+    for (const [p, i] of mB) { if (!porNetB.has(i)) porNetB.set(i, []); porNetB.get(i).push(p); }
+    for (const [, ps] of porNetB) {
+      const origem = new Set(ps.filter(p => mA.has(p)).map(p => mA.get(p)));
+      if (origem.size > 1) return { ok: false, motivo: 'juntaria duas nets (curto)' };
+      const meusAqui = ps.filter(p => meus.has(p));
+      if (meusAqui.length > 1 && !meusAqui.every(p => mA.has(p))) return { ok: false, motivo: 'fecharia dois pinos do próprio componente' };
+    }
+    /* o pino ligado antes continua com todos os vizinhos de antes */
+    for (const [p, i] of mA) {
+      const j = mB.get(p);
+      if (j === undefined) return { ok: false, motivo: 'soltaria ' + p };
+      const agora = new Set(nB.nets[j].pins || []);
+      if (!(nA.nets[i].pins || []).every(q => agora.has(q))) return { ok: false, motivo: 'tiraria ' + p + ' da net ' + nA.nets[i].name };
+    }
+    return { ok: true, antes, depois };
+  }
+  const r4 = v => Math.round(v * 1e4) / 1e4;
+  const movimentos = [], pulados = [];
+  /* as partes e os pontos só mudam quando um movimento é aceito: refeitos só aí (no SHP2, 160 pinos soltos, refazer a
+     cada componente custava segundos) */
+  let partes = partesComSolto(n0), pts = pontos();
+  for (const c of partes.slice()) {
+    /* a parte pode já ter sido resolvida por um movimento anterior (outro componente encaixou nela) */
+    const ainda = partes.find(x => x.it === c.it);
+    if (!ainda) continue;
+    const alvos = (pts.get(c.it.sheet) || []).filter(q => q.dono !== c.it);
+    const chaves = new Set(alvos.map(q => kp(q.x, q.y)));
+    const cand = new Map();
+    for (const s of ainda.soltos) for (const q of alvos) {
+      const dx = r4(q.x - s.x), dy = r4(q.y - s.y);
+      const d = Math.hypot(dx, dy);
+      if (d < 0.5 || d > raio) continue;
+      const k = kp(dx, dy);
+      if (cand.has(k)) continue;
+      cand.set(k, { dx, dy, d, enc: ainda.soltos.filter(z => chaves.has(kp(z.x + dx, z.y + dy))).length });
+    }
+    const ordem = [...cand.values()].sort((a, b) => b.enc - a.enc || a.d - b.d).slice(0, 8);
+    const x0 = c.it.x, y0 = c.it.y;
+    let aceito = null, motivo = ordem.length ? '' : 'nada para encaixar a até ' + raio + ' mil';
+    for (const v of ordem) {
+      if (aceito && (v.enc < aceito.v.enc || v.d > aceito.v.d + 0.5)) break;   /* daqui para baixo só o empate interessa */
+      /* longe (mais de `perto` mil) só com dois ou mais pinos soltos encaixando no mesmo vetor: um pino só, longe, é
+         coincidência (no PESDA o R6 ia andar 148 mil na diagonal para cair na ponta de outro fio) */
+      if (v.d > perto && v.enc < 2) { if (!motivo) motivo = 'o encaixe fica a ' + Math.round(v.d) + ' mil (longe para um pino só)'; continue; }
+      /* a prova geométrica antes da conta das nets (que é a parte cara): 2 pinos em cima de ponto de ligação */
+      const nPinos = ainda.pinos.length;
+      if (ainda.pinos.filter(p => chaves.has(kp(p.x + v.dx, p.y + v.dy))).length < Math.min(2, nPinos)) {
+        if (!motivo) motivo = 'um pino só encaixando: pode ser coincidência';
+        continue;
+      }
+      c.it.x = r4(x0 + v.dx); c.it.y = r4(y0 + v.dy);
+      const n1 = nets();
+      let r = confere(ainda, n0, n1);
+      /* ENCAIXE EXATO: depois de mover, todo pino ligado do componente cai numa ponta/vértice de fio, rótulo, port,
+         power, junção ou pino — como o Altium desenhou. Pino que só liga por deslizar no meio de um fio (o C5 do
+         PRJ - DI261930 andando 260 mil com o outro pino escorregando no fio) não é a arredadinha */
+      if (r.ok) {
+        const soltoDepois = new Set(soltosDe(n1).filter(z => String(z.ref) === String(c.it.ref)).map(z => String(z.num)));
+        const ps = hc.compPinsWorld(c.it, L) || [];
+        const fora = ps.find(p => !soltoDepois.has(String(p.num)) && !chaves.has(kp(p.x, p.y)));
+        /* e a prova do encaixe: 2 pinos (ou todos, no de um pino) em cima de um ponto de ligação. Um pino só encaixando
+           num CI cheio de pinos soltos é coincidência (o IC16 da SHP2 andando 18,7 × 4,1 mil para ligar o 37) */
+        /* (geométrico: o pino em cima do ponto conta mesmo se a net dele ainda não chega a nada — o R10 do PRJ-DI221694D
+           encaixa os dois pinos nas pontas dos fios, e o fio do pino 1 é que não vai a lugar nenhum do outro lado) */
+        const ancorados = ps.filter(p => chaves.has(kp(p.x, p.y))).length;
+        if (fora) r = { ok: false, motivo: 'o pino ' + fora.num + ' ficaria no meio de um fio' };
+        else if (ancorados < Math.min(2, ps.length)) r = { ok: false, motivo: 'um pino só encaixando: pode ser coincidência' };
+      }
+      c.it.x = x0; c.it.y = y0;
+      if (!r.ok) { if (!motivo) motivo = r.motivo; continue; }
+      if (aceito) { aceito = null; motivo = 'ambíguo: encaixa para dois lados'; break; }
+      aceito = { v, r, n1 };
+    }
+    if (!aceito) { pulados.push({ ref: c.it.ref, part: c.it.part || 1, sheet: c.it.sheet, motivo: motivo || 'não encaixa' }); continue; }
+    c.it.x = r4(x0 + aceito.v.dx); c.it.y = r4(y0 + aceito.v.dy);
+    const aindaSolto = new Set(soltosDe(aceito.n1).filter(z => String(z.ref) === String(c.it.ref)).map(z => String(z.num)));
+    movimentos.push({ idx: c.idx, ref: c.it.ref, part: c.it.part || 1, sheet: c.it.sheet, dx: aceito.v.dx, dy: aceito.v.dy,
+                      liga: ainda.soltos.map(s => String(s.num)).filter(nm => !aindaSolto.has(nm)),
+                      soltosAntes: aceito.r.antes, soltosDepois: aceito.r.depois });
+    n0 = aceito.n1;
+    partes = partesComSolto(n0); pts = pontos();
+  }
+  const depoisTotal = soltosDe(n0).length;
+  if (!o.aplicar) for (const m of movimentos) { const it = items[m.idx]; it.x = r4(it.x - m.dx); it.y = r4(it.y - m.dy); }
+  return { movimentos, pulados, soltosAntes: antesTotal, soltosDepois: depoisTotal, tempoMs: Date.now() - t0 };
+}
+
+const API = { REGRAS, SEVERIDADE, TITULO, rodar, painel, triangulo, foraDoAlmox, ehNC, ehSoCobre, arrumar };
 root.HubSchErc = API;
 if (typeof module === 'object' && module.exports) module.exports = API;
 })(typeof self !== 'undefined' ? self : this);
