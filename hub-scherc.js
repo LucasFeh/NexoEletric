@@ -19,6 +19,8 @@
      footprint-inexistente o footprint que não está na PcbLib (nem na biblioteca do hub) — o ECO recusa
      projeto-nao-definido  o Definir projeto ainda não deu o código da placa (a PCB não declarada da 1.92.2) ou o carimbo
                            mostra "PROJETO NÃO DEFINIDO" (placa ou equipamento) — o chamador diz (`projetoNaoDefinido`)
+     (1.97.0) o Graphical (ComponentKind=Graphical, só documentação) não gera pino solto, sem footprint, footprint fora
+     da PcbLib, fora do almoxarifado nem os Parâmetros, e a net que só ele liga não é "um pino só"
      componente            os outros avisos do botão Parâmetros (acervo pendente, desenho emprestado, partes, pinos sem
                            pad, Odoo fora do espelho) — o chamador injeta `avisosDoComp`
    Severidade: 'erro' ou 'aviso' por regra (SEVERIDADE abaixo); o chamador pode trocar (`severidades`).
@@ -82,8 +84,10 @@ function rodar(o){
   const centro = c => { const b = caixaDe(c); return b ? { sheet: c.sheet, x: (b.x1 + b.x2) / 2, y: (b.y1 + b.y2) / 2 } : { sheet: c.sheet, x: c.x, y: c.y }; };
 
   /* pino desconectado */
+  /* o Graphical (1.97.0): só documentação — sem pino solto, sem footprint, sem almoxarifado, sem os Parâmetros */
+  const graf = hc && typeof hc.graficoRefs === 'function' ? hc.graficoRefs(sch) : new Set();
   for (const p of (nets.pinosSoltos || [])) {
-    if (sup.has(String(p.ref)) || ehNC(p.name)) continue;
+    if (sup.has(String(p.ref)) || graf.has(String(p.ref)) || ehNC(p.name)) continue;
     add('pino-solto', p.ref + ' pino ' + p.num + (p.name && p.name !== String(p.num) ? ' (' + p.name + ')' : '') + ' sem ligação'
       + (p.fio ? ' — o fio dele não chega a nada' : ''), p, { ref: String(p.ref), pino: String(p.num) });
   }
@@ -92,7 +96,7 @@ function rodar(o){
   for (const c of comps) { const r = String(c.ref || ''); if (!porRef.has(r)) porRef.set(r, []); porRef.get(r).push(c); }
   for (const [ref, cs] of porRef) {
     const c = cs[0];
-    const suprimido = sup.has(ref);
+    const suprimido = sup.has(ref) || graf.has(ref);
     if (!ref || /\?$/.test(ref) || !/\d/.test(ref))
       for (const x of cs) add('ref-sem-numero', (ref || '(sem designador)') + ' — numere o componente (Anotar)', centro(x), { ref, caixa: caixaDe(x) });
     const partes = new Map();
@@ -105,7 +109,8 @@ function rodar(o){
     if (!suprimido && !naoCompra && typeof o.foraDoAlmox === 'function' && o.foraDoAlmox(c))
       add('fora-almox', ref + ' (' + (c.sym || '—') + ') está fora do almoxarifado — sem ficha: vincule pelo "Trocar componente…"', centro(c), { ref, caixa: caixaDe(c) });
     const fp = String(c.footprint == null ? '' : c.footprint).trim();
-    if (!fp) add('sem-footprint', ref + ' sem footprint — vai sem vínculo para a placa', centro(c), { ref, caixa: caixaDe(c) });
+    if (graf.has(ref)) { /* o Graphical não vai para a placa: footprint nenhum a cobrar */ }
+    else if (!fp) add('sem-footprint', ref + ' sem footprint — vai sem vínculo para a placa', centro(c), { ref, caixa: caixaDe(c) });
     else {
       const existe = typeof o.footprintExiste === 'function' ? o.footprintExiste(fp, c) : !!(hc && hc.footprintOf(o.plib, fp));
       if (!existe) add('footprint-inexistente', ref + ': o footprint "' + fp + '" não está na PcbLib nem na biblioteca do hub — o ECO recusa', centro(c), { ref, caixa: caixaDe(c) });
@@ -131,7 +136,8 @@ function rodar(o){
   for (const n of (nets.nets || [])) {
     if (n.auto || (n.pins || []).length !== 1) continue;
     const [ref, num] = String(n.pins[0]).split(/-(?=[^-]*$)/);
-    if (sup.has(ref)) continue;
+    /* a net que liga só um Graphical a uma port (o contator do painel) não é "um pino só" */
+    if (sup.has(ref) || graf.has(ref)) continue;
     add('net-um-pino', 'a net ' + n.name + ' liga um pino só (' + ref + ' pino ' + num + ')', pinoEm(ref, num), { ref, net: n.name });
   }
   for (const w of (nets.warnings || [])) {

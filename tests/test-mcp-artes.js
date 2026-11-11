@@ -99,6 +99,6 @@ function cliente() {
   assert.ok(r.erro && /dieletrons-logo-qr/.test(r.texto), 'erro com a lista: ' + r.texto);
 
   c.fim();
-  fs.rmSync(TMP, { recursive: true, force: true });
+  fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });   /* o MCP filho ainda segura arquivos um instante depois do fim */
   console.log('test-mcp-artes: ok');
 })().catch(e => { console.error(e); try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {} process.exit(1); });

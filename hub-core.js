@@ -2889,6 +2889,7 @@ function extractNets(schematicOrModel, schlib){
 /* `nets` (opcional) = o extractNets do mesmo esquema e da mesma schlib: com ele saem tambem
    os pinos sem ligacao e as pontas de fio soltas (quem ja extraiu as nets nao paga duas vezes). */
 function validateSchematic(schematic, schlib, pcblib, nets){
+  const graficos = graficoRefs(schematic);          /* o Graphical (1.97.0): sem footprint a conferir */
   const errors = [], warnings = [];
   const avisadoSym = new Set(), avisadoFp = new Set();
   if (!schematic || schematic.format !== 'schmirror-v2') warnings.push('format esperado "schmirror-v2"');
@@ -2920,7 +2921,9 @@ function validateSchematic(schematic, schlib, pcblib, nets){
       if (!part) errors.push(`${where}: parte ${c.part || 1} não existe em "${c.sym}"`);
       /* sem a chave e erro; VAZIO e aviso — vai sem vinculo e se resolve no Altium, como o
          BuildSchematic faz (ver SCH_ITEM_REQUIRED) */
-      if (typeof c.footprint !== 'string') errors.push(`${where}: falta "footprint" (obrigatório em todo componente)`);
+      /* Graphical (1.97.0): só documentação, não vai para a placa — o footprint não se confere */
+      if (graficos.has(String(c.ref))) { /* nada de footprint */ }
+      else if (typeof c.footprint !== 'string') errors.push(`${where}: falta "footprint" (obrigatório em todo componente)`);
       else if (!c.footprint) warnings.push(`${where}: sem footprint — vai sem vínculo, defina no Altium`);
       else {
         const fp = footprintOf(pcblib, c.footprint);
@@ -3214,6 +3217,24 @@ function ehDnp(it){
   if (!it || typeof it !== 'object') return false;
   if (it.dnp === true) return true;
   return typeof it.params === 'string' && it.params.split(';').some(par => DNP_PARAM.test(par));
+}
+/* ---- GRAPHICAL (1.97.0) ----
+   Pedido do dono: "tratar ComponentKind=Graphical como no Altium: componente só de documentação. Ele não vai para a
+   PCB nem para o BOM, não entra no ECO e não gera aviso de 'sem footprint'. A net que liga só um componente desses a
+   um port também não deveria contar como 'net com um pino só'." (os contatores K1/K2 do MIRBC-DI251885MON, que ficam
+   no painel). Vale o params ComponentKind=Graphical (o Component Type do Altium), ou "componentKind":"Graphical" no
+   comp. Uma parte marcada basta para o designador inteiro (graficoRefs). Ele continua na folha e nas nets da folha
+   (o desenho é documentação: o fio e a port seguem ligados), mas o ECO tira os pinos dele das nets da placa. */
+const GRAFICO_PARAM = /^\s*ComponentKind\s*=\s*Graphical\s*$/i;
+function ehGrafico(it){
+  if (!it || typeof it !== 'object') return false;
+  if (typeof it.componentKind === 'string' && /^\s*graphical\s*$/i.test(it.componentKind)) return true;
+  return typeof it.params === 'string' && it.params.split(';').some(par => GRAFICO_PARAM.test(par));
+}
+function graficoRefs(sch){
+  const S = new Set();
+  for (const it of ((sch && Array.isArray(sch.items)) ? sch.items : [])) if (it && it.t === 'comp' && it.ref != null && ehGrafico(it)) S.add(String(it.ref));
+  return S;
 }
 /* os designadores marcados como nao montar no esquema (Set de strings; esquema ausente = vazio) */
 function dnpRefs(sch){
@@ -3541,7 +3562,7 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          arteGeom, ehArte, CAMPOS_ARTE, valorCampoArte, NAO_DEFINIDO_ARTE:NAO_DEFINIDO,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp, assinaturaPinos, simbolosDoDocumento,
          suggestSym,
-         buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp, portPontas, fpDoComponente, mapaPinoPad, padDoPino, pinoPadCampo, avisoFootprintRenomeado,
+         buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp, ehGrafico, graficoRefs, portPontas, fpDoComponente, mapaPinoPad, padDoPino, pinoPadCampo, avisoFootprintRenomeado,
          applyPcbChanges, effectiveBoard, deriveStatus,
          PCB_LAYERS, pcbLayer, isCopper, flipLayer, boardLayers,
          serializeChanges, serializeSchematic, serializeAnnotations, serializeLibSubs,

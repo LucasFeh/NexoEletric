@@ -277,12 +277,14 @@ module.exports = {
         const VR = require('../lib/variantes.js');
         const va = VR.ativa(p.dir), sup = VR.refs(sch, va);
         const dnp = ctx.hc.dnpRefs(sch), fora = new Set();
+        const graf = ctx.hc.graficoRefs ? ctx.hc.graficoRefs(sch) : new Set();
         for (const r of sup) dnp.add(r);
         const soma = (chave, ref, extra) => { if (!linhas.has(chave)) linhas.set(chave, Object.assign({ qtd: 0, refs: [] }, extra)); const l = linhas.get(chave); l.qtd++; l.refs.push(ref); };
         if (usarPlaca) {
           const { eb } = ctx.placa(p);
           for (const c of eb.components || []) {
             if (dnp.has(String(c.ref))) { fora.add(String(c.ref)); continue; }
+            if (graf.has(String(c.ref))) continue;
             const k = (c.comment || '') + '|' + (c.footprint || '');
             soma(k, c.ref, { valor: c.comment || '', footprint: c.footprint || '', lados: {} });
             linhas.get(k).lados[c.layer] = 1;
@@ -294,6 +296,7 @@ module.exports = {
             if (it.t !== 'comp' || vistos.has(it.ref)) continue;
             vistos.add(it.ref);
             if (dnp.has(String(it.ref))) { fora.add(String(it.ref)); continue; }
+            if (graf.has(String(it.ref))) continue;          /* Graphical (1.97.0): só documentação, fora do BOM */
             soma((it.comment || it.sym) + '|' + (it.footprint || ''), it.ref, { valor: it.comment || '', simbolo: it.sym, footprint: it.footprint || '', params: it.params || undefined });
           }
         }

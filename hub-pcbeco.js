@@ -65,8 +65,10 @@ const COMP_MIN = 3, COMP_PCT = 0.75;          /* [Comparison Options] Kind=Net d
 function compsDoEsquema(sch, schlib){
   const M = HC.buildSchModel(sch || {});
   const out = new Map();
+  /* o Graphical (1.97.0) não vai para a placa: nem componente, nem pino nas nets */
+  const graf = typeof HC.graficoRefs === 'function' ? HC.graficoRefs(sch) : new Set();
   for (const s of M.sheets) for (const c of s.comps) {
-    if (!c || !c.ref) continue;
+    if (!c || !c.ref || graf.has(String(c.ref))) continue;
     let r = out.get(c.ref);
     if (!r) { r = { ref:c.ref, footprint:'', comment:'', sheet:s.name, sym:c.sym, partes:0, cego:false }; out.set(c.ref, r); }
     r.partes++;
@@ -78,7 +80,7 @@ function compsDoEsquema(sch, schlib){
     if (!r.mapa && typeof HC.mapaPinoPad === 'function') r.mapa = HC.mapaPinoPad(c);
     if (!r.comment && typeof c.comment === 'string') r.comment = c.comment;
   }
-  return { comps:out, folhas:M.sheets.map(s => s.name) };
+  return { comps:out, folhas:M.sheets.map(s => s.name), graficos:graf };
 }
 
 /* footprint igual: mesma string, mesma chave normalizada, ou os dois resolvem no mesmo item da lib */
@@ -102,7 +104,7 @@ function placaEfetiva(board, opts){
 function compara(schematic, board, opts){
   const o = opts || {};
   const eb = placaEfetiva(board, o);
-  const { comps:sch, folhas } = compsDoEsquema(schematic, o.schlib);
+  const { comps:sch, folhas, graficos } = compsDoEsquema(schematic, o.schlib);
   const cegos = new Set([...sch.values()].filter(s => s.cego).map(s => s.ref));
   const ex = HC.extractNets(schematic || { items:[] }, o.schlib);
   const acoes = [];
@@ -135,7 +137,15 @@ function compara(schematic, board, opts){
     const pad = typeof HC.padDoPino === 'function' ? HC.padDoPino(null, k.slice(i + 1), s.mapa, padsDe(ref)) : k.slice(i + 1);
     return ref + '-' + pad;
   };
-  for (const n of ex.nets) { netSch.set(n.name, new Set(n.pins.map(paraPad))); if (n.auto) autoSch.add(n.name); }
+  const doGrafico = k => graficos.has(k.slice(0, k.lastIndexOf('-')));
+  for (const n of ex.nets) {
+    const pins = n.pins.filter(k => !doGrafico(k));
+    /* a net que só o Graphical ligava (o contator e a port) não existe na placa */
+    if (!pins.length) continue;
+    /* sem nome, com um pino só depois de tirar o Graphical: o Altium não a põe na placa (pino solto) */
+    if (n.auto && pins.length < 2) continue;
+    netSch.set(n.name, new Set(pins.map(paraPad))); if (n.auto) autoSch.add(n.name);
+  }
   const pinSch = Object.create(null);
   for (const [nome, pins] of netSch) for (const p of pins) pinSch[p] = nome;
 

@@ -4,6 +4,24 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.97.0 — 2026-11-10
+
+**ComponentKind=Graphical como no Altium: componente só de documentação.** Pedido do dono: "ele não vai para a PCB nem
+para o BOM, não entra no ECO e não gera aviso de 'sem footprint'. A net que liga só um componente desses a um port
+também não deveria contar como 'net com um pino só'." O caso são os contatores K1 e K2 do MIRBC-DI251885MON, que
+ficam no painel.
+- Vale o params `ComponentKind=Graphical` (o Component Type do Altium) ou `"componentKind":"Graphical"` no comp.
+  Uma parte marcada vale para o designador inteiro (`HubCore.ehGrafico` / `graficoRefs`).
+- **Na folha** ele continua desenhado e ligado (o fio e a port seguem nas nets da folha: é documentação).
+- **ECO:** não entra como componente, e os pinos dele saem das nets da placa. A net que só ele ligava não existe na
+  placa (no MON, a `NetK1_A1`, que um ECO antigo tinha criado vazia, sai).
+- **BOM:** fica fora do `bom_listar` (pela placa e pelo esquema) e da lista do Odoo (`odoolista.py`). Sai calado:
+  não é "não montar", não é peça da placa. O BOM da bancada e a Neoden saem da placa, onde ele não entra.
+- **Validação e DRC do esquema:** não gera "sem footprint", "footprint fora da PcbLib", pino solto, fora do
+  almoxarifado nem os avisos do botão Parâmetros. A net cujo único pino é dele (a port U1 → K1-1L1) não conta como
+  "net com um pino só". No MON: nenhuma violação do K1/K2.
+- Testes: `tests/test-196-erc-port-eco-fp.js` (15 casos, +1 do Graphical) e `tests/test_odoolista.py` (+1).
+
 ## 1.96.1 — 2026-11-10
 
 **O que ficou pela metade na 1.96.0 (o dono devolveu, testando no MIRBC-DI251885DRV).**

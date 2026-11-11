@@ -306,6 +306,26 @@ def eh_dnp(it):
     return isinstance(p, str) and any(_DNP_PARAM.match(par) for par in p.split(';'))
 
 
+# GRAPHICAL (1.97.0): a regra do HubCore.ehGrafico. ComponentKind=Graphical (o Component Type do Altium) e so
+# documentacao: nao vai para a placa nem para o Odoo. Sai calado (nao e "nao montar": nao e peca da placa).
+_GRAFICO_PARAM = re.compile(r'^\s*ComponentKind\s*=\s*Graphical\s*$', re.I)
+
+
+def eh_grafico(it):
+    if not isinstance(it, dict):
+        return False
+    k = it.get('componentKind')
+    if isinstance(k, str) and k.strip().lower() == 'graphical':
+        return True
+    p = it.get('params')
+    return isinstance(p, str) and any(_GRAFICO_PARAM.match(par) for par in p.split(';'))
+
+
+def grafico_refs(schematic):
+    return {str(it.get('ref')).strip() for it in ((schematic or {}).get('items') or [])
+            if isinstance(it, dict) and it.get('t') == 'comp' and it.get('ref') is not None and eh_grafico(it)}
+
+
 def dnp_refs(schematic):
     """Os designadores marcados como nao montar (set de str)."""
     return {str(it.get('ref')).strip() for it in ((schematic or {}).get('items') or [])
@@ -548,7 +568,11 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
     # nao montar: sai antes de tudo (nem linha, nem "tirado" -- o esquema diz que nao vai)
     suprimidos = sorted({str(it.get('ref') or '').strip() for it in (schematic.get('items') or [])
                          if isinstance(it, dict) and it.get('t') == 'comp' and it.get('suprimido')}, key=_natural)
-    nao_montar = dnp_refs(schematic)
+    graficos = grafico_refs(schematic)
+    nao_montar = dnp_refs(schematic) - graficos
+    if graficos:
+        schematic = dict(schematic, items=[it for it in (schematic.get('items') or [])
+                                           if not (it.get('t') == 'comp' and str(it.get('ref') or '').strip() in graficos)])
     if nao_montar:
         schematic = dict(schematic, items=[it for it in (schematic.get('items') or [])
                                            if not (it.get('t') == 'comp' and str(it.get('ref') or '').strip() in nao_montar)])

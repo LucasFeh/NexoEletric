@@ -1371,14 +1371,16 @@ function avisosDoCompPuro(it, d, pre){
   const itens = (d.schematic && d.schematic.items) || [];
   const totalPartes = pre.totalPartes || Math.max(it.part || 1, ...itens
     .filter(x => x && x.t === 'comp' && x.ref === it.ref && x.sheet === it.sheet).map(x => x.part || 1));
-  const fpAv = pre.fpInfo ? pre.fpInfo.avisos
+  /* o Graphical (1.97.0, ComponentKind=Graphical): só documentação — nem compra, nem footprint */
+  const grafico = !!(hc.graficoRefs && hc.graficoRefs(d.schematic).has(String(it.ref)));
+  const fpAv = grafico ? [] : pre.fpInfo ? pre.fpInfo.avisos
     : (d.fpAvisos ? d.fpAvisos(it, sym) : avisosDoFootprint(hc, d.plib, sym, it.footprint || '').avisos);
   const avisos = [];
   const acNome = ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca');
   /* SÓ DE COBRE (1.96.1, o dono marcou J2/J5/J6/J7 e o "Acervo: Biblioteca do Altium — vincule ao almoxarifado"
      continuou): a peça que não se compra não tem acervo nem ficha a vincular — os avisos de compra não saem. Os
      técnicos (desenho, partes, pinos sem pad) continuam. */
-  const soCobre = !!(d.soCobre && d.soCobre(it));
+  const soCobre = grafico || !!(d.soCobre && d.soCobre(it));
   const acPendente = !soCobre && !!ac && /biblioteca do altium|espelho do altium/i.test(String(ac.titulo || ''));
   if (soCobre) { /* sem acervo a cobrar */ }
   else if (acPendente) avisos.push({ t:'Acervo: ' + acNome + ' — vincule ao almoxarifado pelo "Trocar componente…" para a lista do Odoo casar por id', nivel:'err', cod:'acervo' });
@@ -1406,7 +1408,7 @@ function avisosDoCompPuro(it, d, pre){
   /* FORA DO ALMOXARIFADO: sem ficha no almoxarifado (sem OdooId, sem LocalId, sem o valor no espelho). Sem o
      espelho carregado não se afirma nada. */
   const fora = !soCobre && !!d.almoxCarregado && !!d.odoo && !od && !loc;
-  return { avisos, acNome, acPendente, od, lkOdoo, loc, odooTxt, desenhoTxt, fora, soCobre };
+  return { avisos, acNome, acPendente, od, lkOdoo, loc, odooTxt, desenhoTxt, fora, soCobre, grafico };
 }
 
 const PURE = { LIBS, ACERVO_DEFS, montaAcervos, acervoDoComp, partesDe,

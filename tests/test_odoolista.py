@@ -1150,6 +1150,18 @@ def test_nao_montar_fica_fora_da_lista():
     assert '_nao_montar' not in OL.payload_limpo(p), 'diagnóstico não vai ao Odoo'
 
 
+def test_graphical_fica_fora_calado():
+    """1.97.0: ComponentKind=Graphical (o contator do painel) é só documentação: não vai, e não é 'não montar'."""
+    e = esquema(comp('R1', 'SMD 0805 10K 1/8W'),
+                comp('K1', 'contactor', params='Comment=3RT2026;ComponentKind=Graphical;DNP=1'),
+                comp('K2', 'contactor', componentKind='Graphical'))
+    assert OL.grafico_refs(e) == {'K1', 'K2'}
+    p = OL.monta_payload('X', 'A', e, ACERVO)
+    vao = sorted(r for l in p['linhas'] for r in l['designadores'].split(', '))
+    assert vao == ['R1'], vao
+    assert not p.get('_nao_montar'), p.get('_nao_montar')
+
+
 def main():
     n = 0
     for nome, fn in sorted(globals().items()):

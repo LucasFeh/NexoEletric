@@ -283,4 +283,30 @@ caso('pinoPad contra a biblioteca (1/2) e contra a placa (A/B): o C5', () => {
   assert.strictEqual(HC.padDoPino(null, 'A', { A:'1' }, new Set(['A', 'B'])), 'A', 'o pad de mesmo nome ganha do mapa');
   assert.strictEqual(HC.padDoPino(null, 'A', { A:'1' }, new Set(['1', '2'])), '1');
 });
+
+/* ── 1.97.0: ComponentKind=Graphical (o contator do painel) ── */
+caso('Graphical: fora do ECO, sem footprint a cobrar, e a net com a port não é "um pino só"', () => {
+  const KX = { name:'contactor', parts:[{ part:1, pins:[{ num:'A1', name:'A1', x:-100, y:0, orient:180, len:100 },
+                                                       { num:'A2', name:'A2', x:100, y:0, orient:0, len:100 }] }] };
+  const SL = { symbols:[KX, RES2] };
+  const s = folha([{ t:'comp', ref:'K1', sym:'contactor', x:1000, y:1000, rot:0, footprint:'', params:'Comment=3RT2026;ComponentKind=Graphical' },
+                   { t:'port', net:'BOBINA', x:400, y:1000, w:400, style:0 },          /* a ponta direita em (800,1000) = o A1 */
+                   { t:'comp', ref:'R1', sym:'RES2', x:3000, y:1000, rot:0, footprint:'R0805' },
+                   { t:'netlabel', net:'N1', x:2800, y:1000 }, { t:'netlabel', net:'N1', x:3200, y:1000 }]);
+  assert.deepStrictEqual([...HC.graficoRefs(s)], ['K1']);
+  const n = HC.extractNets(s, SL);
+  assert.ok((n.nets.find(x => x.name === 'BOBINA') || { pins:[] }).pins.includes('K1-A1'), 'na folha o fio segue ligado');
+  const r = Erc.rodar({ hc:HC, schematic:s, nets:n, slib:SL, plib:PLIB, foraDoAlmox: () => true, avisosDoComp: () => [{ t:'x', cod:'acervo' }] });
+  const doK1 = r.violacoes.filter(v => v.ref === 'K1');
+  assert.deepStrictEqual(doK1.map(v => v.regra), [], 'nada para o K1: ' + JSON.stringify(doK1));
+  const v = HC.validateSchematic(s, SL, PLIB, n);
+  assert.ok(!v.warnings.some(w => /K1.*footprint/.test(w)) && !v.errors.some(e => /K1/.test(e)), v.warnings.concat(v.errors).join(' | '));
+  const B = placa(['N1'], [{ id:'c1', ref:'R1', footprint:'R0805', comment:'', layer:'Top', x:10, y:10, rot:0, pads:[pad('R1', '1', 9, 'N1'), pad('R1', '2', 11, 'N1')] }]);
+  const eco = Eco.compara(s, B, { schlib:SL, pcblib:PLIB, changes:[] });
+  assert.ok(!eco.acoes.some(a => a.objeto === 'K1' || /^K1-/.test(a.objeto) || a.objeto === 'BOBINA'), 'o ECO não vê o K1 nem a BOBINA: ' + JSON.stringify(eco.acoes.map(a => a.grupo + ' ' + a.objeto)));
+  /* a ficha: o ponto do Parâmetros não cobra acervo nem footprint */
+  const a = P.avisosDoCompPuro(s.items[1], { hc:HC, slib:SL, plib:PLIB, acervos:P.montaAcervos({ schlib:SL }), schematic:s,
+    odoo: () => null, local: () => null, emergencia: () => null, almoxCarregado:true });
+  assert.ok(a.grafico && !a.avisos.some(x => /acervo|odoo|sem-ficha|footprint/.test(x.cod)), JSON.stringify(a.avisos));
+});
 console.log('test-196-erc-port-eco-fp: ' + ok + ' ok');
