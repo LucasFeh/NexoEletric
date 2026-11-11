@@ -17,6 +17,13 @@ clicando nas laterais e arrastando pra aumentar ou diminuir o tamanho".
 - Com uma linha a mais encostando no canto (o traço do pino 1), não é um retângulo solto: a linha se move sozinha, como
   antes. Com as 4 linhas (ou mais coisas) selecionadas, o arrasto continua movendo tudo junto.
 
+**Também nesta versão: o No ERC na ponta do fio do pino vale, como no Altium.** Pedido do dono: "Esse alerta de DRC tá
+errado, não era pra tá dando, o pino tá com ERC de não conectado".
+- O pino com um toco de fio e o No ERC (o X) na outra ponta, ou em qualquer ponto do toco, é solto de propósito: o DRC
+  do esquema, o triângulo amarelo e o sch_validar/sch_erc não o acusam mais. Antes só valia o X em cima da ponta do pino
+  — no PDCD-DI261939 o MD1 acusava 19 pinos que já tinham o X.
+- O aviso "No ERC não está na ponta de nenhum pino" também aceita o X na ponta de um fio.
+
 ## 1.98.0 — 2026-11-11
 
 **Arrumar no DRC do esquema: o componente que veio do Altium deslocado dos fios volta para o lugar.** Pedido do dono:
