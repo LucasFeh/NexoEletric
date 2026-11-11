@@ -1261,14 +1261,25 @@ function localDoCompPuro(comp, locais){
 /* Os avisos do FOOTPRINT do componente (os do painel Footprint da ficha): o que não está na PcbLib e os pinos do
    símbolo sem pad. `mapa` (1.96.0) = o mapa pino↔pad do componente (HubCore.mapaPinoPad): o pino mapeado conta
    pelo pad dele. Devolve { fp, avisos, falta }. */
-function avisosDoFootprint(hc, plib, sym, fpNome, mapa){
+/* As partes do símbolo que valem para o "pinos sem pad" (1.97.5): no conector UMA PARTE POR VIA (sym.porVia: a barra
+   1x40 com 40 partes de uma via) só as que estão na folha — a CN3 cortada em 6 vias acusava "pinos 1…40 sem pad" pelas
+   34 que não foram colocadas. Nos outros símbolos, todas (a parte de um CI que não está na folha tem pad do mesmo
+   jeito). -> Set dos números de parte, ou null = todas. */
+function partesNaFolha(sym, it, schematic){
+  if (!sym || !sym.porVia || !it) return null;
+  const S = new Set();
+  for (const x of ((schematic && schematic.items) || [])) if (x && x.t === 'comp' && x.ref === it.ref) S.add(x.part || 1);
+  if (!S.size) S.add(it.part || 1);
+  return S;
+}
+function avisosDoFootprint(hc, plib, sym, fpNome, mapa, partes){
   const avisos = [];
   const fp = fpNome ? hc.footprintOf(plib, fpNome) : null;
   if (fpNome && !fp) avisos.push('Footprint "' + fpNome + '" não está na PcbLib espelhada nem na biblioteca do hub — o ECO vai recusar');
   const falta = [];
   if (fp && sym && Array.isArray(sym.parts)){
     const pads = new Set((fp.pads || []).map(p => String(p.name)));
-    for (const p of sym.parts) for (const q of (p.pins || [])){
+    for (const p of sym.parts) for (const q of ((partes && !partes.has(p.part || 1)) ? [] : (p.pins || []))){
       if (!q || q.num == null) continue;
       const k = String(q.num);
       const pad = hc.padDoPino ? hc.padDoPino(null, k, mapa || null, pads) : (pads.has(k) ? k : (mapa && mapa[k] != null ? String(mapa[k]) : k));
@@ -1297,7 +1308,7 @@ function avisosDoCompPuro(it, d, pre){
   /* o Graphical (1.97.0, ComponentKind=Graphical): só documentação — nem compra, nem footprint */
   const grafico = !!(hc.graficoRefs && hc.graficoRefs(d.schematic).has(String(it.ref)));
   const fpAv = grafico ? [] : pre.fpInfo ? pre.fpInfo.avisos
-    : (d.fpAvisos ? d.fpAvisos(it, sym) : avisosDoFootprint(hc, d.plib, sym, it.footprint || '').avisos);
+    : (d.fpAvisos ? d.fpAvisos(it, sym) : avisosDoFootprint(hc, d.plib, sym, it.footprint || '', hc.mapaPinoPad ? hc.mapaPinoPad(it) : null, partesNaFolha(sym, it, d.schematic)).avisos);
   const avisos = [];
   const acNome = ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca');
   /* SÓ DE COBRE (1.96.1, o dono marcou J2/J5/J6/J7 e o "Acervo: Biblioteca do Altium — vincule ao almoxarifado"
@@ -1335,7 +1346,7 @@ function avisosDoCompPuro(it, d, pre){
 }
 
 const PURE = { LIBS, ACERVO_DEFS, montaAcervos, acervoDoComp, partesDe,
-               indiceEmergencia, emergenciaDe, localDoCompPuro, avisosDoFootprint, avisosDoCompPuro, nPartes, refDaParte, trocaDeParte, desenhoCabe,
+               indiceEmergencia, emergenciaDe, localDoCompPuro, avisosDoFootprint, avisosDoCompPuro, partesNaFolha, nPartes, refDaParte, trocaDeParte, desenhoCabe,
                assinaturaDesenho, desenhoIgual, casoDoSimbolo, partesDaDecisao,
                carimbo, decideTroca, montaPartsTrocando,
                valorDoComp, tipoDoComp,
@@ -4330,7 +4341,7 @@ function infoFootprint(it, sym, fpNome){
       kv.push(['Nome trocado', renom, 'warn']);
       avisos.push('Footprint: ' + renom);
     } else {
-      const r = avisosDoFootprint(HubCore, PLIB, sym, fpNome, mapa);
+      const r = avisosDoFootprint(HubCore, PLIB, sym, fpNome, mapa, partesNaFolha(sym, it, schematic));
       if (r.falta.length){
         const txt = r.falta.slice(0, 12).join(', ') + (r.falta.length > 12 ? '…' : '');
         kv.push(['Sem pad', txt + ' — pinos sem pad no footprint (o ECO acusa; o mapa pino↔pad liga o pino a outro pad)', 'warn']);

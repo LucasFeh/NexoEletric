@@ -248,6 +248,33 @@ class Rotas(unittest.TestCase):
         self.assertTrue(j['ok'], j)
         self.assertTrue(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
 
+    def test_escolher_a_revisao_ao_aprovar(self):
+        """1.97.5: a nova é o padrão; "manter a atual" grava na letra de agora (a cópia dela é substituída); ou outra"""
+        self.entra_aprovador()
+        e = self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()
+        self.assertEqual((e['proxima'], e['revisoes']), ('REV.A', []))
+        self.assertEqual(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()['rev'], 'REV.A')
+        # mexe depois da aprovação (o evento de edição antes da placa ser produzida): manter a REV.A
+        self.escreve('changes.js', 'var changes = [\n{"op":"move"},\n];\n')
+        e = self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()
+        self.assertEqual((e['proxima'], e['revisoes']), ('REV.B', ['REV.A']))
+        j = self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876', 'rev': 'REV.A'}).get_json()
+        self.assertTrue(j['ok'] and j['rev'] == 'REV.A' and j['substituiu'], j)
+        r = self.c.get('/api/revisoes?projeto=CBM-DI251876').get_json()
+        self.assertEqual([x['rev'] for x in r['revisoes']], ['REV.A'], 'continua uma revisão só')
+        with open(os.path.join(self.pdir, 'Revisoes', 'REV.A', 'changes.js'), encoding='utf-8') as f:
+            self.assertIn('"op":"move"', f.read(), 'a cópia da REV.A é a de agora')
+        # outra letra escolhida, e a nova (padrão) segue dela
+        self.escreve('changes.js', 'var changes = [\n{"op":"move"},\n{"op":"move2"},\n];\n')
+        j = self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876', 'rev': 'D'}).get_json()
+        self.assertEqual((j['rev'], j['substituiu']), ('REV.D', False))
+        self.assertEqual(carimbos.params_do_texto(self.le())['Revisao'], 'REV.D')
+        self.escreve('changes.js', 'var changes = [\n];\n')
+        self.assertEqual(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876', 'rev': 'nova'}).get_json()['rev'], 'REV.E')
+        # letra que não é letra
+        self.escreve('changes.js', 'var changes = [\n{"op":"x"},\n];\n')
+        self.assertEqual(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876', 'rev': 'REV.12'}).status_code, 400)
+
     def test_revisoes_a_cada_aprovacao(self):
         self.entra_aprovador()
         j = self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()

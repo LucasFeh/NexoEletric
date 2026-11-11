@@ -36,7 +36,8 @@ const QS = new URLSearchParams(location.search);
 const PROJ = QS.get('p');
 /* as strings especiais da placa (a logo da casa: ".CodigoDaPlaca", ".Revisao") com os parametros do projeto; o
    leNaoMontar relê o esquema a cada mudança do disco e recarrega a vista se eles mudarem (a aprovação troca a revisão) */
-const chaveParams = s => (s && typeof s.params === 'string' ? s.params : '') + '|' + ((s && s.project) || PROJ || '');
+/* 1.97.5: a marca SoPlaca (só da placa) não conta — marcar um furo de fixação não recarrega a vista */
+const chaveParams = s => (s && typeof s.params === 'string' ? s.params.split(';').filter(x => !/^\s*SoPlaca\s*=/i.test(x)).join(';') : '') + '|' + ((s && s.project) || PROJ || '');
 let PARAMS_CHAVE = chaveParams(window.schematic);
 HubCore.setParamsProjeto(window.schematic ? window.schematic.params : '', (window.schematic && window.schematic.project) || PROJ);
 const LEAN = QS.has('lean');
@@ -5231,6 +5232,9 @@ function extrasDoHub(w){
   /* 1.90.0: o "Não montar" do projeto (fora da variante), que saiu do painel */
   const nm = itemNaoMontar();
   if (nm) it.push(nm);
+  /* 1.97.5: o componente que só a placa tem (furo de fixação, fiducial): "Só da placa" — o ECO não o apaga */
+  const sp = itemSoPlaca();
+  if (sp) it.push(sp);
   const muda = SEL.filter(CAMADA_LIVRE);
   if (muda.length) {
     const ks = new Set(muda.map(a => a.m.eff.layer));
@@ -8037,6 +8041,7 @@ async function leNaoMontar(){
     if (!chDirty && !annDirty) HubDialog.ocioso().then(() => location.reload());
   }
   SCH_COMPS = sch ? new Map((sch.items || []).filter(it => it && it.t === 'comp' && it.ref != null).map(it => [String(it.ref), it])) : null;
+  SO_PLACA = HC.soPlacaRefs ? HC.soPlacaRefs(sch) : new Set();
   const novo = HC.dnpRefs(sch);
   const mudou = novo.size !== DNP.size || [...novo].some(r => !DNP.has(r));
   DNP = novo;
@@ -8061,6 +8066,34 @@ async function marcaNaoMontar(refOuRefs, on){
   DNP = HC.dnpRefs(sch); dnpSemEsquema = false;
   pede(); aoMudarSel();
   HubDialog.toast(refs.join(', ') + (on ? ': não montar — marcado no esquema (sai do BOM, da Neoden e da lista do Odoo)' : ': volta a ser montado'), 'ok');
+}
+/* ── SÓ DA PLACA (1.97.5) ── o componente que a placa tem e o esquema não (furo de fixação, fiducial): a marca mora no
+   cabeçalho do schematic.js (SoPlaca=MH1,MH2 nos params, HubCore.marcaSoPlaca) e o ECO não propõe apagá-lo */
+let SO_PLACA = new Set();
+async function marcaSoPlaca(refs, on){
+  if (LEAN || !HubIO.canPost || !SCH_SRC) { HubDialog.toast('abra a vista pelo hub para marcar "só da placa"', 'warn'); return; }
+  const sch = await globalDe('schematic', SCH_SRC, true);
+  if (!sch) { HubDialog.toast('este projeto não tem schematic.js — a marca "só da placa" mora no cabeçalho dele', 'warn'); return; }
+  if (!HC.marcaSoPlaca(sch, refs, on).length) return;
+  const out = HC.serializeSchematic(sch);
+  if (!out.text) { await HubDialog.alert(out.errors.map(e => (e.idx >= 0 ? '#' + (e.idx + 1) + ' ' : '') + e.msg).join('\n'), { title:'schematic.js inválido — nada foi gravado' }); return; }
+  try { await HubIO.saveFile(SCH_REL, out.text); }
+  catch (e) { HubDialog.toast('não gravou o schematic.js: ' + e.message, 'err'); return; }
+  SO_PLACA = HC.soPlacaRefs(sch);
+  HubDialog.toast(refs.join(', ') + (on ? ': só da placa — o ECO não propõe apagar' : ': volta a ser comparado com o esquema pelo ECO'), 'ok');
+}
+function itemSoPlaca(){
+  if (!SCH_SRC || !SCH_COMPS || VAR.on) return null;
+  const rs = [...new Set(compsDaSel().map(m => String(refDnp(m))).filter(Boolean))].filter(r => !SCH_COMPS.has(r));
+  if (!rs.length) return null;
+  const todos = rs.every(r => SO_PLACA.has(r));
+  const nao = (LEAN || !HubIO.canPost) ? 'abra a vista pelo hub para marcar "só da placa"'
+    : (typeof HubEquipe !== 'undefined' && HubEquipe.bloqueia ? HubEquipe.bloqueia(SCH_REL) : null);
+  const lista = rs.length > 4 ? rs.slice(0, 4).join(', ') + ' +' + (rs.length - 4) : rs.join(', ');
+  return { rot:'Só da placa ' + lista, check:todos, off:!!nao, porque:nao || undefined,
+           dica:nao ? nao : todos ? 'marcado como só da placa: o ECO não propõe apagar — clique para desmarcar'
+                      : 'furo de fixação, fiducial e similares: o componente não está no esquema e fica na placa — o ECO não propõe apagar (grava no cabeçalho do esquema)',
+           f:() => marcaSoPlaca(rs, !todos) };
 }
 /* o "Não montar" no botão direito (1.90.0: saiu do painel). Fora da variante; na variante o menu tem o Suprimir /
    Montar dela. Desligado, com o motivo, para quem não grava o esquema (visualizador, fora da equipe, sem hub). */

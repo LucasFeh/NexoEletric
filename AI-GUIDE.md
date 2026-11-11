@@ -229,6 +229,10 @@ No template da casa (`casa:A4_DiEletrons`) o carimbo se preenche sozinho (desde 
 - `Verificador_DiEletrons`, `Aprovador_DiEletrons`, `Data_verificacao`, `Data_aprovacao`, `Revisao`: o **Aprovar** (só
   quem o administrador marcou como aprovador no Nexo Hub).
 
+**Componente só da placa** (1.97.5): o furo de fixação, o fiducial e similares, que a placa tem e o esquema não, ficam
+marcados no cabeçalho do schematic.js, nos params do projeto: `SoPlaca=MH1,MH2,FID1`. O ECO não propõe apagá-los, nem a net
+que só eles usam. Marque pelo `pcb_so_placa` do MCP ou pelo botão direito da vista PCB; não edite à mão no meio de outros params.
+
 ### Equipe do projeto e histórico (1.84.0)
 
 Cada projeto tem um responsável e colaboradores convidados (`Projects/<p>/equipe.json`, pelo login do Nexo Hub). Só o

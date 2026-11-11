@@ -44,7 +44,12 @@ de outra maquina um de cada vez) os campos da aprovacao saem do cabecalho. Assum
 Rotas:
   GET  /api/aprovacao?projeto=             -> {ok, aprovado, por, data, carimbo (o login), usuario, temEsquema}
   GET  /api/aprovacoes                     -> {ok, projetos:{<nome>: {aprovado, por, data}}}
-  POST /api/aprovacao {projeto}            -> aprova como quem esta logado (aprovador) e grava a revisao: {ok, texto, params, rev, ...}
+  POST /api/aprovacao {projeto, rev?}      -> aprova como quem esta logado (aprovador) e grava a revisao: {ok, texto, params, rev, ...}
+                                              rev (1.97.5): a letra escolhida no Aprovar ("B", "REV.B"); sem ela, a seguinte.
+                                              Pedido do dono: "quando o aprovador for aprovar, apresentar a opcao criar Rev
+                                              nova ou manter a atual — temos eventos de edicao mesmo apos a aprovacao, e a
+                                              rev so vem depois da placa produzida; melhor seria nova rev como padrao ou
+                                              escolher a rev". A letra que ja existe no historico tem a copia substituida.
   GET  /api/revisoes?projeto=              -> {ok, revisoes:[{rev, data, quando, aprovador, usuario, resumo}], atual:{rev, aprovado, mudancas}}
   POST /api/revisoes/voltar {projeto, rev} -> o projeto volta a ser o da revisao
   POST /api/revisoes/apagar {projeto, rev}  -> tira a revisao do historico (a de agora tira tambem a aprovacao)
@@ -671,7 +676,11 @@ def registra(app, root, *_antigo):
         if not d:
             return {'ok': False, 'error': 'projeto desconhecido'}, 404
         e = confere(d)
-        return dict(ok=True, usuario=quem_aprovou(d, e), **e)
+        # 1.97.5: a revisao que o Aprovar oferece como nova, e as que ja existem (para escolher)
+        txt = _le_arquivos(d, ('schematic.js',))['schematic.js'] or ''
+        extra = {'proxima': 'REV.' + proxima_revisao(d, params_do_texto(txt)),
+                 'revisoes': ['REV.' + x.get('rev') for x in revisoes(d) if x.get('rev')]}
+        return dict(ok=True, usuario=quem_aprovou(d, e), **dict(e, **extra))
 
     @app.route('/api/aprovacoes')
     def aprovacoes():
@@ -715,6 +724,14 @@ def registra(app, root, *_antigo):
             if ass is None:
                 return {'ok': False, 'error': 'não consegui conferir o esquema (o Node do NexoEletric não respondeu): tente de novo'}, 503
             rev = proxima_revisao(d, params_do_texto(txt))
+            # 1.97.5: a letra escolhida no Aprovar (nova e o padrao; "manter a atual" ou outra)
+            pedida = corpo().get('rev')
+            if pedida not in (None, '', 'nova'):
+                letra = letra_da_revisao(pedida)
+                if not re.match(r'^[A-Z]{1,3}$', letra or ''):
+                    return {'ok': False, 'error': 'revisão inválida: %s (use a letra, ex.: B ou REV.B)' % pedida}, 400
+                rev = letra
+            substituiu = any(x.get('rev') == rev for x in revisoes(d))
 
             def fn(p):
                 p['Revisao'] = 'REV.' + rev
@@ -739,7 +756,7 @@ def registra(app, root, *_antigo):
         _desde.pop(d, None)
         _eq.evento(d, 'aprovacao', ['%s aprovou o projeto: REV.%s' % (c['nome'], rev)], c)
         return dict(e, ok=True, texto=novo, params=serializa_params(params_do_texto(novo)), rev='REV.' + rev,
-                    resumo=linha['resumo'], usuario=_eq.quem(c))
+                    resumo=linha['resumo'], usuario=_eq.quem(c), substituiu=substituiu)
 
     @app.route('/api/revisoes')
     def revisoes_lista():

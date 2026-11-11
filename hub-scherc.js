@@ -138,6 +138,10 @@ function rodar(o){
     const [ref, num] = String(n.pins[0]).split(/-(?=[^-]*$)/);
     /* a net que liga só um Graphical a uma port (o contator do painel) não é "um pino só" */
     if (sup.has(ref) || graf.has(ref)) continue;
+    /* o No ERC na ponta do pino diz "solto de propósito" (1.97.5, pedido do dono: os pinos 28 e 30 do CN1 do display):
+       vale também para a net de um pino só */
+    const lugar = pinoEm(ref, num);
+    if (lugar && (sch.items || []).some(i => i && i.t === 'noerc' && i.sheet === lugar.sheet && Math.abs(i.x - lugar.x) <= 0.5 && Math.abs(i.y - lugar.y) <= 0.5)) continue;
     add('net-um-pino', 'a net ' + n.name + ' liga um pino só (' + ref + ' pino ' + num + ')', pinoEm(ref, num), { ref, net: n.name });
   }
   for (const w of (nets.warnings || [])) {

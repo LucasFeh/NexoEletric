@@ -392,4 +392,37 @@ caso('ECO: não apaga net com cobre, e o mapa pino↔pad forçado (CH2: pino 2 =
   const ui = require('fs').readFileSync(require('path').join(__dirname, '..', 'hub-pcbeco-ui.js'), 'utf8');
   assert.ok(ui.includes('sem os pinos conferidos') && ui.includes('não serão removidas') && ui.includes('P.fonteSimbolos'));
 });
+/* ── 1.97.5: o conector uma parte por via, o No ERC na net de um pino só, e o componente só da placa ── */
+caso('conector por via: só as partes da folha; No ERC silencia "um pino só"; só da placa fica', () => {
+  /* a barra 1x40 uma parte por via, cortada em 6 vias (o footprint tem 6 pads) */
+  const parts = []; for (let k = 1; k <= 40; k++) parts.push({ part:k, pins:[{ num:String(k), name:String(k), x:0, y:0, orient:0, len:100 }] });
+  const BARRA = { name:'1x40', porVia:40, parts };
+  const FP6 = { name:'BARRA 6', pads:[1, 2, 3, 4, 5, 6].map(n => ({ name:String(n) })), silk:[] };
+  const it = []; for (let k = 1; k <= 6; k++) it.push({ t:'comp', ref:'CN3', sym:'1x40', part:k, x:1000, y:1000 + k * 100, rot:0, footprint:'BARRA 6' });
+  const s = folha(it);
+  const partes = P.partesNaFolha(BARRA, s.items[1], s);
+  assert.deepStrictEqual([...partes].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6]);
+  assert.deepStrictEqual(P.avisosDoFootprint(HC, { footprints:[FP6] }, BARRA, 'BARRA 6', null, partes).falta, [], 'só as 6 da folha');
+  assert.strictEqual(P.avisosDoFootprint(HC, { footprints:[FP6] }, BARRA, 'BARRA 6', null, null).falta.length, 34, 'sem o filtro, as 34 de fora');
+  assert.strictEqual(P.partesNaFolha(RES2, s.items[1], s), null, 'símbolo comum: todas as partes');
+  /* o No ERC na ponta do pino 1 do R1, que é o único da net D28 */
+  const s2 = folha([{ t:'comp', ref:'R1', sym:'RES2', x:1000, y:1000, rot:0, footprint:'R0805' },
+                    { t:'netlabel', net:'D28', x:800, y:1000 }, { t:'noerc', x:800, y:1000 }]);
+  const r2 = Erc.rodar({ hc:HC, schematic:s2, slib:SLIB, plib:PLIB });
+  assert.ok(!r2.violacoes.some(v => v.regra === 'net-um-pino' && /D28/.test(v.msg)), JSON.stringify(r2.violacoes.map(v => v.msg)));
+  const s3 = folha([{ t:'comp', ref:'R1', sym:'RES2', x:1000, y:1000, rot:0, footprint:'R0805' }, { t:'netlabel', net:'D28', x:800, y:1000 }]);
+  assert.ok(Erc.rodar({ hc:HC, schematic:s3, slib:SLIB, plib:PLIB }).violacoes.some(v => v.regra === 'net-um-pino'), 'sem o No ERC o aviso continua');
+  /* só da placa: o MH1 (furo de fixação no GND da carcaça) não sai pelo ECO */
+  const B = placa(['GNDC'], [{ id:'m', ref:'MH1', footprint:'FURO M3', comment:'', layer:'Top', x:5, y:5, rot:0, pads:[pad('MH1', '1', 5, 'GNDC')] }]);
+  const sch = folha([]);
+  const sem = Eco.compara(sch, B, { schlib:SLIB, pcblib:PLIB, changes:[] });
+  assert.ok(sem.acoes.some(a => a.tipo === 'comp_del' && a.objeto === 'MH1'), 'sem a marca, o ECO propõe apagar');
+  assert.deepStrictEqual(HC.marcaSoPlaca(sch, ['MH1', 'FID1'], true), ['MH1', 'FID1']);
+  assert.strictEqual(sch.params, 'SoPlaca=FID1,MH1');
+  const com = Eco.compara(sch, B, { schlib:SLIB, pcblib:PLIB, changes:[] });
+  assert.ok(!com.acoes.some(a => a.objeto === 'MH1' || a.objeto === 'GNDC'), 'com a marca: nem o MH1, nem a net só dele: ' + JSON.stringify(com.acoes.map(a => a.grupo + ' ' + a.objeto)));
+  sch.params = 'Revisao=REV.A;SoPlaca=FID1,MH1';
+  assert.deepStrictEqual(HC.marcaSoPlaca(sch, ['FID1', 'MH1'], false), ['FID1', 'MH1']);
+  assert.strictEqual(sch.params, 'Revisao=REV.A', 'os outros params ficam');
+});
 console.log('test-196-erc-port-eco-fp: ' + ok + ' ok');

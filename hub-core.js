@@ -3336,6 +3336,28 @@ function graficoRefs(sch){
   for (const it of ((sch && Array.isArray(sch.items)) ? sch.items : [])) if (it && it.t === 'comp' && it.ref != null && ehGrafico(it)) S.add(String(it.ref));
   return S;
 }
+/* ---- SÓ DA PLACA (1.97.5) ----
+   Pedido do dono: "componente só da placa: falta uma marca para furo de fixação e similares, para o ECO não propor
+   apagar". O furo de fixação, o fiducial, a logo vinda do Altium: componentes que a placa tem e o esquema não. A marca
+   não cabe no item do esquema (ele não existe lá) nem no board.js (só leitura): mora no CABEÇALHO do schematic.js, nos
+   params do projeto, como SoPlaca=MH1,MH2,FID1 — o arquivo que o ECO já compara. soPlacaRefs(sch) -> Set;
+   marcaSoPlaca(sch, refs, on) marca/desmarca e devolve os refs que mudaram. */
+const SO_PLACA = /^\s*SoPlaca\s*=/i;
+function soPlacaRefs(sch){
+  const p = sch && typeof sch.params === 'string' ? sch.params : '';
+  const par = p.split(';').find(x => SO_PLACA.test(x));
+  return new Set(par ? par.slice(par.indexOf('=') + 1).split(/[\s,]+/).map(s => s.trim()).filter(Boolean) : []);
+}
+function marcaSoPlaca(sch, refs, on){
+  if (!sch) return [];
+  const S = soPlacaRefs(sch), mudou = [];
+  for (const r of (refs || []).map(String)) { if (on && !S.has(r)) { S.add(r); mudou.push(r); } else if (!on && S.has(r)) { S.delete(r); mudou.push(r); } }
+  if (!mudou.length) return [];
+  const resto = (typeof sch.params === 'string' ? sch.params : '').split(';').filter(x => x.trim() && !SO_PLACA.test(x));
+  if (S.size) resto.push('SoPlaca=' + [...S].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric:true })).join(','));
+  if (resto.length) sch.params = resto.join(';'); else delete sch.params;
+  return mudou;
+}
 /* os designadores marcados como nao montar no esquema (Set de strings; esquema ausente = vazio) */
 function dnpRefs(sch){
   const S = new Set();
@@ -3662,7 +3684,7 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          arteGeom, ehArte, CAMPOS_ARTE, valorCampoArte, NAO_DEFINIDO_ARTE:NAO_DEFINIDO,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp, assinaturaPinos, simbolosDoDocumento,
          suggestSym,
-         buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp, ACERVO_DEFS, montaAcervos, partesDe, ehGrafico, graficoRefs, portPontas, fpDoComponente, mapaPinoPad, padDoPino, pinoPadCampo, avisoFootprintRenomeado,
+         buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp, soPlacaRefs, marcaSoPlaca, ACERVO_DEFS, montaAcervos, partesDe, ehGrafico, graficoRefs, portPontas, fpDoComponente, mapaPinoPad, padDoPino, pinoPadCampo, avisoFootprintRenomeado,
          applyPcbChanges, effectiveBoard, deriveStatus,
          PCB_LAYERS, pcbLayer, isCopper, flipLayer, boardLayers,
          serializeChanges, serializeSchematic, serializeAnnotations, serializeLibSubs,

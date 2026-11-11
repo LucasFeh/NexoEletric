@@ -4,6 +4,36 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.97.5 — 2026-11-11
+
+**O conector uma parte por via, o No ERC na net de um pino só, o componente só da placa e a revisão escolhida no
+Aprovar.** Pedidos do dono:
+- **Conector "uma parte por via": só as partes da folha.** A CN3 (barra 1x40 cortada em 6 vias) acusava "pinos 1…40 sem
+  pad" pelas 34 vias que não foram colocadas. No símbolo uma parte por via (`porVia`), os "pinos sem pad" contam só as
+  partes que estão na folha (`partesNaFolha`). Vale na ficha, no ponto do Parâmetros, no DRC do esquema e no `sch_erc`.
+  Nos outros símbolos continua contando todas as partes.
+- **No ERC silencia também a "net com um pino só"** (os pinos 28 e 30 do CN1 do display). O No ERC na ponta do pino já
+  dizia "solto de propósito" para o pino desconectado; agora vale também quando um rótulo dá nome à net desse pino só.
+- **Componente só da placa: uma marca para o ECO não propor apagar** (furo de fixação, fiducial, logo vinda do Altium).
+  - A marca mora no cabeçalho do `schematic.js` (`SoPlaca=MH1,MH2` nos params do projeto): o item não existe no
+    esquema e o `board.js` é só leitura.
+  - Na vista PCB: botão direito no componente que não está no esquema › **Só da placa**. Marcar não recarrega a
+    vista.
+  - No MCP: `pcb_so_placa {projeto, refs}`.
+  - O ECO não propõe o "Remover componente" deles, nem o "Remover net" da net que só eles usam (o furo no GND da
+    carcaça).
+- **A revisão escolhida no Aprovar.** "Quando o aprovador for aprovar, apresentar a opção criar Rev nova ou manter a
+  atual — temos eventos de edição mesmo após a aprovação, e a rev só vem depois da placa produzida; melhor seria nova
+  rev como padrão ou escolher a rev." O Aprovar pergunta a revisão:
+  - **a nova** (a letra seguinte), que é o padrão;
+  - **manter a atual** (grava na letra de agora; a cópia guardada dela em Histórico › Revisões é substituída);
+  - ou **outra**, digitando a letra (se ela já existe no histórico, pede confirmação antes de substituir).
+  No servidor, o `POST /api/aprovacao` aceita `rev` (`tools/rotas/aprovacao.py`; a janela Rust repassa ao Python), e o
+  `GET` diz a próxima e as que já existem.
+- Testes:
+  - `tests/test-196-erc-port-eco-fp.js` (19 casos, +1: a CN3 com 6 de 40 vias, o No ERC, o MH1 só da placa e os params);
+  - `tests/test_aprovacao.py` (+1: nova, manter a atual com a cópia substituída, outra letra e a letra inválida).
+
 ## 1.97.4 — 2026-11-10
 
 **O ECO não apaga net com cobre, avisa alto o que não conferiu, e o mapa pino↔pad forçado.** O dono viu o ECO da tela

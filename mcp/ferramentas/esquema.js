@@ -605,6 +605,32 @@ module.exports = {
       },
     },
     {
+      nome: 'pcb_so_placa', titulo: 'Marcar componente só da placa (furo de fixação)',
+      descricao: 'Marca (so_placa:true, o padrão) ou desmarca componentes que a PLACA tem e o esquema não — furo de fixação, fiducial, logo vinda do Altium —, '
+        + 'para o ECO não propor apagá-los (nem as nets que só eles usam). A marca mora no cabeçalho do schematic.js (SoPlaca=MH1,MH2 nos params do projeto). '
+        + 'refs = os designadores da placa (pcb_consultar/pcb_resumo mostram).',
+      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, refs: { type: 'array', minItems: 1, items: { type: 'string' } },
+        so_placa: { type: 'boolean', description: 'true = só da placa (padrão); false = volta a ser comparado pelo ECO' } }, COMUNS), required: ['projeto', 'refs'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const on = a.so_placa !== false;
+        let mudou = [];
+        const naPlaca = ctx.temBoard(p) ? new Set((ctx.placa(p).eb.components || []).map(c => String(c.ref))) : null;
+        const fora = naPlaca ? a.refs.map(String).filter(r => !naPlaca.has(r)) : [];
+        if (on && fora.length) throw new ErroMcp(`não estão na placa: ${fora.join(', ')}`);
+        const est = transacao(ctx, p, (arq, L, cab) => {
+          const noEsq = a.refs.map(String).filter(r => arq.itens.some(x => x && x.t === 'comp' && String(x.ref) === r));
+          if (on && noEsq.length) throw new ErroMcp(`estão no esquema (o ECO já os compara): ${noEsq.join(', ')} — para não montar, use sch_nao_montar`);
+          mudou = ctx.hc.marcaSoPlaca(cab, a.refs, on);
+          if (mudou.length) arq.cirurgico = false;      /* o cabeçalho mudou: o arquivo sai inteiro */
+          return [];
+        }, { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_so_placa' });
+        est.so_placa = on; est.mudaram = mudou;
+        if (!mudou.length) est.nota = on ? 'já estavam marcados como só da placa' : 'não estavam marcados';
+        return est;
+      },
+    },
+    {
       nome: 'sch_nao_montar', titulo: 'Marcar componentes como não montar (DNP)',
       descricao: 'Marca (dnp:true, o padrão) ou desmarca (dnp:false) componentes como NÃO MONTAR, em todas as partes de cada ref. O componente continua no esquema e na placa (footprint e nets ficam, o ECO não o tira), mas sai da lista do Odoo, do BOM da bancada, do CSV da Neoden e do bom_listar; a folha e a vista PCB o mostram com um X vermelho. Desmarcar também tira a marca antiga dos params (DNP=1, Montagem=NAO MONTAR).',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, refs: { type: 'array', minItems: 1, items: { type: 'string' } },
@@ -771,7 +797,7 @@ module.exports = {
             /* a peça só de cobre (qualquer parte marcada) não tem avisos de compra (1.96.1) */
             soCobre: x => (s.items || []).some(y => y && y.t === 'comp' && y.ref === x.ref
               && HubSchErc.ehSoCobre(y, y.footprint ? hc.footprintOf(L.pcblib, y.footprint) : null)),
-            fpAvisos: (x, sym) => P.avisosDoFootprint(hc, L.pcblib, sym, x.footprint || '', hc.mapaPinoPad ? hc.mapaPinoPad(x) : null).avisos }));
+            fpAvisos: (x, sym) => P.avisosDoFootprint(hc, L.pcblib, sym, x.footprint || '', hc.mapaPinoPad ? hc.mapaPinoPad(x) : null, P.partesNaFolha(sym, x, s)).avisos }));
           return cache.get(c);
         };
         const nd = HubSchTemplate.projetoNaoDefinido(s.params, s.project || '');

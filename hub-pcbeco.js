@@ -237,6 +237,9 @@ function compara(schematic, board, opts){
     if (!listaPcb.includes(bn)) continue;          /* net so num pad, fora da lista: nada a remover */
     /* net com pino de componente de pinagem desconhecida: nao da para dizer que sobrou */
     if ([...netPcbPins.get(bn)].some(k => cegos.has(k.slice(0, k.lastIndexOf('-'))))) continue;
+    /* a net que só os componentes só da placa usam (o furo de fixação no GND da carcaça) fica */
+    { const ps = [...netPcbPins.get(bn)], soP = typeof HC.soPlacaRefs === 'function' ? HC.soPlacaRefs(schematic) : null;
+      if (soP && soP.size && ps.length && ps.every(k => soP.has(k.slice(0, k.lastIndexOf('-'))))) continue; }
     const usos = contaUsos(eb, bn);
     /* 1.97.4 (pedido do dono: "o ECO deveria recusar, ou pelo menos avisar alto, quando vai apagar uma net que ainda
        tem cobre — eram 51 e 55 objetos"): a net com cobre não sai pelo ECO. Ela sai desmarcada e com erro (não
@@ -353,8 +356,10 @@ function compara(schematic, board, opts){
                          dados:{ ref, pad:pino, net:pinSch[k], orig_net:'' }, semPad:true });
     }
   }
+  /* só da placa (1.97.5, HubCore.soPlacaRefs: SoPlaca nos params do esquema): o furo de fixação não sai */
+  const soPlaca = typeof HC.soPlacaRefs === 'function' ? HC.soPlacaRefs(schematic) : new Set();
   for (const ref of [...pcb.keys()].sort(natural)) {
-    if (sch.has(ref)) continue;
+    if (sch.has(ref) || soPlaca.has(ref)) continue;
     const c = pcb.get(ref);
     acao('compDel', { tipo:'comp_del', objeto:ref, para:'PCB', msg:c.footprint || '',
                       dados:{ ref, orig_x:c.x, orig_y:c.y, orig_rot:c.rot, orig_layer:c.layer, orig_footprint:c.footprint || '' } });

@@ -213,10 +213,34 @@ function montaAprovar(g){
         : 'somente leitura: só a equipe do projeto aprova (peça um convite ao responsável)', 'warn', 7000); return;
     }
     const D = root.HubDialog;
-    if (D && !(await D.confirm('Aprovar o projeto ' + g.projeto + ' como ' + u.nome + '?\nO quadro de título da folha recebe '
-        + u.nome + ' como verificador e aprovador, com a data de hoje, e o projeto é guardado como uma revisão nova '
-        + '(Histórico › Revisões). Qualquer modificação depois tira a aprovação.',
-        { title:'Aprovar projeto', ok:'Aprovar' }))) return;
+    /* A REVISÃO DESTA APROVAÇÃO (1.97.5). Pedido do dono: "quando o aprovador for aprovar, apresentar a opção criar Rev
+       nova ou manter a atual — temos eventos de edição mesmo após a aprovação, e a rev só vem depois da placa
+       produzida; melhor seria nova rev como padrão ou escolher a rev". A nova é o padrão; "manter a atual" grava na
+       letra de agora (a cópia guardada dela é substituída); "Outra…" pede a letra. */
+    let rev = 'nova';
+    if (D){
+      const prox = ap.proxima || 'REV.?', atual = String(ap.rev || '').trim(), ja = ap.revisoes || [];
+      const opcoes = [{ v:'nova', rot:prox + ' — revisão nova (padrão)' }];
+      if (atual && atual !== prox) opcoes.push({ v:atual, rot:atual + ' — manter a atual' + (ja.includes(atual) ? ' (substitui a cópia guardada dela)' : '') });
+      opcoes.push({ v:'outra', rot:'Outra revisão…' });
+      const v = D.escolhe ? await D.escolhe('Aprovar o projeto ' + g.projeto + ' como ' + u.nome + '? O quadro de título da folha recebe '
+          + u.nome + ' como verificador e aprovador, com a data de hoje, e o projeto é guardado na revisão escolhida '
+          + '(Histórico › Revisões). Qualquer modificação depois tira a aprovação.',
+          { title:'Aprovar projeto', ok:'Aprovar', rotulo:'Revisão', opcoes, v:'nova' })
+        : ((await D.confirm('Aprovar o projeto ' + g.projeto + ' como ' + u.nome + '? (' + prox + ')', { title:'Aprovar projeto', ok:'Aprovar' })) ? 'nova' : null);
+      if (!v) return;
+      rev = v;
+      if (v === 'outra'){
+        const t = await D.texto('A letra da revisão (ex.: B ou REV.B). As que já existem: ' + (ja.length ? ja.join(', ') : 'nenhuma') + '.',
+          { title:'Aprovar projeto — outra revisão', rotulo:'Revisão', ok:'Aprovar', v:prox,
+            valida: s => /^(REV\.?\s*)?[A-Za-z]{1,3}$/i.test(String(s || '').trim()) ? '' : 'use a letra da revisão (ex.: B ou REV.B)' });
+        if (!t) return;
+        rev = 'REV.' + String(t).trim().replace(/^REV\.?\s*/i, '').toUpperCase();
+      }
+      const final = rev === 'nova' ? prox : rev;
+      if (rev !== 'nova' && ja.includes(final) && rev !== atual
+          && !(await D.confirm(final + ' já existe no histórico: a cópia guardada dela vai ser substituída por este projeto. Continuar?', { title:'Aprovar projeto', ok:'Substituir', danger:true }))) return;
+    }
     /* o aprovado é o que está no disco: a edição pendente vai antes (e a folha que sobrescreve os campos do projeto
        perde os dela, senão o carimbo mostraria o nome da folha e não o de quem aprovou) */
     const sch = g.schematic();
@@ -228,11 +252,11 @@ function montaAprovar(g){
       if (m){ const s = T.serializaParams(q); if (s) it.params = s; else delete it.params; g.marcaSujo(); }
     }
     if (g.sujo() && !(await g.salva())) return;
-    const j = await api('/api/aprovacao', { projeto:g.projeto });
+    const j = await api('/api/aprovacao', { projeto:g.projeto, rev });
     if (!j.ok){ toast('não aprovou: ' + (j.error || 'falhou'), 'err', 7000); await confere(); return; }
     g.adota(j.texto, j.params);
     ap = j; pinta();
-    toast(g.projeto + ' aprovado por ' + j.por + ' — ' + j.rev + ' guardada', 'ok', 5000);
+    toast(g.projeto + ' aprovado por ' + j.por + ' — ' + j.rev + (j.substituiu ? ' guardada (a cópia de antes foi substituída)' : ' guardada'), 'ok', 5000);
   });
   carrega().then(confere);
   setInterval(() => { if (!document.hidden) confere(); }, PERIODO);
