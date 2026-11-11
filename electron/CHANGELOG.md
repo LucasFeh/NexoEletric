@@ -4,6 +4,25 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.97.3 — 2026-11-10
+
+**O ECO da vista PCB vê os símbolos como a vista Esquema e o MCP.** Pedido do dono: "o ECO da tela, na 1.97.2, procura
+os símbolos só na SchLib. Os 115 componentes vinculados ao almoxarifado saem como 'não está na schlib: pinos não
+conferidos'. Sem esses pinos, ele não acha as renomeações e propõe trocar os pads J2-2 e J7-2 sozinhos, o que cria o
+falso curto. O eco_comparar do MCP resolve os mesmos símbolos pelos acervos e gera o ECO certo."
+- A vista PCB dava ao ECO só o `Libs/schlib.js` (a SchLib do Altium). Agora ela dá a SchLib + os acervos do
+  almoxarifado (básicos, especiais e os criados localmente, cada valor um símbolo com o desenho da família, e o
+  conector uma parte por via) + os símbolos guardados no próprio esquema. Os conectores de antes viram uma parte por
+  via em memória, como no MCP e na vista Esquema ao abrir.
+- A montagem dos acervos morava só na vista Esquema (`montaAcervos`). Ela vai para o `hub-core.js`
+  (`HubCore.montaAcervos`, o mesmo texto), e a vista Esquema e o ECO da vista PCB chamam a mesma.
+- Medido nos projetos reais, comparando o ECO montado como a vista monta com o `eco_comparar` do MCP:
+  - MIRBC-DI251885DRV: as 83 ações de net e pino idênticas (eram 115 só com a SchLib), com as 14 renomeações e
+    nenhuma troca do J2-2 nem do J7-2;
+  - MIRBC-DI251885MON: 1 ação idêntica (eram 68).
+- Testes: `tests/test-196-erc-port-eco-fp.js` (17 casos, +1: o ECO da vista com os acervos, e a vista Esquema com a
+  mesma montagem).
+
 ## 1.97.2 — 2026-11-10
 
 **A vista não grava mais por cima de uma edição feita por fora (o MCP).** Pedido do dono: "a vista PCB aberta

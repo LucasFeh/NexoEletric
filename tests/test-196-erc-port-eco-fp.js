@@ -338,4 +338,23 @@ caso('ECO: pino e renomeação juntos, e o aviso do cobre que fica na net antiga
   assert.ok(/as duas vão juntas/.test(pin.msgValida), pin.msgValida);
   assert.ok(!Eco.aplica(eco).linhas.some(l => l.op === 'pad_net'), 'o pad não muda sozinho');
 });
+/* ── 1.97.3: o ECO da vista PCB vê os símbolos como a vista Esquema e o MCP ── */
+caso('ECO da vista: SchLib + acervos do almoxarifado + símbolos do esquema (HubCore.montaAcervos)', () => {
+  const fs = require('fs'), path = require('path');
+  const pcb = fs.readFileSync(path.join(__dirname, '..', 'pcbframe.js'), 'utf8');
+  const i = pcb.indexOf('async function abreEco'), j = pcb.indexOf('async function abreNovaPlaca', i);
+  const eco = pcb.slice(i, j);
+  for (const s of ['HC.montaAcervos(', 'almoxBasicos', 'almoxEspeciais', 'HC.simbolosDoDocumento(', 'HC.migraConectoresPorVia('])
+    assert.ok(eco.includes(s), 'o abreEco usa ' + s);
+  assert.ok(eco.includes('schematic:sch, schlib, pcblib'), 'e entrega essa schlib ao ECO');
+  /* a vista Esquema delega para a mesma montagem */
+  const g2 = { schlib:{ symbols:[RES2] }, almoxBasicos:{ symbols:[{ name:'RESISTOR', parts:RES2.parts, valores:[{ altium:'SMD 0805 10K' }] }] } };
+  const a = HC.montaAcervos(g2), b = P.montaAcervos(g2);
+  assert.deepStrictEqual(a.symbols.map(s => s.name), ['RES2', 'RESISTOR', 'SMD 0805 10K']);
+  assert.deepStrictEqual(b.symbols.map(s => s.name), a.symbols.map(s => s.name));
+  /* o componente do almoxarifado tem pinos: o ECO os confere */
+  const s = folha([{ t:'comp', ref:'R1', sym:'SMD 0805 10K', x:1000, y:1000, rot:0, footprint:'R0805' }]);
+  assert.ok(HC.compPinsWorld(s.items[1], { symbols:a.symbols }), 'pinos pelo acervo');
+  assert.strictEqual(HC.compPinsWorld(s.items[1], g2.schlib), null, 'só pela SchLib: sem pinos (o caso da 1.97.2)');
+});
 console.log('test-196-erc-port-eco-fp: ' + ok + ' ok');

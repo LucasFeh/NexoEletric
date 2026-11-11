@@ -2817,10 +2817,26 @@ async function abreEco(){
   const base = 'Projects/' + encodeURIComponent(PROJ) + '/';
   const sch = await globalDe('schematic', base + 'schematic.js', true);
   if (!sch) { HubDialog.alert('Este projeto não tem schematic.js — o ECO compara o esquema com a placa.', { title:'Atualizar a PCB' }); return; }
-  const [schlib, pcblib, rm, ls] = await Promise.all([
+  const [schlibAltium, pcblib, rm, ls, almoxBasicos, almoxEspeciais, almoxLocais, symbolsLib] = await Promise.all([
     globalDe('schlib', 'Libs/schlib.js'), globalDe('pcblib', 'Libs/pcblib.js'),
-    globalDe('renameMap', 'Libs/rename-map.js'), globalDe('libSubs', 'Libs/lib-subs.js')]);
+    globalDe('renameMap', 'Libs/rename-map.js'), globalDe('libSubs', 'Libs/lib-subs.js'),
+    globalDe('almoxBasicos', 'Libs/almox-basicos.js'), globalDe('almoxEspeciais', 'Libs/almox-especiais.js'),
+    globalDe('almoxLocais', 'Libs/almox-locais.js'), globalDe('symbolsLib', 'Libs/symbols-lib.js')]);
   if (typeof HC.setLibTables === 'function') HC.setLibTables(rm, ls);
+  /* 1.97.3: os símbolos como a vista Esquema e o MCP os veem — a SchLib do Altium + os acervos do almoxarifado (cada
+     valor um símbolo, HubCore.montaAcervos) + os guardados no próprio esquema (HubCore.simbolosDoDocumento). Só com a
+     SchLib, os 115 componentes do almoxarifado do MIRBC ficavam "não está na schlib: pinos não conferidos", o ECO não
+     achava as renomeações (EN_4 → EN, Q1 → LATCH_OK_2) e trocava os pads J2-2 e J7-2 sozinhos (o falso curto). */
+  let schlib = schlibAltium;
+  if (typeof HC.montaAcervos === 'function') {
+    const m = HC.montaAcervos({ schlib:schlibAltium, almoxBasicos, almoxEspeciais, almoxLocais, symbolsLib });
+    schlib = Object.assign({}, schlibAltium || {}, { symbols:m.symbols });
+  }
+  if (typeof HC.simbolosDoDocumento === 'function' && Array.isArray(sch.symbols) && sch.symbols.length)
+    schlib = HC.simbolosDoDocumento(schlib, sch.symbols).schlib;
+  /* o conector de antes (um símbolo com todos os pinos) como uma parte por via, em memória — o mesmo do MCP e da vista
+     Esquema ao abrir; aqui o esquema não é gravado */
+  if (typeof HC.migraConectoresPorVia === 'function') { try { HC.migraConectoresPorVia(sch, schlib); } catch (e) { /* esquema velho: segue */ } }
   if (pcblib && typeof HC.setPcbLib === 'function') HC.setPcbLib(pcblib);
   if (typeof HubFpLib !== 'undefined') { HUBLIB = await HubFpLib.carrega(); registraLibHub(); }
   const pcblibEco = (typeof HubFpLib !== 'undefined' && HUBLIB) ? HubFpLib.mescla(pcblib, HUBLIB) : pcblib;

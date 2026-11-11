@@ -3218,6 +3218,96 @@ function ehDnp(it){
   if (it.dnp === true) return true;
   return typeof it.params === 'string' && it.params.split(';').some(par => DNP_PARAM.test(par));
 }
+/* ══ OS ACERVOS DE SÍMBOLOS (1.97.3) ══
+   Pedido do dono: "o ECO da tela, na 1.97.2, procura os símbolos só na SchLib. Os 115 componentes vinculados ao
+   almoxarifado saem como 'não está na schlib: pinos não conferidos'. Sem esses pinos, ele não acha as renomeações
+   (EN_4 → EN, Q1 → LATCH_OK_2) e propõe trocar os pads J2-2 e J7-2 sozinhos, o que cria o falso curto. O
+   eco_comparar do MCP resolve os mesmos símbolos pelos acervos e gera o ECO certo." A montagem dos acervos (a SchLib
+   do Altium + o almoxarifado, cada VALOR virando um símbolo com o desenho da família) morava só na vista Esquema
+   (schframe.js » montaAcervos); a vista PCB dava ao ECO só o Libs/schlib.js. Ela mora AQUI agora, e a vista Esquema,
+   a vista PCB (o ECO) e quem mais precisar chamam esta. O texto abaixo é o de lá, sem mudança. */
+const ACERVO_DEFS = [
+  { id:'altium',          nome:'schlib',         titulo:'Biblioteca do Altium' },
+  { id:'almox-basicos',   nome:'almoxBasicos',   titulo:'Almoxarifado — Básicos' },
+  { id:'almox-especiais', nome:'almoxEspeciais', titulo:'Almoxarifado — Especiais' },
+  { id:'almox-locais',    nome:'almoxLocais',    titulo:'Componentes criados localmente' },
+];
+const _acervo = (g, id, titulo) => (g && g.symbols && g.symbols.length)
+  ? { id, titulo: g.title || titulo, syms: g.symbols, almox: id !== 'altium',
+      gerado: g.generated || '' } : null;
+
+function partesDe(s, v){
+  return (v ? (v.parts || (s && s.parts)) : (s && s.parts)) || [];
+}
+/* Monta a lista de acervos, o indice nome -> acervo e os alias por VALOR a partir dos
+   globais que os <script> deixaram.
+   `velhos` e a montagem anterior: o acervo cujo arquivo NAO veio agora (404, servidor
+   caido, sync no meio da escrita) e PRESERVADO como estava, marcado com `caiu:true` —
+   meio acervo faltando viraria metade da folha em quadrado vermelho. */
+function montaAcervos(globais, velhos){
+  const g = globais || {};
+  const antes = new Map((velhos || []).map(a => [a.id, a]));
+  const acervos = [];
+  for (const d of ACERVO_DEFS){
+    const novo = _acervo(g[d.nome], d.id, d.titulo);
+    const velho = antes.get(d.id);
+    if (novo) acervos.push(novo);
+    else if (velho) acervos.push(Object.assign({}, velho, { caiu:true }));
+  }
+  const symbols = [], acervoDe = new Map(), valorDe = new Map();
+  /* O CONECTOR UMA PARTE POR VIA (2026-11-05, HubCore.simboloPorVia): o valor com `conn` ganha uma parte por pino,
+     no desenho do "Conector 1 via" da Biblioteca de simbolos */
+  const molde = moldeConectorVia(g.symbolsLib);
+  for (const a of acervos) for (const sy of a.syms){
+    if (acervoDe.has(sy.name)) continue;      /* o do Altium ganha em caso de xara */
+    acervoDe.set(sy.name, a);
+    symbols.push(sy);
+  }
+  /* Na conversao para o Altium cada VALOR virou um componente proprio, com nome
+     "SMD 0805 10K 1/8W". E esse nome que o schematic.js grava, porque e ele que existe
+     la dentro. Aqui registramos cada um como um simbolo que REAPROVEITA a geometria da
+     familia (mesma referencia de objeto, sem copia), para o hub desenhar, extrair nets e
+     validar sem precisar saber da diferenca. */
+  for (const a of acervos){
+    if (!a.almox) continue;
+    for (const sy of a.syms) for (const v of (sy.valores || [])){
+      if (!v.altium || acervoDe.has(v.altium)) continue;
+      /* a geometria da familia, compartilhada — a nao ser que o VALOR traga a dele: e assim
+         que o PNP deixa de ser desenhado com a seta do NPN sem partir a familia em duas. E o
+         partcount e o do desenho que ficou: um valor desenhado em duas partes tem duas, e o 1
+         cravado fazia a ficha e o "Adicionar componentes" esconderem a segunda. */
+      const partes = partesDe(sy, v);
+      const alias = {
+        name: v.altium, description: (v.itens && v.itens[0] && v.itens[0].nome) || v.label,
+        designator: sy.designator, familia: sy.familia, partcount: partes.length || 1,
+        parts: partes,
+        footprints: v.footprint ? [{ name: v.footprint, current: true, incurrentlib: true }]
+                                : (sy.footprints || []),
+        valores: [v], deValor: true,
+      };
+      const final = simboloPorVia(alias, v, molde);
+      acervoDe.set(alias.name, a);
+      valorDe.set(alias.name, { sym: sy, valor: v });
+      symbols.push(final);
+    }
+  }
+  /* A IDENTIDADE DA PEÇA, e não o nome do desenho (1.90.0): o OdooId de cada item do almoxarifado e o id
+     de cada componente criado localmente apontam para o acervo dele. É o que o acervoDoComp consulta antes
+     do nome — ver lá por quê. O primeiro acervo ganha, na mesma ordem do ACERVO_DEFS. */
+  const acervoPorOdoo = new Map(), acervoPorLocal = new Map();
+  for (const a of acervos){
+    if (!a.almox) continue;
+    for (const sy of a.syms){
+      const cl = sy && sy.criadoLocal;
+      if (cl && cl.id != null && !acervoPorLocal.has(String(cl.id))) acervoPorLocal.set(String(cl.id), a);
+      for (const v of (sy.valores || [])) for (const i of ((v && v.itens) || [])){
+        const id = i && i.odoo != null ? String(i.odoo).trim() : '';
+        if (id && !acervoPorOdoo.has(id)) acervoPorOdoo.set(id, a);
+      }
+    }
+  }
+  return { acervos, symbols, acervoDe, valorDe, acervoPorOdoo, acervoPorLocal };
+}
 /* ---- GRAPHICAL (1.97.0) ----
    Pedido do dono: "tratar ComponentKind=Graphical como no Altium: componente só de documentação. Ele não vai para a
    PCB nem para o BOM, não entra no ECO e não gera aviso de 'sem footprint'. A net que liga só um componente desses a
@@ -3562,7 +3652,7 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          arteGeom, ehArte, CAMPOS_ARTE, valorCampoArte, NAO_DEFINIDO_ARTE:NAO_DEFINIDO,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp, assinaturaPinos, simbolosDoDocumento,
          suggestSym,
-         buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp, ehGrafico, graficoRefs, portPontas, fpDoComponente, mapaPinoPad, padDoPino, pinoPadCampo, avisoFootprintRenomeado,
+         buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp, ACERVO_DEFS, montaAcervos, partesDe, ehGrafico, graficoRefs, portPontas, fpDoComponente, mapaPinoPad, padDoPino, pinoPadCampo, avisoFootprintRenomeado,
          applyPcbChanges, effectiveBoard, deriveStatus,
          PCB_LAYERS, pcbLayer, isCopper, flipLayer, boardLayers,
          serializeChanges, serializeSchematic, serializeAnnotations, serializeLibSubs,
