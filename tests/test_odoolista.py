@@ -1162,6 +1162,50 @@ def test_graphical_fica_fora_calado():
     assert not p.get('_nao_montar'), p.get('_nao_montar')
 
 
+def test_odooid_com_simbolo_do_altium_e_do_almoxarifado():
+    """1.99.1: o componente que manteve o símbolo do Altium e ganhou o OdooId (PDCD-DI261939: C1 'CAP [ SMD ]' com
+    OdooId=58) resolvia, mas a coluna Acervo dizia 'fora do almoxarifado'. A ficha vem pelo produto."""
+    ac = {k: dict(v, acervo='almoxarifado - básicos') for k, v in ACERVO.items()}
+    e = esquema(comp('C1', 'CAP [  SMD  ]', footprint='CAP 0805', params='Value=10K;OdooId=1891'))
+    ln = OL.resolve(OL.agrupa(e)[0][0], ac)
+    assert ln['product_id'] == 1891
+    assert ln['_acervo'] == 'almoxarifado - básicos', ln.get('_acervo')
+    assert ln['nome_altium'] == 'Resistor 10K 0805 SMD', ln['nome_altium']
+    # OdooId que o espelho não tem continua sem acervo (é o Odoo que sabe)
+    e = esquema(comp('C1', 'CAP [  SMD  ]', params='OdooId=99999'))
+    assert '_acervo' not in OL.resolve(OL.agrupa(e)[0][0], ac)
+
+
+def test_so_de_cobre_fica_fora_da_lista():
+    """1.99.1: o jumper de solda (footprint só de cobre, sem corpo 3D) não se compra: sai como o não montar, como o DRC
+    do esquema já fazia (HubSchErc.ehSoCobre). O jumper de barra (com corpo 3D) é peça de verdade e vai."""
+    corpos = {'JUMPER 2 VIAS SMD': False, 'JUMPER BARRA 2 VIAS': True, 'R0805': False}
+    e = esquema(comp('R1', 'SMD 0805 10K 1/8W', footprint='R0805'),
+                comp('J1', 'Jumper 2', footprint='JUMPER 2 VIAS SMD'),
+                comp('J2', 'Jumper 2', footprint='JUMPER BARRA 2 VIAS'),
+                comp('TP1', 'TESTE', footprint='SEM NA PCBLIB'),
+                comp('X1', 'qualquer', footprint='R0805', params='SoCobre=1'),
+                comp('X2', 'qualquer', footprint='R0805', soCobre=True))
+    assert OL.so_cobre_refs(e, corpos) == {'J1', 'X1', 'X2'}
+    p = OL.monta_payload('X', 'A', e, ACERVO, corpos=corpos)
+    vao = sorted(r for l in p['linhas'] for r in l['designadores'].split(', '))
+    assert vao == ['J2', 'R1', 'TP1'], vao
+    assert p['_so_cobre'] == ['J1', 'X1', 'X2'], p['_so_cobre']
+    assert '_so_cobre' not in OL.payload_limpo(p)
+    # a PcbLib de verdade: um footprint por linha, só o nome e se há corpo
+    d = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(d, 'Libs'))
+        with open(os.path.join(d, 'Libs', 'pcblib.js'), 'w', encoding='utf-8') as f:
+            f.write('var pcblib = {\n"format":"pcblib-v2",\n"footprints":[\n'
+                    '{"name":"JUMPER 2 VIAS SMD","pads":[],"bodies":[]}\n'
+                    ',{"name":"BARRA \\"2\\"","pads":[],"bodies":[{"kind":"step"}]}\n'
+                    ',{"name":"R0805","pads":[]}\n]};\n')
+        assert OL.corpos_da_pcblib(d) == {'JUMPER 2 VIAS SMD': False, 'BARRA "2"': True, 'R0805': False}
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     n = 0
     for nome, fn in sorted(globals().items()):

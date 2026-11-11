@@ -175,6 +175,19 @@ def _locais():
     return componentes_locais
 
 
+def _ficha_por_odoo(acervo, product_id):
+    """A ficha do almoxarifado que tem o produto `product_id` entre os itens (None = nenhuma). E o caminho do
+    componente que tem o OdooId nos parametros mas cujo simbolo nao e o do valor do almoxarifado."""
+    alvo = str(product_id)
+    for chave, f in (acervo or {}).items():
+        if chave == LOCAIS or not isinstance(f, dict):
+            continue
+        for cand in [f] + [h for h in (f.get('homonimos') or []) if h is not f]:
+            if any(str(x.get('odoo')) == alvo for x in cand.get('itens') or []):
+                return cand
+    return None
+
+
 def _ficha_do_params(ficha, product_id, par):
     """A ficha do homonimo que o componente e, quando o nome sozinho nao diz.
 
@@ -326,6 +339,64 @@ def grafico_refs(schematic):
             if isinstance(it, dict) and it.get('t') == 'comp' and it.get('ref') is not None and eh_grafico(it)}
 
 
+# SO DE COBRE (1.99.1): a regra do HubSchErc.ehSoCobre (hub-scherc.js), do lado do Python. A peca que nao se compra --
+# o jumper de solda, o ponto de teste, o fiducial, o net tie, o logo: o footprint e so cobre na placa. O DRC do esquema
+# ja nao a acusava como fora do almoxarifado (1.96.0); a lista do Odoo a mandava como "sem vinculo com o cadastro".
+# Vale a marca explicita (soCobre:true; SoCobre=1, BOM=NAO, ComponentKind=Net Tie/Jumper/... nos params) ou o nome do
+# footprint/simbolo, mas so com o footprint SEM corpo 3D na PcbLib (o jumper de barra com o shunt e peca de verdade).
+_SO_COBRE_PARAM = re.compile(r'^\s*(SoCobre\s*=\s*(1|true|sim)|BOM\s*=\s*N[AÃ]O|'
+                             r'ComponentKind\s*=\s*(net\s*tie.*|jumper|graphical|.*no\s*bom.*))\s*$', re.I)
+_SO_COBRE_NOME = re.compile(r'jumper|jump\b|ponte\s*(de\s*)?solda|ponto\s*(de\s*)?(solda|teste)|test\s*-?\s*point|'
+                            r'\bTP\b|fiducial|net\s*-?\s*tie|\blogo\b|solder\s*(jumper|bridge)', re.I)
+_CORPOS = {}
+
+
+def corpos_da_pcblib(raiz=RAIZ):
+    """{nome do footprint: tem corpo 3D} lido da Libs/pcblib.js (um footprint por linha; so o nome e se ha
+    "bodies" com algo dentro -- o arquivo tem MB e nao precisa ser montado inteiro). Guardado pelo mtime."""
+    caminho = os.path.join(raiz or RAIZ, 'Libs', 'pcblib.js')
+    try:
+        mt = os.path.getmtime(caminho)
+    except OSError:
+        return {}
+    guardado = _CORPOS.get(caminho)
+    if guardado and guardado[0] == mt:
+        return guardado[1]
+    corpos = {}
+    with open(caminho, encoding='utf-8', errors='replace') as f:
+        for ln in f:
+            m = re.match(r'\s*,?\s*\{"name":("(?:[^"\\]|\\.)*")', ln)
+            if not m:
+                continue
+            try:
+                nome = json.loads(m.group(1))
+            except ValueError:
+                continue
+            corpos[nome] = re.search(r'"bodies":\[\s*\{', ln) is not None
+    _CORPOS[caminho] = (mt, corpos)
+    return corpos
+
+
+def eh_so_cobre(it, corpos):
+    if not isinstance(it, dict):
+        return False
+    if it.get('soCobre') is True:
+        return True
+    p = it.get('params')
+    if isinstance(p, str) and any(_SO_COBRE_PARAM.match(par) for par in p.split(';')):
+        return True
+    fp = str(it.get('footprint') or '').strip()
+    if not fp or corpos.get(fp) is not False:      # footprint fora da PcbLib ou com corpo 3D: peca de verdade
+        return False
+    return bool(_SO_COBRE_NOME.search(fp) or _SO_COBRE_NOME.search(str(it.get('sym') or '')))
+
+
+def so_cobre_refs(schematic, corpos):
+    """Os designadores so de cobre (set de str); uma parte marcada basta, como no hub."""
+    return {str(it.get('ref')).strip() for it in ((schematic or {}).get('items') or [])
+            if isinstance(it, dict) and it.get('t') == 'comp' and it.get('ref') is not None and eh_so_cobre(it, corpos)}
+
+
 def dnp_refs(schematic):
     """Os designadores marcados como nao montar (set de str)."""
     return {str(it.get('ref')).strip() for it in ((schematic or {}).get('items') or [])
@@ -436,6 +507,11 @@ def resolve(grupo, acervo):
             como = 'criado localmente (%s), mas o componente nao esta mais em Libs/almox-locais.js' % lid
 
     ficha = _ficha_do_params(acervo.get(grupo['sym']) or {}, linha.get('product_id'), par)
+    if not ficha.get('itens') and linha.get('product_id') is not None:
+        # 1.99.1: o componente que manteve o simbolo do Altium e ganhou o OdooId (o "Trocar componente" so nos
+        # parametros, ou o vinculo feito pela IA) e peca do almoxarifado: a ficha vem pelo produto, e nao pelo nome do
+        # simbolo -- antes a linha resolvia (verde) e a coluna Acervo dizia "fora do almoxarifado" (pedido do dono)
+        ficha = _ficha_por_odoo(acervo, linha['product_id']) or ficha
     itens = ficha.get('itens') or []
     if 'product_id' not in linha and itens:
         escolha = itens
@@ -547,7 +623,7 @@ def linhas_extras(extras, acervo):
 
 
 def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observacao='',
-                  extras=None, fora=None, codigos=None):
+                  extras=None, fora=None, codigos=None, corpos=None):
     """O payload da spec, secao 2, mais o que a tela precisa saber (campos com _).
 
     `extras` sao os itens de lista-extras.json (le_extras): entram DEPOIS das linhas do
@@ -570,6 +646,11 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
                          if isinstance(it, dict) and it.get('t') == 'comp' and it.get('suprimido')}, key=_natural)
     graficos = grafico_refs(schematic)
     nao_montar = dnp_refs(schematic) - graficos
+    # so de cobre (1.99.1): nao se compra -- sai como o nao montar, e a tela diz quais
+    so_cobre = so_cobre_refs(schematic, corpos_da_pcblib() if corpos is None else corpos) - graficos - nao_montar
+    if so_cobre:
+        schematic = dict(schematic, items=[it for it in (schematic.get('items') or [])
+                                           if not (it.get('t') == 'comp' and str(it.get('ref') or '').strip() in so_cobre)])
     if graficos:
         schematic = dict(schematic, items=[it for it in (schematic.get('items') or [])
                                            if not (it.get('t') == 'comp' and str(it.get('ref') or '').strip() in graficos)])
@@ -607,6 +688,7 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
         '_extras': len(de_fora),
         '_tirados': tirados,
         '_nao_montar': sorted(nao_montar, key=_natural),
+        '_so_cobre': sorted(so_cobre, key=_natural),
     }
     # 1.88.0: os codigos da placa montada e da virgem (o Odoo que nao os conhece ignora as chaves; ver a secao 11 do
     # docs/prompt-altium-envio-de-lista.md). 1.89.0: com a variante, a montada e "<codigo da placa> <NOME DA VARIANTE>"

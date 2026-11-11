@@ -4,6 +4,19 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.99.1 — 2026-11-11
+
+**Enviar para o Odoo: a peça vinculada pelo OdooId é do almoxarifado, e o só de cobre fica fora.** Pedido do dono:
+"mesmo depois de rodar o DRC e colocar os itens no acervo do almoxarifado, ainda fica acusando erro na hora de enviar a
+lista, isso provavelmente é algum bug".
+- O componente que manteve o símbolo do Altium e ganhou o OdooId nos parâmetros (o vínculo feito só na ficha) resolvia
+  o produto, mas a coluna Acervo dizia "fora do almoxarifado" em vermelho — a lista só achava o acervo pelo nome do
+  símbolo. Agora a ficha vem pelo produto: a linha mostra o acervo certo (básicos/especiais) e o nome do item do
+  almoxarifado. No PDCD-DI261939 eram 15 das 18 linhas.
+- O componente só de cobre (jumper de solda, ponto de teste, fiducial, net tie, logo: footprint sem corpo 3D, ou a marca
+  SoCobre/BOM=NAO) não se compra e fica fora da lista, como o DRC do esquema já fazia desde a 1.96.0; um aviso no topo
+  diz quais. Antes o J1/J2 (Jumper 2) iam como "sem vínculo com o cadastro".
+
 ## 1.99.0 — 2026-11-11
 
 **O retângulo fechado regula o tamanho pelo lado, na PCB e no editor de footprint.** Pedido do dono: "na edição de

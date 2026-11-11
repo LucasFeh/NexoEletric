@@ -380,6 +380,13 @@ function pintaLista(payload, recibo){
       + ' como não montar no esquema ' + (naoMontar.length === 1 ? 'fica' : 'ficam') + ' fora da lista ('
       + naoMontar.join(', ') + '). Para pedir, desmarque o "Não montar" na ficha do componente.']);
   }
+  /* so de cobre (1.99.1): jumper de solda, ponto de teste, fiducial... nao se compra -- fica fora, e e dito */
+  const soCobre = (payload && payload._so_cobre) || [];
+  if (soCobre.length){
+    avisos.push(['', soCobre.length + (soCobre.length === 1 ? ' componente só de cobre' : ' componentes só de cobre')
+      + ' (jumper de solda, ponto de teste, fiducial…) ' + (soCobre.length === 1 ? 'fica' : 'ficam') + ' fora da lista ('
+      + soCobre.join(', ') + '): é só cobre na placa, não se compra.']);
+  }
   /* o que foi tirado da lista e dito no TOPO tambem: a lista pode ser longa, e quem confere
      antes de enviar tem de saber que ha linha do esquema que nao vai, sem rolar ate o fim */
   const tirados = (payload && payload._tirados) || [];
