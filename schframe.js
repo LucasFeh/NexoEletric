@@ -7057,6 +7057,16 @@ window.addEventListener('keydown', e => {
   const tk = normalizaTecla(e);
   let acao = ATALHOS.porTecla[tk];
   const ld = leitorSch();
+  /* Ctrl+W: o Place Wire do Altium (pedido do dono, 2026-11-11: "o atalho Ctrl+W não tá funcionando
+     no esquema"). A PCB ja tinha (a Trilha, 1.x de 2026-10-16); o esquema nao, e a tecla caia no
+     vazio. E o mesmo Fio do W, fixo e ao lado dele (o W continua trocavel nas Configuracoes). No app
+     desktop a tecla chega a vista; no navegador ela fecha a aba antes, e fica o W. Com o fio ja na
+     mao, no meio de um arrasto ou de uma sequencia, nao faz nada (a acao do W alterna e largaria o fio). */
+  if (tk === 'Ctrl+W'){
+    e.preventDefault();
+    if (tool !== 'wire' && !mouse && !(ld && ld.pendente())) fazAcao('fio');
+    return;
+  }
   /* a letra que abre menu no Altium (P Place, D Design, T Tools...): o menu do Esquema no
      cursor e a letra seguinte escolhe -- quando ela nao e de nenhuma acao, ou e so o comeco de
      uma sequencia (a predefinicao Padrao Altium) */

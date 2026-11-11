@@ -4,6 +4,14 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.97.7 — 2026-11-11
+
+**Ctrl+W desenha fio no Esquema, como no Altium (Place Wire).** Pedido do dono: "o atalho Ctrl+W não tá funcionando no
+esquema". A vista PCB já pegava a Trilha com o Ctrl+W (1.x, 2026-10-16), mas o Esquema não tratava a tecla: ela caía no
+vazio. Agora o Ctrl+W pega o mesmo Fio do W (fixo, ao lado do W, que continua trocável nas Configurações › Atalhos) e
+aparece na tabela de gestos do Esquema. Com o fio já na mão, no meio de um arrasto ou de uma sequência de teclas, não faz
+nada (para não largar o fio). No navegador o Ctrl+W continua fechando a aba; vale no app desktop.
+
 ## 1.97.6 — 2026-11-11
 
 **A aprovação não cai mais por causa de outra máquina.** Pergunta do dono: "já tinha aprovado as duas MIRBC, por que

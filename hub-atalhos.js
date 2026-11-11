@@ -101,6 +101,9 @@ const GESTOS_SCH = [
   /* 2026-11-05, pedido do dono: o conector uma parte por via -- clicar numa parte e dar Tab marca o conector inteiro,
      e o designador aparece no topo da folha (schframe.js » selecionaComponenteInteiro) */
   { rotulo:'Marcar o componente inteiro (todas as partes, como as vias do conector)', teclas:['Tab'], quando:'parte de um componente selecionada' },
+  /* 2026-11-11, pedido do dono: o Ctrl+W do Altium (Place Wire) pega o mesmo Fio do W. Só no app
+     desktop: no navegador o Ctrl+W fecha a aba (TECLAS_PROIBIDAS) */
+  { rotulo:'Fio (Place Wire do Altium, no app desktop)',   teclas:['Ctrl', 'W'] },
   { rotulo:'Mover a seleção',                              teclas:['Arrastar'] },
   { rotulo:'Andar reto no trilho da guia',                 teclas:['Shift'],            quando:ARRASTO },
   { rotulo:'Soltar as guias',                              teclas:['Ctrl'],             quando:ARRASTO },

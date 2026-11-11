@@ -20,6 +20,14 @@ assert.ok(G.some(g => /fio inteiro/.test(g.rotulo) && g.teclas.join('+') === 'Cl
 assert.ok(G.some(g => /trecho/.test(g.rotulo) && g.teclas.join('+') === 'Segundo clique'), 'segundo clique = trecho');
 /* a net só acende com Alt */
 assert.ok(G.some(g => /net/.test(g.rotulo) && g.teclas.join('+') === 'Alt+Clique'), 'Alt+Clique acende a net');
+/* o Ctrl+W do Altium (Place Wire, 2026-11-11) pega o Fio no app desktop, como na PCB pega a Trilha:
+   gesto fixo, numa tecla que ninguém grava, e o teclado da folha trata ele antes do mapa */
+assert.ok(G.some(g => /^Fio .Place Wire/.test(g.rotulo) && g.teclas.join('+') === 'Ctrl+W' && !g.quando), 'Ctrl+W = o Fio, como no Altium');
+assert.ok(A.TECLAS_PROIBIDAS.includes('Ctrl+W'), 'o Ctrl+W não se grava no Esquema');
+{
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'schframe.js'), 'utf8');
+  assert.ok(/if \(tk === 'Ctrl\+W'\)\{[\s\S]{0,200}fazAcao\('fio'\)/.test(src), 'schframe.js: o Ctrl+W faz a ação do fio');
+}
 
 /* as teclas do fio valem SÓ com o fio na mão: sem o `quando`, o editor diria que o Espaço da
    vista inverte o canto, e ele gira a seleção */
