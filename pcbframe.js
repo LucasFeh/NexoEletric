@@ -48,6 +48,10 @@ if (typeof pcbmirror === 'undefined') {
 }
 const B = pcbmirror;
 const CH = (typeof changes !== 'undefined' && Array.isArray(changes)) ? changes : [];
+/* A BASE da lista daqui (1.97.2): as mudanças como a página as carregou (o <script> do changes.js), tiradas AQUI,
+   antes de qualquer edição — e não por uma busca depois, que podia já trazer o arquivo que o MCP acabou de gravar.
+   A cada gravação daqui ela passa a ser o que se gravou. Ver salvaChanges. */
+let chBase = JSON.stringify(CH);
 const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
 const HC = HubCore;
@@ -8172,25 +8176,59 @@ function comentariosDoDisco(txt){
   }
   return out;
 }
+/* As mudanças de um texto do changes.js (o mesmo var changes = [...] que a página carrega); undefined = não deu para
+   ler (o arquivo no meio de uma gravação) */
+function opsDoTexto(t){
+  if (t == null || !String(t).trim()) return [];
+  try { const v = new Function('var changes;\n' + t + '\n;return typeof changes !== "undefined" ? changes : undefined;')(); return Array.isArray(v) ? v : undefined; }
+  catch (e) { return undefined; }
+}
+/* O DISCO MUDOU POR FORA? (1.97.2) Pedido do dono: "a vista PCB aberta regravou o arquivo de mudanças com a lista
+   antiga da memória e desfez uma edição feita por fora pelo MCP. Ela deveria recarregar o arquivo quando ele muda no
+   disco, ou avisar antes de gravar por cima." A conta era texto do disco × texto lido DEPOIS do carregamento (o
+   chDisco): o MCP que gravava antes dessa leitura (ou criava o changes.js que ainda não existia) virava a base, e o
+   Salvar seguinte passava por cima sem perguntar. Agora a base é a lista que a página de fato carregou (chBase), e
+   a comparação é das mudanças (os comentários // não contam). -> { externo, disco (as mudanças do disco), texto } */
+async function discoDasMudancas(){
+  let texto = null;
+  try { texto = await HubIO.fetchText(CH_REL); } catch (e) { texto = null; }
+  const disco = opsDoTexto(texto);
+  return { texto, disco, externo: disco !== undefined && JSON.stringify(disco) !== chBase };
+}
 async function salvaChanges(quieto){
-  if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o changes.js do disco. Continuar?', SOBRESCREVER))) return false;
+  let atual = null;
+  if (HubIO.canPost) {
+    const d = await discoDasMudancas();
+    atual = d.texto;
+    if (d.externo) {
+      const nDisco = d.disco.length, nAqui = CH.length;
+      /* o autosave nunca grava por cima: para e avisa (o Ctrl+S pergunta) */
+      if (quieto) {
+        staleWorkspace = true;
+        avisoRodape('⚠ o changes.js mudou no disco (outro escritor — o MCP?): o autosave parou para não gravar por cima — Ctrl+S para escolher');
+        HubDialog.toast('O changes.js mudou no disco por fora (' + nDisco + ' mudança(s) lá, ' + nAqui + ' aqui). O autosave parou para não desfazer a edição de fora: Ctrl+S para recarregar ou sobrescrever.', 'warn', 0);
+        return false;
+      }
+      const v = await HubDialog.escolhe('O changes.js mudou no disco desde que esta vista o carregou — outro escritor (o MCP, outra janela) gravou ' + nDisco
+        + ' mudança(s); aqui há ' + nAqui + '. Gravar daqui desfaz a edição de fora.', { title:'O arquivo mudou no disco', danger:true,
+          opcoes:[{ v:'recarregar', rot:'Recarregar do disco (as edições não salvas daqui se perdem)' },
+                  { v:'sobrescrever', rot:'Sobrescrever o disco com a lista daqui (a edição de fora se perde)' }],
+          v:'recarregar', rotulo:'O que fazer', ok:'Continuar' });
+      if (!v) return false;
+      if (v === 'recarregar') { setChDirty(false); if (annDirty) await salvaAnnotations(true); location.reload(); return false; }
+    } else if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o changes.js do disco. Continuar?', SOBRESCREVER))) return false;
+  }
   const out = HC.serializeChanges(CH);
   if (!out.text) {
     /* no autosave nao abre um alerta a cada edicao: o Salvar fica marcado e o rodape diz por que */
     if (quieto) { avisoRodape('⚠ autosave parado: há mudança inválida — Salvar (Ctrl+S) mostra qual'); return false; }
     await HubDialog.alert(out.errors.map(e => '#' + (e.idx + 1) + ' ' + e.msg).join('\n'), { title:'Mudanças inválidas — nada foi gravado' }); return false;
   }
-  let atual = null;
-  if (HubIO.canPost) {
-    try { atual = await HubIO.fetchText(CH_REL); } catch (e) {}
-    if (atual !== null && (chDisco === null || atual !== chDisco) &&
-        !(await HubDialog.confirm('O changes.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?', SOBRESCREVER))) return false;
-  }
   const extra = comentariosDoDisco(atual !== null ? atual : chDisco);
   const texto = extra.length ? out.text.replace('var changes = [', extra.join('\n') + '\nvar changes = [') : out.text;
   try {
     const r = await HubIO.saveFile(CH_REL, texto);
-    chDisco = texto; staleWorkspace = false; setChDirty(false);
+    chDisco = texto; chBase = JSON.stringify(CH); staleWorkspace = false; setChDirty(false);
     avisoRodape('');
     if (!quieto) HubDialog.toast(r.mode === 'server' ? 'changes.js salvo (' + CH.length + ' mudança' + (CH.length === 1 ? '' : 's') + ')' : 'arquivo baixado — substitua ' + CH_REL, r.mode === 'server' ? 'ok' : 'warn');
     return true;
@@ -8249,7 +8287,9 @@ if (AUTOSAVE) AUTOSAVE.aoMudar(v => { if (v && (chDirty || annDirty)) autoSalva(
 async function discoMudou(){
   if (!HubIO.canPost) return [];
   const m = [];
-  try { const t = await HubIO.fetchText(CH_REL); if (chDisco === null) chDisco = t; else if (t !== chDisco) m.push('changes.js'); } catch (e) {}
+  /* 1.97.2: a lista do disco contra a que esta vista carregou (chBase) — antes, o texto do disco contra um texto lido
+     depois do carregamento, e o primeiro arquivo que aparecia (o MCP criando o changes.js) virava a base calado */
+  { const d = await discoDasMudancas(); if (d.texto !== null && chDisco === null) chDisco = d.texto; if (d.externo) m.push('changes.js'); }
   try { const t = await HubIO.fetchText(ANN_REL); if (annDisco === null) annDisco = t; else if (t !== annDisco) m.push('annotations.js'); } catch (e) {}
   const s = await assinaturaBoard();
   if (s !== null) { if (boardSig === null) boardSig = s; else if (s !== boardSig) m.push('board.js'); }

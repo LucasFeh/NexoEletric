@@ -4,6 +4,31 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.97.2 — 2026-11-10
+
+**A vista não grava mais por cima de uma edição feita por fora (o MCP).** Pedido do dono: "a vista PCB aberta
+regravou o arquivo de mudanças com a lista antiga da memória e desfez uma edição feita por fora pelo MCP. Ela
+deveria recarregar o arquivo quando ele muda no disco, ou avisar antes de gravar por cima."
+- **O furo.** A vista guardava como base o texto do `changes.js` lido numa busca DEPOIS de a página carregar. O MCP
+  que gravava nesse intervalo — ou que criava o `changes.js` que o projeto ainda não tinha (aí o vigia adotava o
+  primeiro texto que aparecia) — virava a base sem a lista da tela mudar. O Salvar (ou o autosave) seguinte não via
+  diferença e gravava a lista antiga por cima.
+- **Agora a base é a lista que a página de fato carregou** (o `changes` do script, tirado no carregamento), e a
+  comparação é das mudanças, não do texto (comentário `//` não conta). A cada gravação daqui, a base passa a ser o
+  gravado.
+  - **Sem edição pendente:** a vista recarrega sozinha quando o arquivo muda (como antes).
+  - **Com edição pendente, o autosave** nunca grava por cima: para e avisa no rodapé e num aviso que não some.
+  - **Com edição pendente, o Salvar (Ctrl+S)** pergunta: recarregar do disco (as edições daqui se perdem) ou
+    sobrescrever (a de fora se perde). Cancelar não grava.
+- **A vista Esquema tinha o mesmo furo** com o `schematic.js` ("sem base: adota e segue"): mesma correção — a base é o
+  esquema que a aba carregou, o autosave para e avisa, e o Salvar pergunta.
+- Testes: `tests/test-pcb-salvar-disco.js` (5 casos):
+  - o MCP grava depois do carregamento;
+  - o Ctrl+S com recarregar, sobrescrever e cancelar;
+  - o `changes.js` criado por fora;
+  - o disco igual, que grava sem perguntar e preserva os comentários;
+  - o vigia do Esquema.
+
 ## 1.97.1 — 2026-11-10
 
 **ECO: a ação de pino e a renomeação da net vão juntas, e o cobre que fica na net antiga é avisado antes.** Pedido do

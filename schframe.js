@@ -1433,6 +1433,16 @@ if (typeof window !== 'undefined') window.SchFramePure = PURE;
 const $ = id => document.getElementById(id);
 const fatal = m => { const f = $('fatal'); f.style.display = 'flex'; f.textContent = m; };
 if (typeof schematic === 'undefined') { fatal('schematic.js não encontrado para o projeto "' + SCH_P + '".'); return; }
+/* A BASE do esquema desta aba (1.97.2, o mesmo do changes.js na vista PCB): o schematic.js como a página o carregou,
+   tirado AQUI, antes de qualquer edição ou migração — e não por uma busca depois, que podia já trazer o que o MCP
+   acabou de gravar (e o "sem base: adota e segue" adotava calado). A cada gravação daqui ela passa a ser o gravado. */
+let schBase = JSON.stringify(schematic);
+/* o esquema de um texto do schematic.js, como JSON para comparar; undefined = não deu para ler */
+function baseDoTexto(t){
+  if (t == null) return undefined;
+  try { const v = new Function('var schematic;\n' + t + '\n;return typeof schematic !== "undefined" ? schematic : undefined;')(); return v && typeof v === 'object' ? JSON.stringify(v) : undefined; }
+  catch (e) { return undefined; }
+}
 function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 /* nome de pino ativo-baixo: R\S\T\ e RST com a barra em cima. O hub-overbar.js entra pelo
    schframe.html, mas a vista nao pode morrer se faltar — sem ele a notacao aparece crua,
@@ -1722,7 +1732,7 @@ function setSchDirty(v){ if (v && VAR.on) v = false; schDirty = v; updateSaveBtn
 var AUTOSAVE_SCH = typeof HubAutosave !== 'undefined' ? HubAutosave : null;
 function autoSalvaSch(){
   if (!AUTOSAVE_SCH || !HubIO.canPost) return;
-  AUTOSAVE_SCH.agenda(async () => { if (schDirty) await saveSchematic(); });
+  AUTOSAVE_SCH.agenda(async () => { if (schDirty) await saveSchematic(true); });
 }
 function alternaAutosaveSch(){
   if (!AUTOSAVE_SCH) return;
@@ -5224,9 +5234,29 @@ async function falhaSalvar(err, nome, texto){
       { title:'Falha ao salvar', ok:'Baixar' }))
     HubIO.download(nome, texto);
 }
-async function saveSchematic(){
+async function saveSchematic(quieto){
   if (VAR.on){ HubDialog.toast(MSG_VAR(), 'warn', 6000); return null; }
-  if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o schematic.js do disco. Continuar?', SOBRESCREVER))) return null;
+  /* O DISCO MUDOU POR FORA? (1.97.2) O esquema do disco contra o que esta aba carregou (schBase): o autosave nunca
+     grava por cima — para e avisa —, e o Salvar pergunta: recarregar ou sobrescrever. */
+  if (HubIO.canPost){
+    let cur = null;
+    try { cur = await HubIO.fetchText(SCH_REL); } catch (e) { cur = null; }
+    const b = baseDoTexto(cur);
+    if (b !== undefined && b !== schBase){
+      if (quieto){
+        staleWorkspace = true;
+        $('annmsg').textContent = '⚠ o schematic.js mudou no disco (outro escritor — o MCP?): o autosave parou para não gravar por cima — Ctrl+S para escolher';
+        HubDialog.toast('O schematic.js mudou no disco por fora. O autosave parou para não desfazer a edição de fora: Ctrl+S para recarregar ou sobrescrever.', 'warn', 0);
+        return null;
+      }
+      const v = await HubDialog.escolhe('O schematic.js mudou no disco desde que esta aba o carregou — outro escritor (o MCP, outra janela) gravou por fora. Gravar daqui desfaz a edição de fora.',
+        { title:'O arquivo mudou no disco', danger:true, rotulo:'O que fazer', ok:'Continuar', v:'recarregar',
+          opcoes:[{ v:'recarregar', rot:'Recarregar do disco (as edições não salvas daqui se perdem)' },
+                  { v:'sobrescrever', rot:'Sobrescrever o disco com o esquema daqui (a edição de fora se perde)' }] });
+      if (!v) return null;
+      if (v === 'recarregar'){ setSchDirty(false); location.reload(); return null; }
+    } else if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o schematic.js do disco. Continuar?', SOBRESCREVER))) return null;
+  }
   /* edição salva = modificação: a aprovação cai e a data do desenho vira a de hoje (hub-aprovacao.js) */
   if (schDirty && window.HubAprovacao && HubAprovacao.antesDeSalvar(schematic, schDiskSnapshot)){ cam.draw(); pintaMiniaturas(); }
   const out = HubCore.serializeSchematic(schematic);
@@ -5241,18 +5271,12 @@ async function saveSchematic(){
     HubDialog.toast(q + (q === 1 ? ' texto vazio foi descartado' : ' textos vazios foram descartados')
       + ' — eles não desenhavam nada, e o arquivo não aceita texto sem conteúdo', 'warn', 8000);
   }
-  if (HubIO.canPost){
-    try {
-      const cur = await HubIO.fetchText(SCH_REL);
-      if ((schDiskSnapshot === null || cur !== schDiskSnapshot) &&
-          !(await HubDialog.confirm('schematic.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?', SOBRESCREVER))) return null;
-    } catch (e) {}
-  }
   try {
     const r = await HubIO.saveFile(SCH_REL, out.text);
     setSchDirty(false);
     staleWorkspace = false;
     schDiskSnapshot = out.text;
+    { const b = baseDoTexto(out.text); if (b !== undefined) schBase = b; }
     return r.mode === 'server' ? { m:'schematic.js salvo', k:'ok' } : { m:'arquivo baixado — substitua ' + SCH_REL, k:'warn' };
   } catch (err) { await falhaSalvar(err, 'schematic.js', out.text); return null; }
 }
@@ -5281,6 +5305,7 @@ if (window.HubAprovacao && HubIO.canPost) HubAprovacao.montaAprovar({
   adota: (texto, params) => {
     if (params) schematic.params = params; else delete schematic.params;
     schDiskSnapshot = texto;
+    { const b = baseDoTexto(texto); if (b !== undefined) schBase = b; }
     cam.draw(); pintaMiniaturas(); renderProps();
   } });
 
@@ -7218,8 +7243,11 @@ async function schemaDoDiscoMudou(){
   let atual;
   try { atual = await HubIO.fetchText(SCH_REL); }
   catch (e) { return false; }
-  if (schDiskSnapshot === null){ schDiskSnapshot = atual; return false; }   /* sem base: adota e segue */
-  return atual !== schDiskSnapshot;
+  if (schDiskSnapshot === null) schDiskSnapshot = atual;
+  /* 1.97.2: o esquema do disco contra o que esta aba carregou (schBase) — não mais "sem base: adota e segue", que
+     tomava calado o arquivo que o MCP tinha acabado de gravar */
+  const b = baseDoTexto(atual);
+  return b !== undefined && b !== schBase;
 }
 window.__hubOnChange = function(info){
   /* aviso de OUTRO projeto (hubserver » __hubAvisoToca; a biblioteca toca todos): nada a fazer */
