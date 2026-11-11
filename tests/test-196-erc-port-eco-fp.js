@@ -309,4 +309,33 @@ caso('Graphical: fora do ECO, sem footprint a cobrar, e a net com a port não é
     odoo: () => null, local: () => null, emergencia: () => null, almoxCarregado:true });
   assert.ok(a.grafico && !a.avisos.some(x => /acervo|odoo|sem-ficha|footprint/.test(x.cod)), JSON.stringify(a.avisos));
 });
+
+/* ── 1.97.1: a ação de pino e a renomeação vão juntas; o cobre da net antiga é avisado antes ── */
+caso('ECO: pino e renomeação juntos, e o aviso do cobre que fica na net antiga', () => {
+  const comp = (r, x, n1) => ({ id:r, ref:r, footprint:'R0805', comment:'', layer:'Top', x, y:10, rot:0, pads:[pad(r, '1', x - 1, n1), pad(r, '2', x + 1, '')] });
+  /* B liga R1-1, R2-1, R3-1 (a trilha t1); R4-1 está em C, com a trilha t2 de C chegando nele */
+  const B = placa(['B', 'C'], [comp('R1', 10, 'B'), comp('R2', 20, 'B'), comp('R3', 30, 'B'), comp('R4', 40, 'C')]);
+  B.tracks = [{ id:'t1', layer:'Top', x1:9, y1:10, x2:29, y2:10, w:0.3, net:'B' }, { id:'t2', layer:'Top', x1:39, y1:10, x2:39, y2:20, w:0.3, net:'C' }];
+  const it = [];
+  for (const [r, x] of [['R1', 1000], ['R2', 2000], ['R3', 3000], ['R4', 4000]])
+    it.push({ t:'comp', ref:r, sym:'RES2', x, y:1000, rot:0, footprint:'R0805' }, { t:'netlabel', net:'X', x:x - 200, y:1000 });
+  const s = folha(it);
+  const eco = Eco.compara(s, B, { schlib:SLIB, pcblib:PLIB, changes:[] });
+  const ren = eco.acoes.find(a => a.tipo === 'net_rename'), pin = eco.acoes.find(a => a.objeto === 'R4-1');
+  assert.ok(ren && pin && pin.dados.ren === ren.id, 'o pino aponta a renomeação: ' + JSON.stringify(eco.acoes.map(a => a.grupo + ' ' + a.objeto)));
+  /* desmarcar a renomeação desmarca o pino; marcar o pino marca a renomeação */
+  assert.deepStrictEqual(Eco.junta(eco, ren, false).map(x => x.id), [pin.id]);
+  assert.ok(!pin.ativo);
+  assert.deepStrictEqual(Eco.junta(eco, pin, true).map(x => x.id), [ren.id]);
+  assert.ok(ren.ativo);
+  /* o cobre de C ligado no R4-1 fica em C: aviso antes */
+  Eco.valida(eco);
+  assert.strictEqual(pin.status, 'warn');
+  assert.ok(/1 trilha da net C.*DRC acusa curto/.test(pin.msgValida), pin.msgValida);
+  /* sem a renomeação, a de pino não vai sozinha */
+  ren.ativo = false; Eco.valida(eco);
+  assert.strictEqual(pin.status, 'err');
+  assert.ok(/as duas vão juntas/.test(pin.msgValida), pin.msgValida);
+  assert.ok(!Eco.aplica(eco).linhas.some(l => l.op === 'pad_net'), 'o pad não muda sozinho');
+});
 console.log('test-196-erc-port-eco-fp: ' + ok + ' ok');

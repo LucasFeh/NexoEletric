@@ -4,6 +4,26 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.97.1 — 2026-11-10
+
+**ECO: a ação de pino e a renomeação da net vão juntas, e o cobre que fica na net antiga é avisado antes.** Pedido do
+dono: "o ECO deixou aplicar o 'Adicionar pino à net' de um pad sem a renomeação da net a que ele pertence. O pad fica
+com um nome e o cobre dele com outro, e o DRC acusa curto. Quando houver renomeação pendente para a net de um pad, o
+ECO deveria aplicar as duas juntas ou avisar antes."
+- **Juntas.** A ação de pino que leva o pad para o nome novo de uma renomeação depende dela (`HubPcbEco.junta`):
+  - no diálogo, marcar a de pino marca a renomeação, e desmarcar a renomeação desmarca as de pino, com o aviso de
+    quais mudaram junto (marcando um item ou o grupo inteiro);
+  - no `eco_aplicar` do MCP, a ação de pino escolhida por `ids`/`refs` leva a renomeação junto (`juntas` na
+    resposta);
+  - se mesmo assim a renomeação ficar de fora, a de pino continua com erro e não é gravada ("as duas vão juntas").
+- **Avisar antes.** O pad que muda de net (ou sai de net) com trilha, arco ou via da net antiga ligada nele fica em
+  aviso: "o cobre ligado a este pad (1 trilha da net NetCH2_2) continua em NetCH2_2: o pad vai sozinho e o DRC acusa
+  curto — refaça a ligação depois". O nome da net antiga já sai como fica depois das renomeações marcadas. No
+  `eco_aplicar` vem em `cobre_na_net_antiga`. No MIRBC-DI251885DRV é o CH2-3 (sai da NetCH2_3, renomeada
+  para NetCH2_2, com a trilha dela no pad).
+- Testes: `tests/test-196-erc-port-eco-fp.js` (16 casos, +1: a junção nos dois sentidos, o aviso do cobre e o pad que
+  não muda sozinho).
+
 ## 1.97.0 — 2026-11-10
 
 **ComponentKind=Graphical como no Altium: componente só de documentação.** Pedido do dono: "ele não vai para a PCB nem

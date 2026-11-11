@@ -368,6 +368,15 @@ function compara(schematic, board, opts){
   for (const ref of [...cegos].sort(natural)) if (pcb.has(ref))
     acao('pinAdd', { tipo:'info', objeto:ref, para:'', ativo:false, status:'warn', semPad:false, info:true,
                      msg:`símbolo "${sch.get(ref).sym}" não está na schlib: pinos de ${ref} não conferidos`, dados:{ ref } });
+  /* AS DUAS JUNTAS (1.97.1). Pedido do dono: "o ECO deixou aplicar o 'Adicionar pino à net' de um pad sem a
+     renomeação da net a que ele pertence. O pad fica com um nome e o cobre dele com outro, e o DRC acusa curto.
+     Quando houver renomeação pendente para a net de um pad, o ECO deveria aplicar as duas juntas ou avisar antes."
+     A ação de pino que leva o pad para o nome NOVO de uma renomeação depende dela (dados.ren): marcar a de pino
+     marca a renomeação, e desmarcar a renomeação desmarca as de pino (junta, abaixo; o diálogo e o eco_aplicar
+     usam). E a validação avisa, antes, o pad que muda de net com cobre da net antiga ligado nele. */
+  const renPorNet = Object.create(null);
+  for (const a of acoes) if (a.tipo === 'net_rename') renPorNet[a.dados.net] = a;
+  for (const a of acoes) if (a.tipo === 'pad_net' && a.dados && a.dados.net && renPorNet[a.dados.net]) a.dados.ren = renPorNet[a.dados.net].id;
   const eco = { acoes, folhas, eb, avisosNets:ex.warnings.slice(),
                 resumo:null, opts:{ pcblib:o.pcblib || null } };
   Object.defineProperty(eco, 'opts', { enumerable:false, value:eco.opts, writable:true });
@@ -376,6 +385,35 @@ function compara(schematic, board, opts){
   return eco;
 }
 
+/* trilhas, arcos e vias da net `net` que encostam no pad `ref-pad` da placa efetiva: { n, txt } */
+function cobreNoPad(eb, ref, pad, net){
+  const c = (eb.components || []).find(x => x && x.ref === ref);
+  const p = c && (c.pads || []).find(q => q && String(q.name) === String(pad));
+  if (!p || !isNum(p.x) || !isNum(p.y)) return { n:0, txt:'' };
+  const r = Math.max(+p.w || 0, +p.h || 0) / 2 + 0.05;
+  const perto = (x, y) => isNum(x) && isNum(y) && Math.hypot(x - p.x, y - p.y) <= r;
+  let t = 0, v = 0;
+  for (const o of (eb.tracks || [])) if (o && o.net === net && (perto(o.x1, o.y1) || perto(o.x2, o.y2))) t++;
+  for (const o of (eb.arcs || [])) if (o && o.net === net && isNum(o.cx)) {
+    const pt = g => [o.cx + o.r * Math.cos(g * Math.PI / 180), o.cy + o.r * Math.sin(g * Math.PI / 180)];
+    if (perto(...pt(o.sa)) || perto(...pt(o.ea))) t++;
+  }
+  for (const o of (eb.vias || [])) if (o && o.net === net && perto(o.x, o.y)) v++;
+  const partes = [];
+  if (t) partes.push(t + (t === 1 ? ' trilha' : ' trilhas'));
+  if (v) partes.push(v + (v === 1 ? ' via' : ' vias'));
+  return { n:t + v, txt:partes.join(' e ') };
+}
+/* Marca (ou desmarca) a ação `a` com as que vão junto (1.97.1): a ação de pino puxa a renomeação de que depende
+   (dados.ren); desmarcar a renomeação desmarca as de pino que dependem dela. Devolve as OUTRAS que mudaram. */
+function junta(eco, a, ligado){
+  const mudou = [];
+  const poe = (x, v) => { if (x && !x.semPad && !x.info && x.ativo !== v) { x.ativo = v; if (x !== a) mudou.push(x); } };
+  poe(a, !!ligado);
+  if (ligado && a.dados && a.dados.ren) poe(eco.acoes.find(x => x.id === a.dados.ren), true);
+  if (!ligado && a.tipo === 'net_rename') for (const x of eco.acoes) if (x.dados && x.dados.ren === a.id) poe(x, false);
+  return mudou;
+}
 function contaUsos(eb, net){
   let n = 0;
   for (const k of ['tracks', 'arcs', 'vias', 'fills', 'regions', 'freepads', 'polygons']) for (const o of (eb[k] || [])) if (o && o.net === net) n++;
@@ -446,7 +484,7 @@ function valida(eco, opts){
   const netOk = n => {
     if (!n) return '';
     if (netNova[n]) return ativa.has(netNova[n].id) ? '' : `depende de "Adicionar net ${n}", desmarcada`;
-    if (netRen[n]) return ativa.has(netRen[n].id) ? '' : `depende de "Renomear net → ${n}", desmarcada`;
+    if (netRen[n]) return ativa.has(netRen[n].id) ? '' : `depende de "Renomear net ${netRen[n].dados.orig_net} → ${n}", desmarcada — as duas vão juntas (marque a renomeação)`;
     if (netSai[n] && ativa.has(netSai[n].id)) return `a net ${n} também está sendo removida`;
     return existe.has(n) ? '' : `net ${n} não existe na placa`;
   };
@@ -470,6 +508,13 @@ function valida(eco, opts){
     } else if (a.tipo === 'pad_net' && a.dados.net) {
       const m = netOk(a.dados.net);
       if (m) ruim('err', m);
+    }
+    /* o cobre da net antiga ligado ao pad que muda de net (1.97.1): o pad muda, a trilha e a via não — o DRC acusa
+       curto. Avisa antes (a ação continua valendo: o cobre se refaz depois, ou se renomeia a net inteira) */
+    if (a.tipo === 'pad_net' && a.dados && a.dados.orig_net && a.dados.orig_net !== (a.dados.net || '') && !a.dados.padNovo) {
+      const vai = netRenomeada(eco, a.dados.orig_net, x => ativa.has(x.id));
+      const c = cobreNoPad(eb, a.dados.ref, a.dados.pad, a.dados.orig_net);
+      if (c.n && vai !== (a.dados.net || '')) ruim('warn', `o cobre ligado a este pad (${c.txt} da net ${vai}) continua em ${vai}: o pad vai para ${a.dados.net || '(sem net)'} sozinho e o DRC acusa curto — refaça a ligação depois`);
     }
   }
   /* troca de footprint: o pad que so o footprint novo tem depende da troca; e a mensagem da
@@ -632,5 +677,5 @@ function relatorio(eco){
   return L.join('\n') + '\n';
 }
 
-return { GRUPOS, compara, valida, aplica, relatorio, mesmoFootprint, compsDoEsquema, resumoTroca, trocasFp };
+return { GRUPOS, compara, valida, aplica, relatorio, mesmoFootprint, compsDoEsquema, resumoTroca, trocasFp , junta, cobreNoPad };
 });

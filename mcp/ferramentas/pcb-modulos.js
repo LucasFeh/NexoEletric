@@ -273,22 +273,29 @@ module.exports = {
         if (!ctx.temBoard(p)) throw new ErroMcp('o projeto não tem board.js: crie a placa antes (projeto_criar com placa, ou o assistente de placa nova da vista)');
         const pl = ctx.placa(p);
         let eco = E.compara(sch, pl.board, { schlib: L.schlib, pcblib: L.pcblib, changes: pl.changes, eb: pl.eb });
+        const juntas = [];
         const acoes = eco.acoes || eco.actions || [];
         if (a.ids || a.refs) {
           for (const x of acoes) {
             const txt = JSON.stringify([x.objeto, x.para, x.dados]);
             x.ativo = (a.ids ? a.ids.includes(x.id) : true) && (a.refs ? a.refs.some(r => new RegExp('\\b' + r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(txt)) : true);
           }
+          /* 1.97.1: a ação de pino escolhida leva junto a renomeação da net de que depende (o pad e o cobre
+             ficariam com nomes diferentes: curto no DRC) */
+          if (E.junta) for (const x of acoes.filter(y => y.ativo)) juntas.push(...E.junta(eco, x, true));
           eco = E.valida(eco) || eco;
         }
         const r = E.aplica(eco, a.opcoes || {});
         const linhas = r.linhas || [];
+        if (juntas.length) r.juntas = juntas.map(x => ({ id: x.id, acao: x.grupo, objeto: x.objeto, para: x.para, porque: 'vai junto com a ação de pino escolhida' }));
         /* troca de footprint: os pads ficam com a net da placa; o que o esquema muda (cada pino uma
            acao, que ids/refs deixam de fora) e os pads que saem vao na resposta, nao so o nome */
         const trocas = (E.trocasFp ? E.trocasFp(eco) : []).filter(t => t.ativo && t.status !== 'err');
         const extra = trocas.length ? { trocas_footprint: trocas } : {};
         if (!linhas.length) return Object.assign({ ok: true, linhas: 0, puladas: r.puladas, nota: 'nada a aplicar: esquema e placa já concordam (ou as ações foram puladas)' }, extra);
-        return Object.assign({ via: 'HubPcbEco.aplica', puladas: r.puladas }, extra, aplicaOps(ctx, p, linhas, a, 'eco_aplicar'));
+        const avisoCobre = (eco.acoes || []).filter(x => x.ativo && x.status === 'warn' && /DRC acusa curto/.test(x.msgValida || '')).map(x => x.objeto + ': ' + x.msgValida);
+        return Object.assign({ via: 'HubPcbEco.aplica', puladas: r.puladas, juntas: r.juntas, cobre_na_net_antiga: avisoCobre.length ? avisoCobre : undefined },
+                             extra, aplicaOps(ctx, p, linhas, a, 'eco_aplicar'));
       },
     },
   ],

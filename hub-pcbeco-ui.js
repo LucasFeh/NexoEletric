@@ -96,6 +96,14 @@ function eco(par){
     const M = modal('');
     let soErros = false, executou = false, linhasFeitas = [];
     const feitos = new Set();
+    /* 1.97.1: a ação de pino e a renomeação de que ela depende vão juntas — diz quais mudaram junto */
+    const avisaJuntas = (juntas, ligado) => {
+      const outras = (juntas || []).filter(x => x && !feitos.has(x.id));
+      if (!outras.length) return;
+      const nomes = outras.slice(0, 4).map(x => (x.tipo === 'net_rename' ? 'Renomear ' + x.objeto + ' → ' + x.para : x.objeto + ' → ' + (x.para || ''))).join(', ');
+      avisa((ligado ? 'Marcada junto: ' : 'Desmarcada junto: ') + nomes + (outras.length > 4 ? ' e mais ' + (outras.length - 4) : '')
+        + ' — a ação de pino e a renomeação da net dela vão juntas', 'info');
+    };
     M.box.innerHTML = `<h3>Engineering Change Order</h3>
       <div class="eco-sub">Design » Update PCB Document — do esquema para a placa. As linhas marcadas e sem erro viram mudanças no changes.js.</div>
       <div class="eco-tab"><table><thead><tr><th style="width:26px"></th><th>Ação</th><th>Objeto afetado</th><th></th><th>Para</th>
@@ -115,7 +123,11 @@ function eco(par){
         const tr = el('tr', 'grp', `<td><input type="checkbox" ${todos ? 'checked' : ''} aria-label="marcar o grupo"></td>
           <td colspan="7">${esc(g.titulo)} <span class="eco-sub" style="font-weight:400">(${esc(g.altium)}) — ${as.length}</span></td>`);
         const cb = tr.querySelector('input'); cb.indeterminate = algum && !todos;
-        cb.onchange = () => { for (const a of as) if (!a.semPad && !a.info && !feitos.has(a.id)) a.ativo = cb.checked; E.valida(ec); desenha(); };
+        cb.onchange = () => {
+          const juntas = [];
+          for (const a of as) if (!a.semPad && !a.info && !feitos.has(a.id)) juntas.push(...(E.junta ? E.junta(ec, a, cb.checked) : (a.ativo = cb.checked, [])));
+          E.valida(ec); desenha(); avisaJuntas(juntas, cb.checked);
+        };
         tbody.appendChild(tr);
         for (const a of as) {
           const r = el('tr', a.ativo ? '' : 'off');
@@ -128,7 +140,10 @@ function eco(par){
             <td>${esc(a.objeto)}</td><td>${a.para ? '→' : ''}</td><td>${esc(a.para || '')}</td>
             <td class="st">${icone(a)}</td><td class="st">${feitos.has(a.id) ? '<span class="eco-ok">✔</span>' : ''}</td>
             <td class="msg" title="${esc(dica)}">${esc(msg)}</td>`;
-          r.querySelector('input').onchange = ev => { a.ativo = ev.target.checked; E.valida(ec); desenha(); };
+          r.querySelector('input').onchange = ev => {
+            const juntas = E.junta ? E.junta(ec, a, ev.target.checked) : (a.ativo = ev.target.checked, []);
+            E.valida(ec); desenha(); avisaJuntas(juntas, ev.target.checked);
+          };
           tbody.appendChild(r);
         }
       }
