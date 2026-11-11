@@ -4,6 +4,27 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.97.6 — 2026-11-11
+
+**A aprovação não cai mais por causa de outra máquina.** Pergunta do dono: "já tinha aprovado as duas MIRBC, por que
+elas estão piscando sem aprovação agora?". As duas foram aprovadas às 00:49 no DESKTOP-MDMCRJ6, na 1.97.5. Às 00:51 o
+LUCAS-PC, com o NexoEletric aberto numa versão anterior à 1.96.0, apagou a aprovação das duas. Ninguém tinha mexido
+nelas: os arquivos eram idênticos à cópia da revisão. O que mudou foi a conta da assinatura.
+- **Por que a conta mudou.** A assinatura elétrica do esquema depende da versão do NexoEletric (a extração de nets do
+  `hub-core.js`, por exemplo a port que liga nas duas pontas da 1.96.0) e das bibliotecas daquela máquina (SchLib,
+  acervos do almoxarifado). Com outra conta, a máquina achava o projeto "modificado" e, passados os 2 minutos de
+  carência, apagava o carimbo. O NexoBD levava o arquivo para todo mundo.
+- **Agora a dúvida se tira pela cópia da revisão.** Quando a assinatura gravada não bate, o app confere a cópia em
+  `Revisoes/REV.<x>/` (o projeto como foi aprovado) com a conta DESTA máquina, a mesma do projeto de agora. A
+  assinatura só cai se a ligação ou a PCB mudaram de verdade. Mover no esquema continua não derrubando.
+- **Sem a cópia, ninguém apaga.** Se a cópia da revisão não existe (ou ainda não chegou do NexoBD), a tag mostra
+  [Sem aprovação], mas o carimbo não é apagado.
+- **A máquina com versão anterior à 1.97.6 ainda apaga.** Atualize todas as máquinas. Para recuperar uma aprovação
+  apagada assim, use Histórico › Revisões › voltar para a revisão aprovada (o projeto fica idêntico a ela e volta
+  aprovado).
+- `tools/rotas/aprovacao.py` (`copia_da_aprovacao`, `estado_aprovacao` com `limpavel`, `confere`);
+  `tests/test_aprovacao.py` (outra máquina sem mudança, só layout, ligação mudada, sem cópia).
+
 ## 1.97.5 — 2026-11-11
 
 **O conector uma parte por via, o No ERC na net de um pino só, o componente só da placa e a revisão escolhida no

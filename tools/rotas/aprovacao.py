@@ -316,8 +316,35 @@ def _hoje():
     return time.strftime('%d/%m/%y')
 
 
+def copia_da_aprovacao(pdir, p, ass):
+    """a pasta Revisoes/REV.<x>/ que guarda o projeto como estava na aprovacao `ass` (o schematic.js dela traz a mesma
+    Aprovacao_assinatura; a da assinatura velha, pela assinatura legada da copia); None se nao tem"""
+    rd = os.path.join(pdir, PASTA_REV, 'REV.' + letra_da_revisao(p.get('Revisao')))
+    sch = os.path.join(rd, 'schematic.js')
+    if not os.path.isfile(sch):
+        return None
+    try:
+        with open(sch, encoding='utf-8') as f:
+            pr = params_do_texto(f.read())
+    except OSError:
+        return None
+    if pr.get('Aprovacao_assinatura') == ass:
+        return rd
+    if not ass.startswith(PREFIXO) and assinatura_legada(rd) == ass:
+        return rd
+    return None
+
+
 def estado_aprovacao(pdir):
-    """{aprovado, por, data, carimbo, assinada, temEsquema} do projeto na pasta"""
+    """{aprovado, por, data, carimbo, assinada, temEsquema} do projeto na pasta
+
+    1.97.6 (2026-11-11, o MIRBC): a assinatura gravada foi feita pela conta de UMA maquina — a impressao eletrica depende
+    da versao do NexoEletric (hub-core.js) e das bibliotecas dela (SchLib, acervos do almoxarifado). Aprovado na 1.97.5,
+    o LUCAS-PC, numa versao anterior a 1.96.0, achou a assinatura diferente e, passada a carencia, apagou a aprovacao
+    das duas placas sem ninguem ter mexido. Agora, quando a assinatura gravada nao bate, a duvida se tira pela copia da
+    revisao (Revisoes/REV.<x>/, o projeto como foi aprovado), assinada com a conta DESTA maquina: copia e projeto de
+    agora na mesma conta = nada eletrico mudou. Sem a copia nao ha como ter certeza: a tag fica "Sem aprovacao", mas
+    o carimbo nao e apagado (`limpavel` False)."""
     sch = os.path.join(pdir, 'schematic.js')
     try:
         with open(sch, encoding='utf-8') as f:
@@ -326,26 +353,29 @@ def estado_aprovacao(pdir):
         return {'aprovado': False, 'temEsquema': False, 'assinada': False}
     ass = p.get('Aprovacao_assinatura') or ''
     conferida = True
+    limpavel = True
     ok = False
     if ass and (p.get('Aprovador_DiEletrons') or '').strip():
         atual = assinatura(pdir)
         if atual is None:                  # sem o Node nao da para conferir: fica como esta, e nada e limpo
             ok, conferida = True, False
-        elif ass.startswith(PREFIXO):
-            ok = ass == atual
         else:
-            # aprovada pela assinatura velha: vale se nada mudou, ou se so mudou o que nao e eletrico desde a revisao
-            # aprovada (a copia em Revisoes/REV.<x>/ e o estado da aprovacao)
-            ok = ass == assinatura_legada(pdir)
+            # a mesma conta de quem aprovou (a assinatura velha, antes da 1.80.0: o texto inteiro do esquema)
+            ok = ass == atual if ass.startswith(PREFIXO) else ass == assinatura_legada(pdir)
             if not ok:
-                rd = os.path.join(pdir, PASTA_REV, 'REV.' + letra_da_revisao(p.get('Revisao')))
-                if os.path.isfile(os.path.join(rd, 'schematic.js')) and assinatura_legada(rd) == ass:
+                # a copia da revisao aprovada, pela conta desta maquina (vale para outra versao, outra biblioteca e
+                # para a assinatura velha, onde so mudou o que nao e eletrico)
+                rd = copia_da_aprovacao(pdir, p, ass)
+                if rd is None:
+                    limpavel = False
+                else:
                     ar = assinatura(rd)
                     if ar is None:
                         ok, conferida = True, False
                     else:
                         ok = ar == atual
-    return {'aprovado': ok, 'conferida': conferida, 'por': p.get('Aprovador_DiEletrons') or '', 'data': p.get('Data_aprovacao') or '',
+    return {'aprovado': ok, 'conferida': conferida, 'limpavel': limpavel,
+            'por': p.get('Aprovador_DiEletrons') or '', 'data': p.get('Data_aprovacao') or '',
             'rev': p.get('Revisao') or '',
             'carimbo': p.get('Aprovacao_carimbo') or '', 'assinada': bool(ass), 'temEsquema': True}
 
@@ -405,7 +435,8 @@ def _quem_aprova():
 def confere(pdir, agora=None):
     """o estado do projeto; assinatura velha ha mais que a CARENCIA: tira os campos da aprovacao do schematic.js"""
     e = estado_aprovacao(pdir)
-    if e['aprovado'] or not e.get('assinada') or e.get('conferida') is False:
+    # 1.97.6: sem a copia da revisao para confirmar (limpavel False), a diferenca pode ser so a conta de outra versao
+    if e['aprovado'] or not e.get('assinada') or e.get('conferida') is False or e.get('limpavel') is False:
         _desde.pop(pdir, None)
         return e
     agora = agora if agora is not None else time.time()

@@ -226,6 +226,57 @@ class Rotas(unittest.TestCase):
         finally:
             carimbos.impressoes_eletricas = velho
 
+    # ── 1.97.6: a aprovacao confere pela copia da revisao, com a conta DESTA maquina ──
+    def outra_maquina(self):
+        """a impressao eletrica de outra versao do NexoEletric (ou de outra biblioteca): a mesma ligacao da outro hash.
+        Caso do MIRBC (2026-11-11): aprovado na 1.97.5, o LUCAS-PC (versao velha) achou a assinatura diferente e,
+        passados 2 minutos, apagou a aprovacao das duas placas sem ninguem ter mexido em nada."""
+        import hashlib
+        velho = carimbos.impressoes_eletricas
+
+        def fake(arqs):
+            # a mesma impressao eletrica, numa conta diferente (mover continua nao contando; ligacao continua contando)
+            return {a: (hashlib.sha256(('outra versao' + h).encode('utf-8')).hexdigest()[:24] if h else h)
+                    for a, h in velho(arqs).items()}
+        carimbos.impressoes_eletricas = fake
+        carimbos._cache_hash.clear()
+        carimbos._cache_eletrica.clear()
+        self.addCleanup(setattr, carimbos, 'impressoes_eletricas', velho)
+
+    def test_outra_maquina_nao_derruba_a_aprovacao_sem_mudanca(self):
+        self.escreve('schematic.js', self.esquema_eletrico())
+        self.entra_aprovador()
+        self.assertTrue(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()['ok'])
+        antes = self.le()
+        self.outra_maquina()
+        self.assertNotEqual(carimbos.assinatura(self.pdir), carimbos.params_do_texto(antes)['Aprovacao_assinatura'])
+        self.assertTrue(carimbos.confere(self.pdir, agora=1.0)['aprovado'])
+        self.assertTrue(carimbos.confere(self.pdir, agora=1.0 + carimbos.CARENCIA + 10)['aprovado'])
+        self.assertEqual(self.le(), antes, 'nada mudou: a aprovacao fica no carimbo')
+        # so o layout mudou: continua aprovado tambem na outra maquina
+        aprov = carimbos.params_do_texto(antes)
+        extra = ';'.join('%s=%s' % (k, aprov[k]) for k in carimbos.CAMPOS_APROVACAO)
+        self.escreve('schematic.js', self.esquema_eletrico(dx=400, extra=extra))
+        self.assertTrue(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
+        # a ligacao mudou de verdade: a outra maquina tambem derruba (e limpa passada a carencia)
+        self.escreve('schematic.js', self.esquema_eletrico(dx=400, sem_fio=True, extra=extra))
+        self.assertFalse(carimbos.confere(self.pdir, agora=50.0)['aprovado'])
+        carimbos.confere(self.pdir, agora=50.0 + carimbos.CARENCIA + 1)
+        self.assertNotIn('Aprovador_DiEletrons', carimbos.params_do_texto(self.le()))
+
+    def test_sem_copia_da_revisao_nao_limpa(self):
+        """assinatura que nao bate e sem a copia da revisao para tirar a duvida: sem aprovacao na tag, mas ninguem
+        apaga o carimbo (pode ser so a conta de outra versao)"""
+        self.escreve('schematic.js', self.esquema_eletrico())
+        self.entra_aprovador()
+        self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'})
+        shutil.rmtree(os.path.join(self.pdir, 'Revisoes'))
+        antes = self.le()
+        self.outra_maquina()
+        self.assertFalse(carimbos.confere(self.pdir, agora=1.0)['aprovado'])
+        self.assertFalse(carimbos.confere(self.pdir, agora=1.0 + carimbos.CARENCIA + 10)['aprovado'])
+        self.assertEqual(self.le(), antes)
+
     def test_assumir_pelo_login(self):
         """1.84.0: quem esta logado assume o projeto sem responsavel (vira o responsavel e o desenhista), sem senha;
         o admin assume sempre"""
