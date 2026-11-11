@@ -69,6 +69,12 @@ const base = () => ({ format: 'schmirror-v2', project: 'T', units: 'mil', items:
   /* No ERC na ponta solta do fio: de propósito */
   const s = base(); s.items.push({ t: 'noerc', sheet: S, x: 2500, y: 1500 });
   assert.strictEqual(HC.extractNets(s, schlib).pontasSoltas.length, 0);
+  /* 1.98.1: e o pino do toco (R2.2) também não é solto — o No ERC vale para a ligação inteira, como no Altium */
+  assert.ok(!HC.extractNets(s, schlib).pinosSoltos.some(p => p.ref === 'R2' && p.num === '2'), 'R2.2 com No ERC na ponta do toco');
+  assert.ok(!/No ERC em \(2500,1500\)/.test(HC.validateSchematic(s, schlib, pcblib).warnings.join('\n')), 'No ERC na ponta do fio não é aviso');
+  /* No ERC no meio do toco também vale */
+  const m = base(); m.items.push({ t: 'noerc', sheet: S, x: 2500, y: 1200 });
+  assert.ok(!HC.extractNets(m, schlib).pinosSoltos.some(p => p.ref === 'R2' && p.num === '2'), 'R2.2 com No ERC no meio do toco');
   /* a ponta que pousa no MEIO de outro fio (T) liga */
   const t = base(); t.items.push({ t: 'wire', sheet: S, pts: [[1500, 1000], [1500, 600]] }, { t: 'netlabel', sheet: S, net: 'X', x: 1500, y: 600 });
   assert.ok(!HC.extractNets(t, schlib).pontasSoltas.some(p => p.x === 1500), 'a ponta em T no meio do fio liga');
