@@ -4,6 +4,28 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.103.0 — 2026-11-12
+
+**As peças do Wokwi vivas no Simulador do NexoEletric (o NexoCode só controla).** Pedido do dono: "o simulador do Wokwi
+que tá no NexoCode eu quero que funcione no NexoEletric; no NexoCode só vai ter código; ele controla o microcontrolador
+do projeto no simulador do NexoEletric; toda a simulação fica lá".
+- O NexoCode (0.4.0+) roda o firmware e os modelos dos dispositivos montados a partir do ESQUEMA do projeto, e manda no
+  `gpio_lote` o campo `pecas`: só o que mudou, por designador (U3, DS1...) ou `net:<NET>`.
+- Cada peça aparece com o visual do Wokwi (@wokwi/elements 1.9.2, MIT, em `vendor/wokwi`), presa por uma linha:
+  - no Esquema do Simulador, ao lado do símbolo;
+  - na PCB 2D/3D e na Bancada, junto ao componente.
+  As peças: OLED SSD1306 com a imagem da tela, LCD 16×2/20×4, servo com o ângulo, NeoPixel/anel, 7 segmentos, LED/RGB,
+  buzzer, relé, botão, teclado, potenciômetro, encoder, joystick, DHT22, sonar HC-SR04, PIR, LDR, NTC, MPU6050 e
+  DS1307. Peça sem componente vai para a doca "Peças do NexoCode". O cabeçalho do cartão recolhe a peça.
+- O que a pessoa faz na peça volta ao firmware na resposta do próximo `gpio_lote` (`pecas_entrada`, no formato do
+  `bancada.interagir` do NexoCode):
+  - apertar o botão ou uma tecla do teclado;
+  - girar o potenciômetro ou o encoder;
+  - movimento no PIR;
+  - os controles dos sensores (temperatura e umidade do DHT, distância do sonar, luz, NTC, acelerações e giros do MPU).
+- MCP `sim_controlar`: `pecas` (o estado das peças vivas) e `peca {id, entrada}` (mexer numa peça).
+- Arquivo novo `hub-simulador-pecas.js`: envolve o `HubSimulador.mcp` sem mudar o `hub-simulador.js`.
+
 ## 1.102.5 — 2026-11-12
 
 **Osciloscópio com a frequência certa.** Pedido do dono: "a frequência do osciloscópio tá bugada, não mostra a frequência

@@ -1,0 +1,2 @@
+@wokwi/elements 1.9.2 (MIT) — https://github.com/wokwi/wokwi-elements
+Peças da Bancada do NexoCode. Copyright (c) 2019-2025 Uri Shaked. Licença em LICENSE.

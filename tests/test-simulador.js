@@ -356,6 +356,33 @@ caso('1.102.1: média na tela, Analisar (lista/osciloscópio), acionar do NexoCo
   assert.ok(ctrl.entrada.properties.acao.enum.includes('analisar'), 'sim_controlar analisar');
 });
 
+caso('1.103.0: as peças vivas do Wokwi (NexoCode → gpio_lote.pecas) no Simulador, e as entradas de volta', () => {
+  const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
+  const pc = ler('hub-simulador-pecas.js');
+  assert.ok(/hub-simulador-pecas\.js/.test(ler('schframe.html')) && /hub-simulador-pecas\.js/.test(ler('pcbframe.html')), 'o script nas duas vistas');
+  assert.ok(fs.existsSync(path.join(RAIZ, 'vendor/wokwi/wokwi-elements.bundle.min.js')) && fs.existsSync(path.join(RAIZ, 'vendor/wokwi/LICENSE')), 'o @wokwi/elements (MIT) com a licença');
+  assert.ok(/a\.acao === 'gpio_lote' && a\.pecas/.test(pc) && /r\.pecas_entrada = fila\(\)\.splice\(0\)/.test(pc) && /!\('pecas_entrada' in r\)/.test(pc), 'gpio_lote: recebe pecas e devolve a fila pecas_entrada uma vez');
+  assert.ok(/'membrane-keypad' \? \{ id, acao: 'apertar', linha/.test(pc) && /acao: 'girar', valor: 1/.test(pc) && /acao: 'movimento'/.test(pc), 'as entradas no formato do bancada.interagir do NexoCode');
+  /* a fila e o estado, sem tela: o contrato do gpio_lote */
+  const vm = require('node:vm');
+  const H = { mcp: async a => ({ ok: true, eco: a.acao }) };
+  const win = { HubSimulador: H, location: { search: '?p=X', pathname: '/schframe.html' }, setInterval, clearInterval, setTimeout, CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } }, dispatchEvent() {} };
+  win.top = win; win.window = win;
+  vm.runInNewContext(pc, Object.assign(win, { URLSearchParams, console }));
+  return (async () => {
+    await win.HubSimulador.mcp({ acao: 'gpio_lote', gpio: {}, pecas: { U3: { tipo: 'ssd1306', ref: true, png: 'data:x' }, 'net:K': { tipo: 'membrane-keypad', ref: false } } });
+    assert.strictEqual(JSON.stringify(Object.keys(win.__nexoPecas.X).sort()), JSON.stringify(['U3', 'net:K']));
+    await win.HubSimulador.mcp({ acao: 'peca', id: 'net:K', entrada: { acao: 'apertar', linha: 1, coluna: 2 } });
+    const r = await win.HubSimulador.mcp({ acao: 'gpio_lote', gpio: {} });
+    assert.strictEqual(JSON.stringify(r.pecas_entrada), JSON.stringify([{ id: 'net:K', acao: 'apertar', linha: 1, coluna: 2 }]));
+    const r2 = await win.HubSimulador.mcp({ acao: 'gpio_lote', gpio: {}, pecas: { U3: { remover: true } } });
+    assert.strictEqual(JSON.stringify(r2.pecas_entrada), '[]');
+    assert.ok(!('U3' in win.__nexoPecas.X), 'remover tira a peça');
+    const e = await win.HubSimulador.mcp({ acao: 'pecas' });
+    assert.ok(e.pecas['net:K'] && !('png' in e.pecas['net:K']));
+  })();
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();
