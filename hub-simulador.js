@@ -76,6 +76,7 @@
       st.mt = C.monta(st.comps, Object.assign({}, st.cfg, { externos: externosDaBancada(st.comps) }));
       st.mt.cfg = st.cfg;
       st.sim = M.cria(st.mt.elementos, { terra: st.mt.terra, dt: dtDaVelocidade() });
+      st.acc = null; st.vis = null;   // a media e do circuito montado
       st.res = st.modo === 'dc' ? st.sim.dc() : st.sim.liga();
       if (st.modo !== 'dc') st.res = st.sim.passo(1);
       st.erro = '';
@@ -95,7 +96,7 @@
   function acumula(r) {
     if (!r || r.modo === 'dc') return;
     const a = st.acc || (st.acc = { n: 0, v: Object.create(null), i: r.el.map(e => e.i.map(() => 0)), p: r.el.map(() => 0) });
-    if (a.i.length !== r.el.length) { st.acc = null; return acumula(r); }
+    if (a.i.length !== r.el.length || a.i.some((x, j) => x.length !== r.el[j].i.length)) { st.acc = null; return acumula(r); }
     a.n++;
     for (const k in r.v) a.v[k] = (a.v[k] || 0) + r.v[k];
     r.el.forEach((e, j) => { const ai = a.i[j]; for (let q = 0; q < e.i.length; q++) ai[q] += e.i[q]; a.p[j] += e.p; });
@@ -103,6 +104,8 @@
   function resParaMostrar() {
     const r = st.res;
     if (!r || r.modo === 'dc' || !st.acc || !st.acc.n) { st.vis = null; return r; }
+    /* o circuito foi remontado depois da soma (outro numero de elementos): descarta a soma velha */
+    if (st.acc.i.length !== r.el.length || st.acc.i.some((x, j) => x.length !== r.el[j].i.length)) { st.acc = null; st.vis = null; return r; }
     const a = st.acc, n = a.n;
     const med = { v: {}, el: r.el.map((e, j) => Object.assign({}, e, { i: a.i[j].map(x => x / n), p: a.p[j] / n })) };
     for (const k in a.v) med.v[k] = a.v[k] / n;

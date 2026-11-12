@@ -239,8 +239,10 @@
     }
     function pinta() {
       const u = ui(); if (!u) return;
-      u.el.hidden = !H.em3d();
-      u.rot.hidden = !H.em3d() || !st.ligado || !st.baloes;
+      /* na aba Simulador o painel "Corrente nas trilhas" e os rotulos automaticos sairam (pedido do dono: "so atrapalha;
+         os baloes surgem interativamente"): o clique na trilha ou no pino abre o balao */
+      u.el.hidden = !H.em3d() || naAba;
+      u.rot.hidden = !H.em3d() || !st.ligado || !st.baloes || naAba;
       u.el.querySelector('[data-a=bal]').classList.toggle('on', st.baloes);
       const bOn = u.el.querySelector('[data-a=on]'); bOn.textContent = st.ligado ? 'ligado' : 'desligado'; bOn.classList.toggle('on', st.ligado);
       u.el.querySelector('[data-a=calc]').classList.toggle('on', st.calc);
@@ -279,6 +281,7 @@
       else st.res = null;
       if (!H.em3d()) H.redesenha();
       pinta();
+      try { atualizaBaloes(); } catch (e) { console.warn('baloes:', e); }
       if (!V || typeof V.extra !== 'function') return;
       if (!st.ligado || !st.dados || !H.placa() || !st.res) { V.extra('simCorrente', null); V.anima(null); limpaRotulos(); pinta(); return; }
       const T = V.T(), esp = V.espessura();
@@ -345,6 +348,7 @@
     function limpaRotulos() { for (const r of st.rotulos) r.el.remove(); st.rotulos = []; }
     function rotulos(vivos) {
       limpaRotulos();
+      if (naAba) return;
       const u = ui(); if (!u) return;
       /* um rotulo por trilha (a maior corrente de cada uma), as 12 mais carregadas (acima de 5 % da maior), sem dois
          a menos de 6 mm um do outro: a placa continua legivel */
@@ -540,7 +544,154 @@
       cartao.hidden = false;
       cartao.style.left = Math.min(ev.clientX + 16, window.innerWidth - 330) + 'px';
       cartao.style.top = Math.min(ev.clientY + 14, window.innerHeight - cartao.offsetHeight - 8) + 'px';
+      if (fixo && naAba) {
+        const ja = baloes.find(b => b.el === cartao);
+        if (ja) { ja.ax = p.x; ja.ay = p.y; ja.bottom = /bottom/i.test(p.camada); }
+        else baloes.push({ el: cartao, ax: p.x, ay: p.y, bottom: /bottom/i.test(p.camada), dx: 34, dy: -30, cartao: true });
+        rodaBaloes();
+      } else { const i = baloes.findIndex(b => b.el === cartao); if (i >= 0) baloes.splice(i, 1); }
     }
+
+    /* ---------------------------------------------------------------- OS BALOES (clique na trilha ou no pino) */
+    /* Pedido do dono: "os baloes eu quero clicar em cima da trilha ou do pino pra que eles aparecam" e "os calculos so
+       aparecem se abrir; por padrao invisiveis". Cada balao fica preso ao ponto clicado por uma linha (2D e 3D: segue a
+       camera), mostra a corrente e a net; "contas" abre R, dV, P e dT. Clicar de novo na trilha (ou no x) fecha. */
+    const baloes = [];
+    let camadaB = null, svgB = null, rafB = 0;
+    function camadaBaloes() {
+      if (camadaB) return camadaB;
+      camadaB = document.createElement('div');
+      camadaB.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:64';
+      svgB = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svgB.setAttribute('width', '100%'); svgB.setAttribute('height', '100%');
+      svgB.style.cssText = 'position:absolute;inset:0;overflow:visible';
+      camadaB.append(svgB);
+      document.body.append(camadaB);
+      return camadaB;
+    }
+    function telaDe(b) {
+      if (H.em3d()) {
+        const V = H.vista3d(), host = H.host3d(); if (!V || !V.projeta || !host) return null;
+        const e = V.espessura(), r = host.getBoundingClientRect();
+        const q = V.projeta(b.ax, b.ay, b.bottom ? -e - 0.05 : 0.05);
+        return { x: r.left + q.x, y: r.top + q.y, atras: q.atras };
+      }
+      const cv = H.canvas(); if (!cv || !H.mundoParaTela) return null;
+      const r = cv.getBoundingClientRect(), q = H.mundoParaTela(b.ax, b.ay);
+      return { x: r.left + q.x, y: r.top + q.y, atras: false };
+    }
+    function posicionaBaloes() {
+      camadaBaloes();
+      svgB.textContent = '';
+      for (let i = baloes.length - 1; i >= 0; i--) if (baloes[i].cartao && baloes[i].el.hidden) baloes.splice(i, 1);   // o cartao fechado sai
+      const postosB = [], pontosB = [];
+      for (const b of baloes) { const q = telaDe(b); if (q && !q.atras) pontosB.push(q); }
+      for (const b of baloes) {
+        const p = telaDe(b);
+        if (!p || p.atras) { if (!b.cartao) b.el.style.display = 'none'; continue; }
+        b.el.style.display = '';
+        const w = b.el.offsetWidth || 200, h = b.el.offsetHeight || 60;
+        /* o primeiro lugar livre em volta do ponto (acima a direita, acima a esquerda, abaixo...), mais longe se preciso:
+           um balao nao cobre o outro nem o ponto de outro balao */
+        let L = 0, T = 0;
+        for (const d of [56, 90, 130, 180]) {
+          let achou = false;
+          for (const [sx, sy] of [[1, -1], [-1, -1], [1, 1], [-1, 1]]) {
+            L = sx > 0 ? p.x + d * 0.8 : p.x - d * 0.8 - w;
+            T = sy < 0 ? p.y - d * 0.6 - h : p.y + d * 0.6;
+            L = Math.max(4, Math.min(L, window.innerWidth - w - 4)); T = Math.max(4, Math.min(T, window.innerHeight - h - 4));
+            const r = { x1: L, y1: T, x2: L + w, y2: T + h };
+            const bate = postosB.some(o => r.x1 < o.x2 + 6 && r.x2 > o.x1 - 6 && r.y1 < o.y2 + 6 && r.y2 > o.y1 - 6)
+              || pontosB.some(q => q.x > r.x1 - 8 && q.x < r.x2 + 8 && q.y > r.y1 - 8 && q.y < r.y2 + 8);
+            if (!bate) { achou = true; break; }
+          }
+          if (achou) break;
+        }
+        postosB.push({ x1: L, y1: T, x2: L + w, y2: T + h });
+        b.el.style.left = L + 'px'; b.el.style.top = T + 'px';
+        /* a linha: do ponto ate a borda mais perto do balao */
+        const bx = Math.max(L, Math.min(p.x, L + w)), by = Math.max(T, Math.min(p.y, T + h));
+        /* a linha com uma borda escura (o cobre tambem e amarelo) e o ponto com anel branco */
+        const NS = 'http://www.w3.org/2000/svg', mk = (t, at) => { const e = document.createElementNS(NS, t); for (const k in at) e.setAttribute(k, at[k]); return e; };
+        svgB.append(
+          mk('line', { x1: p.x, y1: p.y, x2: bx, y2: by, stroke: 'rgba(0,0,0,.85)', 'stroke-width': 4.5, 'stroke-linecap': 'round' }),
+          mk('line', { x1: p.x, y1: p.y, x2: bx, y2: by, stroke: '#facc15', 'stroke-width': 1.8, 'stroke-linecap': 'round' }),
+          mk('circle', { cx: p.x, cy: p.y, r: 5, fill: '#facc15', stroke: '#fff', 'stroke-width': 1.6 }));
+      }
+    }
+    function rodaBaloes() {
+      if (rafB) return;
+      const passo = () => { rafB = 0; if (!baloes.length) { if (svgB) svgB.textContent = ''; return; } posicionaBaloes(); rafB = requestAnimationFrame(passo); };
+      rafB = requestAnimationFrame(passo);
+    }
+    const chaveSeg = s => s.trilha + '|' + s.x1.toFixed(3) + ',' + s.y1.toFixed(3) + '|' + s.x2.toFixed(3) + ',' + s.y2.toFixed(3);
+    function trilhaEm(ev) {
+      if (!st.res || !st.res.segs) return null;
+      let melhor = null, dm = 1e9;
+      const dSeg = (px, py, ax, ay, bx, by) => { const vx = bx - ax, vy = by - ay, L2 = vx * vx + vy * vy || 1e-12; const t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / L2)); return Math.hypot(px - ax - t * vx, py - ay - t * vy); };
+      if (H.em3d()) {
+        const V = H.vista3d(), host = H.host3d(); if (!V || !V.projeta || !host) return null;
+        const r = host.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top, e = V.espessura();
+        for (const s of st.res.segs) {
+          const z = /bottom/i.test(s.layer) ? -e - 0.05 : 0.05;
+          const a = V.projeta(s.x1, s.y1, z), b = V.projeta(s.x2, s.y2, z);
+          if (a.atras || b.atras) continue;
+          const d = dSeg(mx, my, a.x, a.y, b.x, b.y);
+          if (d < 8 && d < dm) { dm = d; melhor = s; }
+        }
+        if (!melhor) return null;
+        return { s: melhor, ax: (melhor.x1 + melhor.x2) / 2, ay: (melhor.y1 + melhor.y2) / 2 };
+      }
+      const cv = H.canvas(); if (!cv) return null;
+      const r = cv.getBoundingClientRect(), w = H.telaParaMundo(ev.clientX - r.left, ev.clientY - r.top), esc = H.escala();
+      for (const s of st.res.segs) {
+        const d = dSeg(w.x, w.y, s.x1, s.y1, s.x2, s.y2) * esc;
+        if (d < Math.max(7, s.w / 2 * esc + 3) && d < dm) { dm = d; melhor = s; }
+      }
+      if (!melhor) return null;
+      /* a ancora do balao: o ponto da trilha mais perto do clique */
+      const vx = melhor.x2 - melhor.x1, vy = melhor.y2 - melhor.y1, L2 = vx * vx + vy * vy || 1e-12;
+      const t = Math.max(0, Math.min(1, ((w.x - melhor.x1) * vx + (w.y - melhor.y1) * vy) / L2));
+      return { s: melhor, ax: melhor.x1 + t * vx, ay: melhor.y1 + t * vy };
+    }
+    function htmlTrilha(b) {
+      const s = b.s, n = v => (+v || 0).toFixed(2).replace('.', ',');
+      let h = '<div class="hd"><b>' + fmt(Math.abs(s.i), 'A') + '</b><span>' + esc(s.net) + ' · ' + esc(s.layer) + '</span>'
+        + '<button data-b="c" class="' + (b.contas ? 'on' : '') + '" title="Mostrar as contas">contas</button><button data-b="x" title="Fechar">×</button></div>';
+      if (b.contas) h += '<div class="f">R = ρ·L/(w·t) = 1,72e-8·' + n(s.len) + ' mm/(' + n(s.w) + ' mm·35 µm) = ' + fmt(s.r, 'Ω')
+        + '<br>ΔV = I·R = ' + fmt(s.dv, 'V') + ' · P = I²·R = ' + fmt(s.p, 'W')
+        + '<br>ΔT (IPC-2221) ≈ ' + n(s.dT) + ' °C · Imáx p/ +10 °C = ' + fmt(s.imax10, 'A') + '</div>';
+      return h;
+    }
+    function pintaBalaoTrilha(b) {
+      b.el.innerHTML = htmlTrilha(b);
+      b.el.querySelector('[data-b=x]').onclick = () => fechaBalao(b);
+      b.el.querySelector('[data-b=c]').onclick = () => { b.contas = !b.contas; pintaBalaoTrilha(b); };
+    }
+    function fechaBalao(b) { const i = baloes.indexOf(b); if (i >= 0) baloes.splice(i, 1); b.el.remove(); if (!baloes.length && svgB) svgB.textContent = ''; }
+    function alternaBalaoTrilha(hit) {
+      const k = chaveSeg(hit.s), ja = baloes.find(b => b.chave === k);
+      if (ja) { fechaBalao(ja); return; }
+      camadaBaloes();
+      const el = document.createElement('div'); el.className = 'simpcb-balao';
+      for (const x of ['mousedown', 'wheel', 'contextmenu', 'dblclick']) el.addEventListener(x, z => z.stopPropagation());
+      camadaB.append(el);
+      const b = { el, s: hit.s, chave: k, ax: hit.ax, ay: hit.ay, bottom: /bottom/i.test(hit.s.layer), dx: 26 + (baloes.length % 3) * 8, dy: -22, contas: false };
+      baloes.push(b);
+      pintaBalaoTrilha(b);
+      rodaBaloes();
+    }
+    /* a simulacao andou: o mesmo trecho com os valores novos (a corrente que sumiu fica 0) */
+    function atualizaBaloes() {
+      for (const b of baloes) {
+        if (!b.chave) continue;
+        const s = st.res && st.res.segs.find(x => chaveSeg(x) === b.chave);
+        b.s = s || Object.assign({}, b.s, { i: 0, dv: 0, p: 0, dT: 0 });
+        pintaBalaoTrilha(b);
+      }
+    }
+    /* o que os testes e a IA usam daqui */
+    window.HubSimPcbBaloes = { lista: () => baloes.map(b => ({ chave: b.chave || null, cartao: !!b.cartao, i: b.s ? b.s.i : null })), trilhaEm, alternaBalaoTrilha };
     /* o que a bancada (hub-bancada.js) usa daqui */
     window.HubSimPcbInt = { padEm, padsDaPlaca, H, dados: () => st.dados, mostraCartao };
     const CSS2 = `.simpcb-cartao{position:fixed; z-index:70; min-width:220px; max-width:320px; padding:9px 11px; border-radius:10px; pointer-events:none;
@@ -549,6 +700,12 @@
 .simpcb-cartao .c{color:#9ca3af; margin-top:3px} .simpcb-cartao .g{display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin-top:5px} .simpcb-cartao .g b{text-align:right}
 .simpcb-cartao .ds{margin-top:6px; padding:6px 8px; border-radius:7px; background:rgba(59,130,246,.14); color:#dbeafe} .simpcb-cartao .ds .dd{color:#93c5fd; font-size:11px}
 .simpcb-cartao a{display:inline-block; margin-top:6px; color:#93c5fd}
+.simpcb-balao{position:fixed; pointer-events:auto; min-width:150px; max-width:340px; padding:6px 9px; border-radius:10px; background:rgba(12,15,20,.96); color:#e5e7eb;
+  border:1px solid #facc15; box-shadow:0 8px 24px rgba(0,0,0,.5); font:12px system-ui, sans-serif}
+.simpcb-balao .hd{display:flex; align-items:center; gap:7px} .simpcb-balao .hd b{color:#facc15} .simpcb-balao .hd span{flex:1; color:#9ca3af}
+.simpcb-balao button{height:20px; padding:0 6px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.05); color:inherit; cursor:pointer; font:11px system-ui}
+.simpcb-balao button.on{background:#f59e0b; color:#111; border-color:#f59e0b}
+.simpcb-balao .f{margin-top:5px; color:#93c5fd; font:10.5px ui-monospace, monospace; line-height:1.45}
 .simpcb-cartao .ab{display:flex; gap:4px; margin:-2px 0 7px} .simpcb-cartao .ab button{flex:1; height:24px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.05); color:inherit; cursor:pointer; font:inherit}
 .simpcb-cartao .ab button.on{background:#f59e0b; color:#111; border-color:#f59e0b} .simpcb-cartao .ab button[data-m=x]{flex:0 0 26px}
 .simpcb-cartao canvas{display:block; width:300px; height:140px; margin-top:6px; border-radius:7px; background:#05070a} .simpcb-cartao .lg{margin-top:4px; color:#9ca3af; font:10.5px ui-monospace, monospace}`;
@@ -570,7 +727,10 @@
           if (window.HubBancada && window.HubBancada.consome && window.HubBancada.consome(e)) { e.stopPropagation(); e.preventDefault(); return; }
           const p = padEm(e);
           e.stopPropagation(); e.preventDefault();
-          if (p) mostraCartao(p, e, true); else mostraCartao(null);
+          if (p) { mostraCartao(p, e, true); return; }
+          const sg = trilhaEm(e);
+          if (sg) { alternaBalaoTrilha(sg); return; }
+          mostraCartao(null);
         }, true);
         alvo.addEventListener('mousemove', e => {
           if (cartao && cartao.classList.contains('fixo') && !cartao.hidden) return;

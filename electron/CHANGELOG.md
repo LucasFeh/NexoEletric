@@ -4,6 +4,23 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.102.2 — 2026-11-12
+
+**PCB do Simulador: os balões surgem no clique, sem o painel "Corrente nas trilhas"; correção do primeiro sincronismo com o NexoCode.**
+Pedidos do dono: "os balões eu quero clicar em cima da trilha ou do pino pra que eles apareçam; essa aba de correntes
+nas trilhas pode ir embora, só atrapalha" e "os cálculos só aparecem se abrir, ficam por padrão invisíveis".
+- **Balão no clique** (PCB 2D, PCB 3D e Bancada):
+  - clicar numa trilha abre o balão com a corrente, a net e a camada, preso ao ponto clicado por uma linha (com borda
+    escura e um ponto com anel);
+  - clicar de novo na trilha, ou no ×, fecha;
+  - o botão **contas** abre R = ρ·L/(w·t), ΔV, P e ΔT (IPC-2221); por padrão as contas ficam fechadas;
+  - o cartão do pino (Lista ou Osciloscópio) também fica preso ao pad pela linha;
+  - os balões procuram um lugar livre e não se cobrem;
+  - acompanham a câmera e os valores da simulação.
+- O painel "Corrente nas trilhas" e os rótulos automáticos saíram da aba Simulador. A vista PCB comum continua com eles.
+- **Correção:** o primeiro `gpio_lote` do NexoCode depois de remontar o circuito respondia "Cannot read properties of
+  undefined (reading 'map')", porque sobrava a média do circuito anterior. Agora ela é descartada ao montar.
+
 ## 1.102.1 — 2026-11-12
 
 **Simulador mais calmo e no clique: Analisar (lista ou osciloscópio), balões organizados, o botão do NexoCode na folha e a bancada editável.**

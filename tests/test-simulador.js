@@ -340,6 +340,8 @@ caso('ganchos nas vistas, <script> nas cascas, ação "simulador" nos dois hubs'
 caso('1.102.1: média na tela, Analisar (lista/osciloscópio), acionar do NexoCode, bancada com seleção, skill do 3D', () => {
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
   const sim = ler('hub-simulador.js'), pcb = ler('hub-simulador-pcb.js'), banc = ler('hub-bancada.js');
+  assert.ok(/st\.acc = null; st\.vis = null;   \/\/ a media e do circuito montado/.test(sim), 'remontar descarta a media velha (o gpio_lote do NexoCode dava "reading map")');
+  assert.ok(/u\.el\.hidden = !H\.em3d\(\) \|\| naAba;/.test(pcb) && /function alternaBalaoTrilha/.test(pcb) && /b\.contas/.test(pcb) && /contas: false/.test(pcb), 'PCB: sem o painel na aba; balão no clique da trilha, contas fechadas');
   assert.ok(/function resParaMostrar\(\)/.test(sim) && /acumula\(st\.res\)/.test(sim) && /const k = 1;/.test(sim), 'a média dos passos (o PWM não pisca) e um passo de cada vez');
   assert.ok(/case 'analisar':/.test(sim) && /'📈 Osciloscópio'/.test(sim) && !/dica\.mostra\(h, e\)/.test(sim), 'Analisar no clique, sem balão no mouse');
   assert.ok(/tensoes: false/.test(sim) && /if \(!j\.v2\) st\.mostrar\.tensoes = false/.test(sim), 'as pílulas de tensão começam desligadas');
