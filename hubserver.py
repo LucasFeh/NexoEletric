@@ -2323,6 +2323,16 @@ try:
 except Exception as _e:            # noqa: BLE001
     print('AVISO: integracao com o NexoCAD desligada (%s) — falta tools/rotas/nexocad.py.' % _e)
 
+# ─────────────────── NexoCode: o firmware a partir do esquema (tools/rotas/nexocode.py, 1.100.0) ───────────────────
+# /api/nexocode/{estado,pasta,abrir}: o botao NexoCODE do esquema (hub-nexocode.js) grava o pedido (esquema + respostas)
+# em %LOCALAPPDATA%\NexoCode\briefings e abre o NexoCode com ele. So desta maquina.
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import nexocode as _nexocode   # noqa: E402
+    _nexocode.registra(app, ROOT, _is_local)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: integracao com o NexoCode desligada (%s) — falta tools/rotas/nexocode.py.' % _e)
+
 # ─────────────────── JLCPCB: o Gerber no carrinho pelo IntegrateBrowser (tools/rotas/jlc.py) ───────────────────
 # POST /api/jlc/enviar + GET /api/jlc/estado: o botao "Enviar pra JLC" do Gerber roda o mcp/lib/jlc.js (o motor das
 # ferramentas jlc_* do MCP). So desta maquina: o navegador e o do Nexo Hub dela.

@@ -7589,6 +7589,22 @@ window.__hubComponentes = function(){
   return fora;
 };
 
+/* O esquema para o firmware (hub-nexocode.js, botao NexoCODE): cada componente com os pinos e a net de cada pino,
+   como o sch_componentes do MCP. Copia, nunca o modelo. */
+window.__hubEsquemaFirmware = function(){
+  const componentes = [];
+  for (const s of model.sheets)
+    for (const c of s.comps){
+      let pinos = [];
+      try { pinos = HubCore.compPinsWorld(c, SLIB).map(p => ({ num:String(p.num), name:p.name || '', net:nets.pinNet[c.ref + '-' + p.num] || '' })); }
+      catch (_e){ pinos = []; }
+      componentes.push({ ref:c.ref, sym:c.sym, comment:c.comment, footprint:c.footprint, params:c.params,
+                         part:c.part || 1, sheet:s.name, dnp:!!c.dnp, pinos });
+    }
+  return { projeto:SCH_P, params:schematic.params || '', componentes,
+           nets:(nets.nets || []).map(n => ({ name:n.name, pins:n.pins.slice() })) };
+};
+
 window.__hubSelectComp = function(ref){
   for (const s of model.sheets){ const c = s.comps.find(c => c.ref === ref); if (c){ focusComp(c); return; } }
 };

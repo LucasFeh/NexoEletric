@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.100.0 — 2026-11-12
+
+**NexoCODE no esquema: o firmware da placa pela IA, no NexoCode.** Pedido do dono: "na tela do esquema tenha NexoCODE que
+pede uma IA pra gerar código em cima do esquema, com várias perguntinhas e efeito de animação sobre o produto".
+- Botão **NexoCODE** na barra do esquema (hub-nexocode.js). Abre, por cima da janela, as perguntas uma a uma com o produto
+  animado ao lado (o microcontrolador do esquema e os GPIO ligados se acendendo): já tem software? (sim: pasta deste PC ou
+  link do GitHub; não: onde criar, Arduino ou ESP-IDF), o que o sistema deve fazer (com sugestões), referências (links de
+  interface, repositórios, códigos, datasheets) e se a IA já começa.
+- O pedido leva o esquema da tela (cada componente com os pinos e as nets — `window.__hubEsquemaFirmware` no schframe.js)
+  e vai para `POST /api/nexocode/abrir` (tools/rotas/nexocode.py), que grava em `%LOCALAPPDATA%\NexoCode\briefings` e abre o
+  **NexoCode** (o editor de firmware novo da atmosfera Nexo) com ele: o NexoCode monta o projeto PlatformIO, gera
+  `include/pinos_placa.h` do esquema e a IA começa. `GET /api/nexocode/estado` diz se o NexoCode está instalado/aberto;
+  `POST /api/nexocode/pasta` abre o diálogo de pasta do Windows. Só desta máquina.
+
 ## 1.99.1 — 2026-11-11
 
 **Enviar para o Odoo: a peça vinculada pelo OdooId é do almoxarifado, e o só de cobre fica fora.** Pedido do dono:
