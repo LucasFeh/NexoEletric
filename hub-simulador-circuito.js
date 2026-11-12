@@ -771,20 +771,33 @@
           for (const p of c.pinos) {
             const g = cfg.gpio && cfg.gpio[ref + '-' + p.num];
             if (!g || !p.net || !vddPino || !g0) continue;
-            const modo = g.modo, duty = g.duty == null ? 0.5 : +g.duty, fr = +g.f || 1000;
-            if (modo === 'entrada') continue;
+            /* o modo e lido A CADA conta do objeto da config (nao copiado): o NexoCode (gpio_lote) e o painel mudam o
+               duty do PWM ou o nivel sem remontar o circuito — o tempo da simulacao continua */
             const f = (v, e, ctx) => {
+              const modo = g.modo, duty = g.duty == null ? 0.5 : +g.duty, fr = +g.f || 1000;
               const vdd = v[1] - v[2];
               let alvo = null, rr = 30;
+              if (modo === 'entrada' || !modo) { const io = 1e-12 * (v[0] - v[2]); return [io, 0, -io]; }
               if (modo === 'alto') alvo = vdd;
               else if (modo === 'baixo') alvo = 0;
-              else if (modo === 'pwm') alvo = ctx.modo === 'dc' ? duty * vdd : ((ctx.t * fr) % 1 < duty ? vdd : 0);
+              /* PWM: no DC vale a media; no tempo, mais rapido que o passo (20 kHz com dt de ms) o pino CHAVEIA distribuindo
+                 o duty entre os passos (sigma-delta, g._on no atualiza) — o MOSFET liga e desliga como na placa e o motor
+                 recebe duty·V na media (a media no gate deixava o transistor meio aberto) */
+              else if (modo === 'pwm') alvo = ctx.modo === 'dc' ? duty * vdd : ctx.dt * fr > 0.25 ? (g._on ? vdd : 0) : ((ctx.t * fr) % 1 < duty ? vdd : 0);
               else if (modo === 'pullup') { alvo = vdd; rr = 45e3; }
               else if (modo === 'pulldown') { alvo = 0; rr = 45e3; }
               const io = (v[0] - v[2] - alvo) / rr;   // entrando pelo pino
               return [io, sp(-io, 1e-6), -sp(io, 1e-6)].map((x, k) => k === 2 ? -(io + sp(-io, 1e-6)) : x);
             };
-            poe(info, { tipo: 'NL', nos: [p.net, vddPino.net, g0.net], f, dc: [[0, 1, 2]], papel: 'GPIO ' + (p.name || p.num) + ' ' + modo }, [pk(info, p), pk(info, vddPino), pk(info, g0)]);
+            poe(info, { tipo: 'NL', nos: [p.net, vddPino.net, g0.net], f, dc: [[0, 1, 2]], papel: 'GPIO ' + (p.name || p.num), gpio: g,
+              reinicia: () => { g._acc = 0; g._on = false; },
+              atualiza: (v, e, ctx) => {
+                if (g.modo !== 'pwm' || ctx.modo === 'dc' || !(ctx.dt * (+g.f || 1000) > 0.25)) return false;
+                g._acc = (g._acc || 0) + (g.duty == null ? 0.5 : +g.duty);
+                g._on = g._acc >= 1 - 1e-9;
+                if (g._on) g._acc -= 1;
+                return false;   // vale no proximo passo
+              } }, [pk(info, p), pk(info, vddPino), pk(info, g0)]);
           }
           continue;
         }
@@ -803,6 +816,53 @@
       info.tipo = ps.length ? 'desconhecido' : 'solto';
       info.rotulo = ps.length ? 'Sem modelo de simulação' : 'Sem pinos ligados';
       if (ps.length) info.avisos.push('sem modelo de simulação: os pinos ficam em alta impedância');
+    }
+
+    /* -------- os itens da BANCADA ligados por fio (1.102.0): cfg.externos = [{ref, tipo:'motor_dc'|'fonte', nos:[a, b],
+       rotulo, eletrico:{r_ohm, kv_rpm_v, i0_a} | {v, imax_a}}]. O motor DC: R em serie com a forca contraeletromotriz
+       E = Ke·w, e a inercia (J·dw/dt = Kt·I − b·w); a fonte de bancada: tensao com resistencia interna. */
+    for (const x of cfg.externos || []) {
+      if (!x || !x.ref || !Array.isArray(x.nos) || x.nos.length < 2 || !x.nos[0] || !x.nos[1]) continue;
+      const el = x.eletrico || {};
+      const info = { ref: x.ref, pre: 'BANC', comp: { ref: x.ref, comment: x.rotulo || x.tipo }, tipo: x.tipo === 'fonte' ? 'fonte_bancada' : 'motor', rotulo: x.rotulo || x.tipo, valor: {}, elementos: [],
+                     pinos: [{ num: '+', name: '+', net: x.nos[0] }, { num: '-', name: '-', net: x.nos[1] }], avisos: [], interativo: null, valorTxt: '', externo: true };
+      comps.set(x.ref, info);
+      for (const n of x.nos) usadas.add(n);
+      if (x.tipo === 'fonte') {
+        const v = +el.v || 12;
+        info.rotulo = (x.rotulo || 'Fonte de bancada') + ' ' + fmt(v, 'V');
+        info.v = v; info.imax = +el.imax_a || 3;
+        const e = poe(info, { tipo: 'V', nos: [x.nos[0], x.nos[1]], v, rs: 0.05, papel: 'fonte de bancada' }, [info.ref + '-+', info.ref + '--']);
+        e.pinos = [info.ref + '-+', info.ref + '--'];
+        produzidas.add(x.nos[0]);
+        continue;
+      }
+      /* motor DC */
+      const R = +el.r_ohm > 0 ? +el.r_ohm : 2.5, kv = +el.kv_rpm_v > 0 ? +el.kv_rpm_v : 2500, i0 = +el.i0_a >= 0 ? +el.i0_a : 0.15;
+      const Ke = 60 / (2 * Math.PI * kv);                 // V por rad/s (= Kt em N·m/A)
+      const wNom = 6 / Ke;                                // a velocidade sem carga a 6 V (rad/s)
+      const bv = Ke * i0 / wNom;                          // atrito viscoso que da a corrente sem carga
+      const J = 0.06 * (bv + Ke * Ke / R);                // a partida leva ~60 ms (o freio eletrico Ke²/R entra na conta)
+      Object.assign(info, { R, kv, i0, Ke, bv, J, w: 0, rotulo: (x.rotulo || 'Motor DC') + ' (' + fmt(R, 'Ω') + ', ' + kv + ' rpm/V)' });
+      /* a INDUTANCIA do enrolamento (equivalente: L/R = 20 ms, para valer com o passo de tempo da tela): com o PWM, quando o
+         MOSFET abre a corrente continua pelo diodo de roda livre e o motor ve duty·V na media, como na placa de verdade */
+      const meio = x.ref + '#L';
+      poe(info, { tipo: 'L', nos: [x.nos[0], meio], l: R * 0.02, papel: 'indutância do motor', interno: true }, [info.ref + '-+', null]);
+      const f = (v, e, ctx) => {
+        const vm = v[0] - v[1];
+        /* no DC: o regime (w = Kt·I/b) -> I = V/(R + Ke²/b); no tempo: a w da inercia */
+        const i = ctx.modo === 'dc' ? vm / (R + Ke * Ke / bv) : (vm - Ke * info.w) / R;
+        return [i, -i];
+      };
+      info.el = poe(info, { tipo: 'NL', nos: [meio, x.nos[1]], f, papel: 'motor',
+        reinicia: () => { info.w = 0; },
+        atualiza: (v, e, ctx) => {
+          const vm = v[0] - v[1];
+          if (ctx.modo === 'dc') { info.w = Ke * (vm / (R + Ke * Ke / bv)) / bv; return false; }
+          const i = (vm - Ke * info.w) / R;
+          info.w += ctx.dt * (Ke * i - bv * info.w) / J;
+          return false;
+        } }, [null, info.ref + '--']);
     }
 
     /* -------- fontes: as nets de alimentacao pelo nome, as dos conectores, as que a pessoa definiu */
@@ -1087,6 +1147,27 @@
           }
           break;
         }
+        case 'motor': {
+          const r = elRes.get(info.el); if (!r) break;
+          const vm = r.v[0] - r.v[1], i = r.i[0];
+          const rpm = info.w * 60 / (2 * Math.PI);
+          out.rpm = rpm; out.corrente = i;
+          out.linhas.push(L('Tensão no motor', 'V', fmt(vm, 'V')));
+          out.linhas.push(L('Corrente', res.modo === 'dc' ? 'I = V / (R + Ke²/b) (regime)' : 'I = (V − Ke·ω) / R = (' + fmt(vm, 'V') + ' − ' + fmt(info.Ke * info.w, 'V') + ') / ' + fmt(info.R, 'Ω'), fmt(i, 'A')));
+          out.linhas.push(L('Rotação', 'ω·60/2π (Kv = ' + info.kv + ' rpm/V)', Math.round(rpm).toLocaleString('pt-BR') + ' rpm'));
+          out.linhas.push(L('Força contraeletromotriz', 'E = Ke·ω', fmt(info.Ke * info.w, 'V')));
+          out.linhas.push(L('Potência', 'P = V·I (mecânica ≈ E·I)', fmt(vm * i, 'W') + ' (' + fmt(info.Ke * info.w * i, 'W') + ' no eixo)'));
+          if (Math.abs(vm) > 0.3 && Math.abs(rpm) < 50) out.alertas.push('motor travado ou sem tensão suficiente (' + fmt(vm, 'V') + ')');
+          if (Math.abs(i) > 2) out.alertas.push('corrente alta no motor (' + fmt(i, 'A') + ')');
+          break;
+        }
+        case 'fonte_bancada': {
+          const r = info.elementos[0] && elRes.get(info.elementos[0]); if (!r) break;
+          out.linhas.push(L('Tensão', 'ajustada', fmt(info.v, 'V')));
+          out.linhas.push(L('Corrente entregue', 'I', fmt(-r.i[0], 'A')));
+          if (-r.i[0] > info.imax) out.alertas.push('acima do limite da fonte (' + fmt(info.imax, 'A') + ')');
+          break;
+        }
         case 'opto': {
           const r = elRes.get(info.ci); if (!r) break;
           out.linhas.push(L('LED interno', 'If', fmt(r.i[0], 'A')));
@@ -1215,6 +1296,35 @@
     return out;
   }
 
+  /* A CHAVE DO COMPONENTE nos dados de datasheet (Libs/componentes-dados.json, "Recolher informações"): o numero da
+     peca (o comment: ESP32-WROOM-32, AMS1117-3.3, BC337), senao o valor, senao o simbolo — em maiusculas, sem espacos
+     sobrando. Passivo (R, C, L, ferrite) nao precisa de datasheet: null */
+  const PASSIVOS = /^(resistor|capacitor|indutor|pot|fusivel|chave|conector|ignorado|fora|solto|carga|bateria|led)$/;
+  function chaveDados(c, tipo) {
+    if (tipo && PASSIVOS.test(tipo)) return null;
+    const bruto = [c && c.comment, c && c.valor, c && c.sym].map(x => String(x || '').trim()).find(x => x && x.charAt(0) !== '=' && !/^(CONE|CONN|JUMPER|-|\*)/i.test(x));
+    return bruto ? norm(bruto).replace(/\s+/g, ' ') : null;
+  }
+  /* os dados de um componente: pela chave, pelos apelidos de cada registro, ou pelo comeco (ESP32-WROOM-32D acha ESP32-WROOM-32) */
+  function dadosDe(banco, c, tipo) {
+    if (!banco || !banco.componentes) return null;
+    const k = chaveDados(c, tipo);
+    if (!k) return null;
+    const B = banco.componentes;
+    if (B[k]) return Object.assign({ chave: k }, B[k]);
+    for (const [ch, d] of Object.entries(B)) if ((d.apelidos || []).some(a => norm(a) === k)) return Object.assign({ chave: ch }, d);
+    let melhor = null;
+    for (const [ch, d] of Object.entries(B)) if (k.startsWith(ch) && ch.length >= 5 && (!melhor || ch.length > melhor.chave.length)) melhor = Object.assign({ chave: ch }, d);
+    return melhor;
+  }
+  /* o numero do GPIO pelo nome do pino do MCU: IO25, GPIO25, IO25/ADC2_8, D25, SENSOR_VP (36)... */
+  function gpioDe(nome) {
+    const n = norm(nome).replace(/[\s-]+/g, '_');
+    const esp = { TXD0: 1, U0TXD: 1, TXD: 1, RXD0: 3, U0RXD: 3, RXD: 3, SENSOR_VP: 36, VP: 36, SENSOR_VN: 39, VN: 39 };
+    if (esp[n] !== undefined) return esp[n];
+    const m = /^(?:GPIO|IO|D|P)_?(\d{1,2})(?![0-9])/.exec(n) || /(?:^|[/_])(?:GPIO|IO)_?(\d{1,2})(?:$|[/_])/.exec(n);
+    return m ? +m[1] : null;
+  }
   /* as ENTRADAS da placa para a config de fontes: {"CN2-1": 12, "+5V": 5, "J1-3": {v, onda}, "CN2-2": null} -> {net: {v,
      onda} | null}. A chave e um pino (REF-NUM) ou o nome de uma net; null tira a fonte (o pino fica aberto, so mede) */
   function entradasParaFontes(componentes, entradas) {
@@ -1257,5 +1367,5 @@
   /* monta + guarda a config (para o analisa saber o modo dos GPIO) */
   function montaComConfig(componentes, cfg) { const m = monta(componentes, cfg); m.cfg = cfg || {}; return m; }
 
-  return { monta: montaComConfig, analisa, doEsquema, entradasParaFontes, verifica, leValor, fmt, tensaoDoNome, RE_TERRA, commentResolvido, potenciaDoFootprint };
+  return { monta: montaComConfig, analisa, doEsquema, entradasParaFontes, verifica, gpioDe, chaveDados, dadosDe, leValor, fmt, tensaoDoNome, RE_TERRA, commentResolvido, potenciaDoFootprint };
 });

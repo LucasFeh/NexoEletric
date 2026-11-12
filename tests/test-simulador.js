@@ -24,9 +24,12 @@ const P = require('../hub-simulador-pcb.js');
 const RAIZ = path.join(__dirname, '..');
 
 let falhou = 0, n = 0;
+const fila = [];
 function caso(nome, fn) {
-  try { fn(); n++; console.log('ok  ' + nome); }
-  catch (e) { falhou++; console.log('FALHOU  ' + nome + '\n   ' + (e && e.stack || e)); }
+  fila.push(async () => {
+    try { await fn(); n++; console.log('ok  ' + nome); }
+    catch (e) { falhou++; console.log('FALHOU  ' + nome + '\n   ' + (e && e.stack || e)); }
+  });
 }
 const perto = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, (msg || '') + ': ' + a + ' ≠ ' + b + ' (±' + tol + ')');
 const pin = (num, name, net) => ({ num: String(num), name, net });
@@ -211,6 +214,47 @@ caso('entradas pelos conectores e a verificação do esperado (sim_testar)', () 
   assert.ok(!sem.mt.fontes.some(q => q.net === 'ENT'), 'sem a entrada aplicada a net fica aberta');
 });
 
+caso('GPIO pelo número (NexoCode), PWM chaveado e o motor da bancada', () => {
+  assert.deepStrictEqual(['IO25', 'GPIO26', 'IO34/ADC1_6', 'SENSOR_VP', 'TXD0', 'EN', '3V3'].map(C.gpioDe), [25, 26, 34, 36, 1, null, null]);
+  const comps = [
+    { ref: 'U1', comment: 'ESP32-WROOM-32D', pinos: [pin(2, '3V3', '+3V3'), pin(1, 'GND', 'GND'), pin(10, 'IO25', 'PWM')] },
+    { ref: 'R1', valor: '100', pinos: [pin(1, '1', 'PWM'), pin(2, '2', 'G')] }, { ref: 'R2', valor: '100k', pinos: [pin(1, '1', 'G'), pin(2, '2', 'GND')] },
+    { ref: 'Q1', comment: 'AO3400', pinos: [pin(1, 'G', 'G'), pin(2, 'D', 'M-'), pin(3, 'S', 'GND')] },
+    { ref: 'D1', comment: 'SS14', pinos: [pin(1, 'A', 'M-'), pin(2, 'K', '+5V')] }];
+  const rpm = duty => {
+    const g = { 'U1-10': { modo: 'pwm', duty, f: 20000 } };
+    const mt = C.monta(comps, { gpio: g, externos: [{ ref: 'M1', tipo: 'motor_dc', nos: ['+5V', 'M-'], eletrico: { r_ohm: 2.5, kv_rpm_v: 2500, i0_a: 0.15 } }] });
+    const s = M.cria(mt.elementos, { terra: mt.terra, dt: 4e-3 }); s.liga();
+    let r; for (let k = 0; k < 300; k++) r = s.passo(1);
+    return C.analisa(mt, r).comps.M1.rpm;
+  };
+  const a = rpm(0.3), b = rpm(0.6), c = rpm(1);
+  assert.ok(a < b && b < c, 'a rotação sobe com o duty: ' + [a, b, c].map(Math.round));
+  perto(c, 5 * 2500 * 0.93, 900, 'duty 100 %');
+  const mt = C.monta([], { externos: [{ ref: 'M1', tipo: 'motor_dc', nos: ['A', 'GND'], eletrico: {} }, { ref: 'PS1', tipo: 'fonte', nos: ['A', 'GND'], eletrico: { v: 6 } }] });
+  const s = M.cria(mt.elementos, { terra: mt.terra, dt: 5e-3 });
+  perto(C.analisa(mt, s.dc()).comps.M1.rpm, 14100, 300, 'regime a 6 V');
+  s.liga(); for (let k = 0; k < 10; k++) s.passo(1);
+  const r50 = mt.comps.get('M1').w * 60 / (2 * Math.PI);
+  assert.ok(r50 > 5000 && r50 < 13000, 'em 50 ms ainda acelerando: ' + Math.round(r50));
+});
+caso('datasheet no componente: chave, apelido e gravar/ler (Libs/componentes-dados.json)', async () => {
+  assert.strictEqual(C.chaveDados({ comment: 'ESP32-WROOM-32D' }, 'mcu'), 'ESP32-WROOM-32D');
+  assert.strictEqual(C.chaveDados({ comment: '10k' }, 'resistor'), null);
+  const banco = { componentes: { 'ESP32-WROOM-32': { pinos: { 2: { nome: '3V3' } } }, 'AMS1117-3.3': { apelidos: ['LM1117MP-3.3NOPB'] } } };
+  assert.strictEqual(C.dadosDe(banco, { comment: 'ESP32-WROOM-32D' }, 'mcu').chave, 'ESP32-WROOM-32', 'pelo começo');
+  assert.strictEqual(C.dadosDe(banco, { comment: 'LM1117MP-3.3NOPB' }, 'regulador').chave, 'AMS1117-3.3', 'pelo apelido');
+  const raiz = fs.mkdtempSync(path.join(require('os').tmpdir(), 'simds-'));
+  const ctx = { root: raiz, grava: (abs, t) => { fs.writeFileSync(abs, t); return true; } };
+  const g = require('../mcp/ferramentas/simulador.js').ferramentas;
+  const gravar = g.find(t => t.nome === 'sim_datasheet_gravar'), ler = g.find(t => t.nome === 'sim_datasheet_ler');
+  await gravar.executa({ chave: 'ao3400', resumo: 'MOSFET N 30 V', pinos: { 1: { nome: 'G', tipo: 'entrada', funcao: 'gate' } } }, ctx);
+  await gravar.executa({ chave: 'AO3400', pinos: { 3: { nome: 'D', tipo: 'saida' } }, apelidos: ['AO3400A'] }, ctx);
+  const r = await ler.executa({ chave: 'AO3400' }, ctx);
+  assert.ok(r.dados && r.dados.resumo === 'MOSFET N 30 V' && r.dados.pinos['1'].funcao === 'gate' && r.dados.pinos['3'].nome === 'D', 'completa sem perder: ' + JSON.stringify(r));
+  assert.ok(fs.existsSync(path.join(raiz, 'Libs', 'componentes-dados.json')));
+});
+
 /* ------------------------------------------------------------------ 6. a corrente nas trilhas */
 caso('trilhas: Kirchhoff no cobre e R = ρ·L/(w·t)', () => {
   const eb = {
@@ -283,9 +327,16 @@ caso('ganchos nas vistas, <script> nas cascas, ação "simulador" nos dois hubs'
   const hub = ler('hub.html');
   assert.ok(/\{ id:'sim', key:'tab\.sim' \}/.test(hub) && /data-pane="sim"/.test(hub) && /HubSimAba\.pane/.test(hub) && /hub-simulador-aba\.js/.test(hub), 'a aba Simulador no hub.html');
   assert.ok((ler('hub-i18n.js').match(/'tab\.sim':/g) || []).length === 2, 'tab.sim em pt e en');
-  assert.ok(/modo=sim'/.test(ler('hub-simulador-aba.js')) && /modo=sim3d'/.test(ler('hub-simulador-aba.js')), 'a aba abre as duas vistas no modo da simulação');
-  for (const k of ['sim_conectores', 'sim_testar']) assert.ok(require('../mcp/ferramentas/simulador.js').ferramentas.some(t => t.nome === k), k);
+  const aba = ler('hub-simulador-aba.js');
+  assert.ok(/modo=sim'/.test(aba) && /\['sim2d', 'PCB 2D'\]/.test(aba) && /\['sim3d', 'PCB 3D'\]/.test(aba) && /\['bancada', 'Bancada'\]/.test(aba), 'os modos da aba: Esquema, PCB 2D, PCB 3D, Bancada');
+  assert.ok(/window\.__simVisual/.test(sch) && /window\.__simVisual/.test(ler('hub-simulador.js')), 'a folha escura sem template/textos');
+  assert.ok(/HubSimPcb2d/.test(ler('pcbframe.js')), 'a camada elétrica no 2D');
+  assert.ok(/hub-bancada\.js/.test(ler('pcbframe.html')) && /animaExtra/.test(ler('hub-pcb3d-vista.js')) && /modeloStep/.test(ler('hub-pcb3d-vista.js')), 'a bancada no 3D');
+  assert.ok(/o\['bancada'\] = at\['bancada'\]/.test(ler('tools/rotas/nexocad.py')), 'o índice da biblioteca passa atributos.bancada');
+  assert.ok(/case 'gpio_lote'/.test(ler('hub-simulador.js')) && /\? 120 :/.test(ler('mcp/hub-mcpvista.js')), 'o NexoCode: gpio_lote e a vista perguntando a cada 120 ms');
+  for (const k of ['sim_conectores', 'sim_testar', 'sim_datasheet_pendentes', 'sim_datasheet_gravar', 'sim_datasheet_ler', 'sim_bancada']) assert.ok(require('../mcp/ferramentas/simulador.js').ferramentas.some(t => t.nome === k), k);
 });
 
+(async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
-process.exit(falhou ? 1 : 0);
+process.exit(falhou ? 1 : 0); })();

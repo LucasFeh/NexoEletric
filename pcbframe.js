@@ -1396,6 +1396,8 @@ function draw(){
   desenhaArrasto();
   desenhaSelecao();
   desenhaHover();
+  /* 1.102.0: o funcionamento eletrico da placa (a aba Simulador, hub-simulador-pcb.js): cobre pela tensao, pontos da corrente */
+  if (window.HubSimPcb2d) { try { window.HubSimPcb2d.desenha(ctx, px); } catch (e) { console.warn('simulador 2D:', e); } }
   desenhaAnotacoes();
   desenhaCotas();
   desenhaFerramenta();
@@ -7815,6 +7817,9 @@ window.__hubPcbSim = {
   vista3d: () => V3, em3d: () => !!modo3d, placa: () => EB,
   projeto: () => new URLSearchParams(location.search).get('p') || '',
   host3d: () => $('v3d'),
+  /* 1.102.0: a vista 2D (a camada eletrica e o clique no pad) */
+  canvas: () => cv, escala: () => view.scale, telaParaMundo: (x, y) => telaParaMundo(x, y), mundoParaTela: (x, y) => mundoParaTela(x, y),
+  redesenha: () => pede(), sai3d: () => sai3d(), entra3d: () => entra3d(),
 };
 window.HubMcpVista = {
   focar(x, y, zoom){ if (isNum(x) && isNum(y)) { view.cx = x; view.cy = y; if (isNum(zoom) && zoom > 0) view.scale = zoom; pede(); } return true; },

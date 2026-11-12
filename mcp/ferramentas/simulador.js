@@ -70,6 +70,18 @@ function conectoresDe(r) {
       return { pino: q.num, nome: q.name || '', net: q.net || '', v: pin.v, i: pin.i, entrada: f ? { v: f.v, origem: f.origem, corrente_entregue: (an.fontes.find(x => x.net === f.net) || {}).i } : null,
                terra: !!q.net && mt.terra.includes(q.net), flutuando: !!q.net && (res.flutuantes || []).includes(q.net) }; }) }));
 }
+/* OS DADOS DE DATASHEET (1.102.0, "Recolher informações"): um registro por COMPONENTE (a chave e o numero da peca,
+   HubSimCircuito.chaveDados) em Libs/componentes-dados.json — a pasta Libs/ vai para o NexoBD (item "Biblioteca do
+   NexoEletric"), entao o que a IA levantou vale em qualquer projeto e maquina. Pedido do dono: "as informações que
+   vierem do datasheet ficam salvas no componente". */
+const fs = require('node:fs');
+const path = require('node:path');
+function arqDados(ctx) { return path.join(ctx.root, 'Libs', 'componentes-dados.json'); }
+function leDados(ctx) {
+  try { const j = JSON.parse(fs.readFileSync(arqDados(ctx), 'utf8')); if (j && typeof j === 'object' && j.componentes) return j; } catch (_e) { /* ainda nao existe */ }
+  return { formato: 'nexoeletric-componentes-dados-1', componentes: {} };
+}
+const TIPOS_PINO = ['alimentacao', 'terra', 'entrada', 'saida', 'es', 'analogico', 'comunicacao', 'controle', 'nc', 'outro'];
 const resumoComp = c => ({ titulo: c.titulo, tipo: c.tipo, potencia: c.p, alertas: c.alertas });
 function saidaSemTela(r, a) {
   const { mt, res, an } = r;
@@ -182,6 +194,94 @@ module.exports = {
         return { fonte_dos_dados: 'arquivo (sem a vista: a pessoa não está vendo)', modo: r.res.modo, t: r.res.t, convergiu: r.res.ok,
           passou: res.every(x => x.ok), resultados: res, alertas: r.an.resumo.alertas, avisos: r.mt.avisos,
           fontes: r.an.fontes.map(f => ({ net: f.net, v: f.v, origem: f.origem, corrente: f.i })), conectores: conectoresDe(r) };
+      },
+    },
+    {
+      nome: 'sim_datasheet_pendentes', titulo: 'Componentes sem dados de datasheet', leitura: true,
+      descricao: 'O começo do "Recolher informações" do simulador: os componentes do projeto que precisam de datasheet (CIs, MCU, reguladores, transistores, diodos especiais — passivos não), cada um com a CHAVE (o número da peça que o sim_datasheet_gravar usa), o comment, o símbolo, o footprint, e os pinos como estão no esquema (número, nome, net), e se já tem dados salvos. Fluxo: sim_datasheet_pendentes → achar o datasheet oficial na internet (IntegrateBrowser pesquisar/ler_links) → sim_datasheet_gravar por componente.',
+      entrada: { type: 'object', properties: { projeto: PROJETO, todos: { type: 'boolean', description: 'true = também os que já têm dados' } }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const r = semTela(ctx, p, {});
+        const banco = leDados(ctx);
+        const vistos = new Map();
+        for (const info of r.mt.comps.values()) {
+          const cc = Object.assign({}, info.comp, { valor: info.valorTxt });
+          const k = C.chaveDados(cc, info.tipo);
+          if (!k) continue;
+          const tem = C.dadosDe(banco, cc, info.tipo);
+          if (tem && !a.todos) continue;
+          const v = vistos.get(k) || { chave: k, refs: [], comment: info.comp.comment || '', simbolo: info.comp.sym || '', footprint: info.comp.footprint || '', tipo_no_simulador: info.tipo, ja_tem: tem ? tem.chave : null,
+            pinos: info.pinos.map(q => ({ num: q.num, nome: q.name || '', net: q.net || '' })) };
+          v.refs.push(info.ref);
+          vistos.set(k, v);
+        }
+        return { arquivo: path.relative(ctx.root, arqDados(ctx)), salvos: Object.keys(banco.componentes).length, pendentes: [...vistos.values()] };
+      },
+    },
+    {
+      nome: 'sim_datasheet_gravar', titulo: 'Gravar os dados de datasheet no componente',
+      descricao: 'Grava (ou completa) o registro de UM componente em Libs/componentes-dados.json — a biblioteca do NexoEletric, sincronizada com o NexoBD: vale para todo projeto que usa a peça. O simulador mostra no mouse em cima do pino (esquema, PCB 2D e 3D) e nos cálculos. pinos = {"<número do pino como no esquema>": {nome, funcao (o que faz, uma linha), tipo: ' + TIPOS_PINO.join('|') + ', descricao, vmax, imax}}. Só o que está no datasheet — não invente. apelidos = outros nomes da mesma peça (ESP32-WROOM-32D, ESP32-WROOM-32E).',
+      entrada: { type: 'object', properties: {
+        chave: { type: 'string', description: 'a chave que o sim_datasheet_pendentes deu (número da peça)' },
+        fabricante: { type: 'string' }, resumo: { type: 'string', description: 'uma linha: o que é a peça' }, datasheet_url: { type: 'string' },
+        alimentacao: { type: 'object', properties: { vmin: { type: 'number' }, vmax: { type: 'number' }, icc_a: { type: 'number' } } },
+        pinos: { type: 'object', additionalProperties: { type: 'object', properties: { nome: { type: 'string' }, funcao: { type: 'string' }, tipo: { type: 'string' }, descricao: { type: 'string' }, vmax: { type: 'number' }, imax: { type: 'number' } } } },
+        apelidos: { type: 'array', items: { type: 'string' } }, notas: { type: 'string' }, substituir: { type: 'boolean', description: 'true = troca o registro inteiro; padrão completa' } }, required: ['chave'] },
+      executa: async (a, ctx) => {
+        const banco = leDados(ctx);
+        const k = String(a.chave).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim().replace(/\s+/g, ' ');
+        if (!k) throw new ErroMcp('chave vazia');
+        const ant = a.substituir ? {} : (banco.componentes[k] || {});
+        const novo = Object.assign({}, ant);
+        for (const c of ['fabricante', 'resumo', 'datasheet_url', 'notas']) if (a[c] != null) novo[c] = String(a[c]);
+        if (a.alimentacao) novo.alimentacao = Object.assign({}, ant.alimentacao || {}, a.alimentacao);
+        if (a.apelidos) novo.apelidos = [...new Set([].concat(ant.apelidos || [], a.apelidos.map(String)))];
+        if (a.pinos) {
+          novo.pinos = Object.assign({}, ant.pinos || {});
+          for (const [n, pi] of Object.entries(a.pinos)) {
+            if (pi && pi.tipo && !TIPOS_PINO.includes(String(pi.tipo))) pi.tipo = 'outro';
+            novo.pinos[String(n)] = Object.assign({}, novo.pinos[String(n)] || {}, pi);
+          }
+        }
+        novo.fonte = 'IA (datasheet)';
+        novo.atualizado = new Date().toISOString();
+        banco.componentes[k] = novo;
+        const abs = arqDados(ctx);
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        ctx.grava(abs, JSON.stringify(banco, null, 1) + '\n', 'sim_datasheet_gravar');
+        /* a tela aberta rele os dados (sem a vista, nada a fazer) */
+        try { await require('./hub.js').pedeVista(ctx, 'sch', '*', 'simulador', { acao: 'dados' }, 1, true); } catch (_e) { /* sem vista */ }
+        return { chave: k, pinos: Object.keys(novo.pinos || {}).length, arquivo: path.relative(ctx.root, abs), total: Object.keys(banco.componentes).length };
+      },
+    },
+    {
+      nome: 'sim_datasheet_ler', titulo: 'Ler os dados de datasheet de um componente', leitura: true,
+      descricao: 'O que está salvo para um componente (por chave = número da peça) ou para um ref de um projeto ({projeto, ref}); sem nada, a lista das chaves salvas.',
+      entrada: { type: 'object', properties: { chave: { type: 'string' }, projeto: PROJETO, ref: { type: 'string' } } },
+      executa: async (a, ctx) => {
+        const banco = leDados(ctx);
+        if (a.projeto && a.ref) {
+          const r = semTela(ctx, ctx.projeto(a.projeto), {});
+          const info = r.mt.comps.get(a.ref);
+          if (!info) throw new ErroMcp('o componente ' + a.ref + ' não está no esquema');
+          const cc = Object.assign({}, info.comp, { valor: info.valorTxt });
+          return { ref: a.ref, chave: C.chaveDados(cc, info.tipo), dados: C.dadosDe(banco, cc, info.tipo) };
+        }
+        if (a.chave) { const k = String(a.chave).toUpperCase().trim(); return { chave: k, dados: banco.componentes[k] || null }; }
+        return { total: Object.keys(banco.componentes).length, chaves: Object.keys(banco.componentes) };
+      },
+    },
+    {
+      nome: 'sim_bancada', titulo: 'Bancada do simulador (itens e fios)',
+      descricao: 'A BANCADA da aba Simulador (vista PCB aberta no modo Bancada): a placa em 3D sobre a mesa, os itens da biblioteca do Nexo Hub com atributos.bancada (motor DC, fonte — criados no NexoCAD) e os fios. acao: bancada_estado · bancada_biblioteca (os itens que podem ir para a bancada) · bancada_colocar {item: id|nome|rotulo, tipo?: "motor_dc"|"fonte", pos?: [x,y] mm} · bancada_fio {de, para} (pad da placa "CN1-1" ou terminal "M1:+" / "PS1:-") · bancada_remover {item|fio} · bancada_limpar · bancada_ativar {ligado}. O que fica ligado entra na simulação do Esquema: o motor gira (rpm e corrente em sim_rodar/sim_componente {ref:"M1"}), a fonte alimenta. Precisa da vista PCB do projeto aberta (a aba Simulador › Bancada).',
+      entrada: { type: 'object', properties: { projeto: PROJETO, acao: { type: 'string', enum: ['bancada_estado', 'bancada_biblioteca', 'bancada_colocar', 'bancada_fio', 'bancada_remover', 'bancada_limpar', 'bancada_ativar'] } }, required: ['projeto', 'acao'], additionalProperties: true },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const args = Object.assign({}, a); delete args.projeto;
+        const v = await require('./hub.js').pedeVista(ctx, 'pcb', p.nome, 'simulador', args, 12, true);
+        if (!v || !v.ok) throw new ErroMcp((v && v.erro) || 'a vista PCB não respondeu' + (v && v.semVista ? ': abra a aba Simulador › Bancada do projeto' : ''));
+        return v.dados;
       },
     },
     {

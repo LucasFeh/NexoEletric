@@ -194,8 +194,9 @@
       return (v / p[0]).toFixed(2).replace('.', ',') + ' ' + p[1] + u;
     };
     const PREF = 'nexoSim.pcb3d';
-    /* a aba Simulador do hub abre a placa com ?modo=sim3d: entra no 3D e liga a corrente sozinha */
-    const naAba = (() => { try { return new URLSearchParams(location.search).get('modo') === 'sim3d'; } catch (_e) { return false; } })();
+    /* a aba Simulador do hub abre a placa com ?modo=sim2d | sim3d | bancada: area de simulacao, sem as ferramentas */
+    const modoPg = (() => { try { return new URLSearchParams(location.search).get('modo') || ''; } catch (_e) { return ''; } })();
+    const naAba = /^(sim2d|sim3d|bancada)$/.test(modoPg);
     const st = { ligado: naAba || (() => { try { return localStorage.getItem(PREF) !== '0'; } catch (_e) { return true; } })(), calc: true,
                  dados: null, res: null, versao: 0, ui: null, rotulos: [], setas: null, fase: 0, montado: 0 };
     let topo = window;
@@ -269,10 +270,13 @@
     function agenda() { if (tAgenda) return; tAgenda = setTimeout(() => { tAgenda = 0; monta(); }, 350); }
     function monta() {
       const V = H.vista3d && H.vista3d();
+      /* a conta vale para o 2D e o 3D: refaz sempre que a simulacao chega */
+      if (st.ligado && st.dados && H.placa()) { try { st.res = correntes(H.placa(), st.dados.pinos, {}); } catch (e) { console.warn('corrente nas trilhas:', e); st.res = null; } }
+      else st.res = null;
+      if (!H.em3d()) H.redesenha();
       pinta();
       if (!V || typeof V.extra !== 'function') return;
-      if (!st.ligado || !st.dados || !H.placa()) { V.extra('simCorrente', null); V.anima(null); limpaRotulos(); st.res = null; pinta(); return; }
-      try { st.res = correntes(H.placa(), st.dados.pinos, {}); } catch (e) { console.warn('corrente nas trilhas:', e); st.res = null; return; }
+      if (!st.ligado || !st.dados || !H.placa() || !st.res) { V.extra('simCorrente', null); V.anima(null); limpaRotulos(); pinta(); return; }
       const T = V.T(), esp = V.espessura();
       const g = new T.Group(); g.name = 'simCorrente';
       const imax = Math.max(st.res.imax, 1e-9);
@@ -374,24 +378,198 @@
         if (!p.atras && !bate) postos.push(cx);
       }
     }
-    if (naAba) {
-      /* na aba Simulador so a placa: sem o painel da direita e sem o filtro/camadas do canto */
-      const sty = document.createElement('style'); sty.textContent = '#splitR, #props, #cantoesq{display:none !important}'; document.head.append(sty);
-      setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
-      let tentativas = 0;
-      const entra = () => {
-        if (H.em3d()) return;
-        try { if (window.HubMcpVista && typeof window.HubMcpVista.comando === 'function' && H.placa()) window.HubMcpVista.comando('vista3d'); } catch (_e) { /* ainda carregando */ }
-        if (++tentativas < 40) setTimeout(entra, 500);
-      };
-      setTimeout(entra, 600);
+    /* ---------------------------------------------------------------- os dados de datasheet (Libs/componentes-dados.json) */
+    let banco = null;
+    async function carregaBanco() {
+      try { const r = await fetch('Libs/componentes-dados.json?t=' + Date.now(), { cache: 'no-store' }); banco = r.ok ? await r.json() : { componentes: {} }; }
+      catch (_e) { banco = { componentes: {} }; }
     }
+    carregaBanco();
+    setInterval(carregaBanco, 20000);
+    function compDaPlaca(ref) { const pl = H.placa(); return pl && (pl.components || []).find(c => c.ref === ref); }
+    function pinoDoDatasheet(ref, pad) {
+      const Cc = C(); if (!Cc || !banco) return null;
+      const comp = compDaPlaca(ref); if (!comp) return null;
+      const d = Cc.dadosDe(banco, { comment: comp.comment, sym: comp.footprint }, 'ci');
+      if (!d || !d.pinos) return null;
+      return { comp: d, pino: d.pinos[String(pad)] || null };
+    }
+
+    /* ---------------------------------------------------------------- a camada eletrica no 2D (o draw() do pcbframe chama) */
+    const fase = new Map();
+    let tAnim = 0;
+    const velPonto = i => { const a = Math.abs(i); return a > 2e-7 ? Math.sign(i) * Math.min(220, 14 + 26 * Math.log10(a / 2e-7)) : 0; };
+    function corV(v) {
+      const vm = st.vmax || 5, t = Math.max(-1, Math.min(1, v / vm)), k = Math.pow(Math.abs(t), 0.5);
+      const g = [110, 116, 128], f = t >= 0 ? [34, 197, 94] : [239, 68, 68];
+      return 'rgb(' + g.map((x, i) => Math.round(x + (f[i] - x) * k)).join(',') + ')';
+    }
+    let hoverPad = null;
+    window.HubSimPcb2d = {
+      desenha(ctx, px) {
+        if (!naAba || !st.ligado || !st.res || !st.dados) return;
+        let vm = 1; for (const x of Object.values(st.dados.nets || {})) if (isFinite(x)) vm = Math.max(vm, Math.abs(x)); st.vmax = vm;
+        ctx.save();
+        ctx.lineCap = 'round';
+        /* o cobre pela tensao da net */
+        for (const s of st.res.segs) {
+          const v = st.dados.nets[s.net];
+          if (v == null) continue;
+          ctx.strokeStyle = corV(v); ctx.globalAlpha = 0.55; ctx.lineWidth = s.w;
+          ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+        }
+        /* os pontos da corrente */
+        ctx.globalAlpha = 1; ctx.fillStyle = '#facc15'; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = px(0.8);
+        const passo = Math.max(px(18), 0.8), raio = Math.max(px(2.4), 0.12);
+        for (const s of st.res.segs) {
+          if (!velPonto(s.i)) continue;
+          const L = Math.hypot(s.x2 - s.x1, s.y2 - s.y1); if (L < 1e-6) continue;
+          const ux = (s.x2 - s.x1) / L, uy = (s.y2 - s.y1) / L;
+          let d = (((fase.get(s.id) || 0) * px(1)) % passo + passo) % passo;
+          for (; d < L; d += passo) { ctx.beginPath(); ctx.arc(s.x1 + ux * d, s.y1 + uy * d, raio, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+        }
+        /* o pad sob o mouse */
+        if (hoverPad) { ctx.strokeStyle = '#facc15'; ctx.lineWidth = px(2); ctx.beginPath(); ctx.arc(hoverPad.x, hoverPad.y, Math.max(hoverPad.r * 1.3, px(8)), 0, Math.PI * 2); ctx.stroke(); }
+        ctx.restore();
+      },
+    };
+    function animaPontos(t) {
+      if (naAba && st.ligado && st.res && !H.em3d()) {
+        const dt = tAnim ? Math.min(0.1, (t - tAnim) / 1000) : 0;
+        for (const s of st.res.segs) { const v = velPonto(s.i); if (v) fase.set(s.id, (fase.get(s.id) || 0) + v * dt); }
+        H.redesenha();
+      }
+      tAnim = t;
+      requestAnimationFrame(animaPontos);
+    }
+
+    /* ---------------------------------------------------------------- o pad (a perna do CI) sob o mouse: 2D e 3D */
+    function padsDaPlaca() {
+      const pl = H.placa(); const out = [];
+      if (!pl) return out;
+      for (const c of pl.components || []) for (const p of c.pads || []) out.push({ ref: c.ref, nome: String(p.name), net: p.net || '', x: p.x, y: p.y, r: Math.max(p.w || 0.5, p.h || 0.5) / 2, camada: p.layer, comp: c });
+      return out;
+    }
+    function padEm(ev) {
+      const host = H.em3d() ? H.host3d() : H.canvas();
+      if (!host) return null;
+      const r = host.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
+      let melhor = null, dm = 14;
+      if (H.em3d()) {
+        const V = H.vista3d(); if (!V || !V.projeta) return null;
+        const e = V.espessura();
+        for (const p of padsDaPlaca()) {
+          const q = V.projeta(p.x, p.y, /bottom/i.test(p.camada) ? -e : 0.05);
+          if (q.atras) continue;
+          const d = Math.hypot(q.x - mx, q.y - my);
+          if (d < dm) { dm = d; melhor = p; }
+        }
+      } else {
+        const w = H.telaParaMundo(mx, my), esc = H.escala();
+        for (const p of padsDaPlaca()) { const d = Math.hypot(p.x - w.x, p.y - w.y) * esc; if (d < Math.max(dm, p.r * esc)) { if (!melhor || d < dm) { dm = d; melhor = p; } } }
+      }
+      return melhor;
+    }
+    let cartao = null;
+    function mostraCartao(p, ev, fixo) {
+      if (!cartao) {
+        cartao = document.createElement('div'); cartao.className = 'simpcb-cartao';
+        for (const e of ['mousedown', 'wheel', 'contextmenu']) cartao.addEventListener(e, x => x.stopPropagation());
+        document.body.append(cartao);
+      }
+      if (!p) { cartao.hidden = true; return; }
+      const pin = st.dados && st.dados.pinos ? st.dados.pinos[p.ref + '-' + p.nome] : null;
+      const ds = pinoDoDatasheet(p.ref, p.nome);
+      const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      let h = '<div class="t">' + esc(p.ref) + ' · pino ' + esc(p.nome) + (ds && ds.pino && ds.pino.nome ? ' (' + esc(ds.pino.nome) + ')' : '') + ' <span>' + esc(p.net || 'sem net') + '</span></div>';
+      if (p.comp && p.comp.comment) h += '<div class="c">' + esc(p.comp.comment) + '</div>';
+      if (pin) h += '<div class="g"><span>Tensão</span><b>' + fmt(pin.v, 'V') + '</b>' + (Math.abs(pin.i) > 1e-10 ? '<span>Corrente</span><b>' + fmt(Math.abs(pin.i), 'A') + (pin.i > 0 ? ' entrando' : ' saindo') + '</b>' : '') + '</div>';
+      else h += '<div class="c">sem simulação neste pino (ligue a simulação do esquema)</div>';
+      if (ds && ds.pino) {
+        const q = ds.pino;
+        h += '<div class="ds"><b>' + esc(q.nome || 'pino ' + p.nome) + (q.tipo ? ' · ' + esc(q.tipo) : '') + '</b>'
+          + (q.funcao ? '<div>' + esc(q.funcao) + '</div>' : '') + (q.descricao ? '<div class="dd">' + esc(q.descricao) + '</div>' : '')
+          + (q.vmax != null || q.imax != null ? '<div class="dd">' + [q.vmax != null ? 'máx. ' + fmt(+q.vmax, 'V') : '', q.imax != null ? fmt(+q.imax, 'A') : ''].filter(Boolean).join(' · ') + '</div>' : '') + '</div>';
+      } else if (ds && ds.comp) h += '<div class="c">o datasheet de ' + esc(ds.comp.chave) + ' não descreve este pino</div>';
+      else h += '<div class="c">sem dados de datasheet — use "Recolher informações" no Esquema do Simulador</div>';
+      if (ds && ds.comp && ds.comp.datasheet_url && fixo) h += '<a href="' + esc(ds.comp.datasheet_url) + '" target="_blank">abrir o datasheet</a>';
+      cartao.innerHTML = h;
+      cartao.classList.toggle('fixo', !!fixo);
+      cartao.hidden = false;
+      cartao.style.left = Math.min(ev.clientX + 16, window.innerWidth - 330) + 'px';
+      cartao.style.top = Math.min(ev.clientY + 14, window.innerHeight - cartao.offsetHeight - 8) + 'px';
+    }
+    /* o que a bancada (hub-bancada.js) usa daqui */
+    window.HubSimPcbInt = { padEm, padsDaPlaca, H, dados: () => st.dados, mostraCartao };
+    const CSS2 = `.simpcb-cartao{position:fixed; z-index:70; min-width:220px; max-width:320px; padding:9px 11px; border-radius:10px; pointer-events:none;
+  background:rgba(12,15,20,.96); color:#e5e7eb; border:1px solid rgba(255,255,255,.12); box-shadow:0 10px 30px rgba(0,0,0,.5); font:12px system-ui, sans-serif}
+.simpcb-cartao.fixo{pointer-events:auto; border-color:#f59e0b} .simpcb-cartao .t{font-weight:700} .simpcb-cartao .t span{font-weight:500; color:#9ca3af}
+.simpcb-cartao .c{color:#9ca3af; margin-top:3px} .simpcb-cartao .g{display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin-top:5px} .simpcb-cartao .g b{text-align:right}
+.simpcb-cartao .ds{margin-top:6px; padding:6px 8px; border-radius:7px; background:rgba(59,130,246,.14); color:#dbeafe} .simpcb-cartao .ds .dd{color:#93c5fd; font-size:11px}
+.simpcb-cartao a{display:inline-block; margin-top:6px; color:#93c5fd}`;
+    { const sc = document.createElement('style'); sc.textContent = CSS2; document.head.append(sc); }
+
+    if (naAba) { try { Object.defineProperty(window, '__hubMenus', { configurable: true, get: () => null, set: () => {} }); } catch (_e) { /* ok */ } }
+    if (naAba) {
+      /* A AREA DE SIMULACAO da placa (pedido do dono: "é uma área completamente nova, não traz nenhuma das ferramentas" e
+         "a PCB na visão 2D também mostra o funcionamento elétrico"): sai a barra, o filtro/camadas, o painel, as abas de
+         camada e o rodape; nada se edita (o clique esquerdo e as teclas nao chegam a vista); navegar continua */
+      const sty = document.createElement('style');
+      sty.textContent = '#pcbtb, #cantoesq, #splitR, #props, #abas, #status, #alertaCodigo, #btnPaineis, #btnArtes, #menubar, #help, #annform, #txtbox{display:none !important} body{background:#000 !important}';
+      document.head.append(sty);
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
+      const guarda = alvo => {
+        alvo.addEventListener('mousedown', e => {
+          if (e.button !== 0) return;
+          /* a bancada (mover item, ligar fio) pega o clique primeiro */
+          if (window.HubBancada && window.HubBancada.consome && window.HubBancada.consome(e)) { e.stopPropagation(); e.preventDefault(); return; }
+          const p = padEm(e);
+          e.stopPropagation(); e.preventDefault();
+          if (p) mostraCartao(p, e, true); else mostraCartao(null);
+        }, true);
+        alvo.addEventListener('mousemove', e => {
+          if (cartao && cartao.classList.contains('fixo') && !cartao.hidden) return;
+          const p = padEm(e);
+          const mudou = (p && p.ref + p.nome) !== (hoverPad && hoverPad.ref + hoverPad.nome);
+          hoverPad = p; mostraCartao(p, e, false);
+          if (mudou && !H.em3d()) H.redesenha();
+        }, { passive: true });
+        alvo.addEventListener('mouseleave', () => { hoverPad = null; if (cartao && !cartao.classList.contains('fixo')) cartao.hidden = true; }, { passive: true });
+        alvo.addEventListener('dblclick', e => e.stopPropagation(), true);
+        alvo.addEventListener('contextmenu', e => { e.stopPropagation(); e.preventDefault(); }, true);
+      };
+      const tenta = () => { const cvh = H.canvas && H.canvas(), h3 = H.host3d && H.host3d(); if (cvh && h3) { guarda(cvh.parentElement); } else setTimeout(tenta, 300); };
+      tenta();
+      window.addEventListener('keydown', e => {
+        const t = e.target;
+        if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+        if (H.em3d() && /^[089]$/.test(e.key)) return;
+        if (e.key === 'Escape' && cartao) cartao.hidden = true;
+        e.stopPropagation(); e.preventDefault();
+      }, true);
+      requestAnimationFrame(animaPontos);
+      setTimeout(() => window.HubSimPcbModo(modoPg), 0);   // definido logo abaixo
+    }
+    /* o modo da area (a aba Simulador troca sem recarregar a pagina): sim2d = a placa em 2D; sim3d e bancada = no 3D */
+    window.HubSimPcbModo = function (m) {
+      let tentativas = 0;
+      const vai = () => {
+        if (!H.placa()) { if (++tentativas < 60) setTimeout(vai, 400); return; }
+        try {
+          if (m === 'sim2d') { if (H.em3d()) H.sai3d(); }
+          else if (!H.em3d()) H.entra3d();
+        } catch (_e) { if (++tentativas < 60) setTimeout(vai, 400); return; }
+        if (window.HubBancada && typeof window.HubBancada.ativa === 'function') window.HubBancada.ativa(m === 'bancada');
+        agenda();
+      };
+      vai();
+    };
     /* o 3D entra e sai, a placa muda, a simulacao chega: confere de tempos em tempos */
     let ultEm3d = false, ultPlaca = null;
     setInterval(() => {
       const em = H.em3d(), pl = H.placa();
       const d = dadosDoTopo();
-      if (d !== st.dados) { st.dados = d; if (em) agenda(); }
+      if (d !== st.dados) { st.dados = d; if (em || naAba) agenda(); }
       if (em !== ultEm3d || pl !== ultPlaca) { ultEm3d = em; ultPlaca = pl; if (em) agenda(); else pinta(); }
     }, 700);
 
@@ -399,6 +577,8 @@
     if (!window.HubSimulador) window.HubSimulador = {
       async mcp(a) {
         a = a || {};
+        if (/^bancada_/.test(a.acao || '')) { if (!window.HubBancada) throw new Error('a bancada não carregou nesta vista'); return window.HubBancada.mcp(a); }
+        if (a.acao === 'pcb_modo') { window.HubSimPcbModo(a.modo); return { modo: a.modo }; }
         st.dados = dadosDoTopo();
         if (a.acao === 'pcb_mostrar') { st.ligado = a.ligado !== false; try { localStorage.setItem(PREF, st.ligado ? '1' : '0'); } catch (_e) { /* ok */ } if (a.calculos != null) st.calc = !!a.calculos; monta(); return { ligado: st.ligado, em3d: H.em3d() }; }
         if (!st.dados) throw new Error('não há simulação deste projeto: ligue o Simular no Esquema (sim_controlar {acao:"ligar"})');

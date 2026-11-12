@@ -4,6 +4,41 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.102.0 — 2026-11-12
+
+**O Simulador vira uma área própria: esquema escuro, PCB 2D elétrica, pinos com datasheet, a Bancada e o ESP32 do NexoCode.**
+Pedidos do dono: "no simulador o esquema é diferente: sem texto, só os pinos, o template some, o fundo é preto", "as
+ferramentas da visão de PCB e esquema são completamente diferentes das de construir; é uma área completamente nova",
+"a PCB na visão 2D também mostra o funcionamento elétrico", "na visão 3D clicar nas pernas do CI e ler sobre elas pelo
+datasheet; um botão Recolher informações, a IA busca o datasheet na internet e mapeia; fica salvo no componente", "o
+NexoCode simula o ESP32 mandando sinal para o esquema" e "uma visão Bancada com a PCB e um motor, os assets criados no
+NexoCAD e salvos na biblioteca; ligo os fios da placa no motor e simula como se funcionasse de verdade".
+- **Área de simulação** (a aba Simulador): nenhuma ferramenta de construção — sem barra de desenho, menu da folha,
+  painel de propriedades, filtro, camadas nem os menus do hub (Arquivo/Exibir/Ajuda); nada se edita, só navegar e as
+  interações da simulação. Modos **Esquema**, **PCB 2D**, **PCB 3D** e **Bancada**; "Esquema ao lado" divide a tela.
+- **Esquema do simulador**: fundo preto, folha escura, sem template, sem textos livres nem comentários — símbolos, pinos
+  e fios; a barra própria (Enquadrar, Sondar, Ponta de prova, Aplicar tensão, folha, Recolher informações).
+- **Mouse no pino ou no fio**: além de tensão e corrente, o **sinal** (o gráfico das últimas análises) e o que o
+  **datasheet** diz daquele pino.
+- **PCB 2D elétrica**: o cobre pintado pela tensão da net e os pontos da corrente andando nas trilhas; mouse no pad: o
+  cartão com tensão, corrente e o pino no datasheet. **PCB 3D**: o mesmo cartão clicando na perna do CI.
+- **Recolher informações**: a IA do hub (o botão IA) recebe o pedido, acha o datasheet de cada componente na internet e
+  grava a pinagem (função, tipo, limites), a alimentação, o resumo e o link **no componente** — `Libs/componentes-dados.json`,
+  sincronizado com o NexoBD, vale em qualquer projeto. MCP: `sim_datasheet_pendentes`, `sim_datasheet_gravar`,
+  `sim_datasheet_ler`.
+- **Bancada**: a placa em 3D sobre espaçadores numa mesa; os itens da biblioteca do Nexo Hub com `atributos.bancada`
+  (categoria Bancada: Motor DC 130, Fonte de bancada 12 V, Hélice — modelados no NexoCAD) entram com "+ Pôr"; "Fio" liga
+  um pad da placa ao terminal do item; arrastar move. O que fica ligado entra na simulação: o **motor DC** (resistência,
+  indutância, força contraeletromotriz e inércia) gira na rotação calculada — a hélice gira e o rótulo mostra rpm e
+  corrente —, a **fonte** alimenta. MCP `sim_bancada` (colocar, fio, remover...).
+- **ESP32 do NexoCode** (NexoCode 0.2.0, "Sincronizar com o esquema"): a ação `gpio_lote` recebe os GPIO do firmware
+  simulado (alto, baixo, PWM com duty, entrada, pull-up) pelo número do GPIO e devolve a tensão de cada pino, para o
+  firmware ler o botão e o potenciômetro do esquema; a vista do simulador pergunta a cada 120 ms. O PWM rápido chaveia o
+  MOSFET de verdade (o motor recebe duty·V na média).
+- **DEMO-MOTOR-ESP32**: um projeto de exemplo (ESP32-WROOM-32D, AMS1117, MOSFET AO3400 no PWM do GPIO25, diodo de roda
+  livre, LED no GPIO26, botão no GPIO27, potenciômetro no GPIO34, bornes de entrada 5 V e do motor), placa 72 × 52 mm
+  roteada (DRC aprovado); o firmware está no NexoCode.
+
 ## 1.101.0 — 2026-11-12
 
 **Simulador de circuito no esquema (estilo Falstad), com a corrente nas trilhas da placa em 3D.** Pedido do dono: "um

@@ -170,18 +170,19 @@ async function cria(host, opcoes){
   function pede(){ if (!agendado && vivo) agendado = requestAnimationFrame(desenha); }
   /* 1.101.0: camadas extras na cena (a corrente nas trilhas do simulador, hub-simulador-pcb.js) e um animador por
      quadro: enquanto houver animador, a vista desenha sem parar */
-  const extras = new Map();
+  const extras = new Map(), animadores = new Map();
   let animador = null, tAnim = 0;
   function desenha(){
     agendado = 0; if (!vivo) return;
     posiciona();
     if (gGiz.visible) gGiz.scale.setScalar(orb.dist * 0.11);
-    if (animador) {
+    if (animador || animadores.size) {
       const t = performance.now(), dt = tAnim ? Math.min(0.1, (t - tAnim) / 1000) : 0; tAnim = t;
-      try { animador(dt, { cam, dist:orb.dist }); } catch (e) { console.warn('3D: animador', e); animador = null; }
+      if (animador) { try { animador(dt, { cam, dist:orb.dist }); } catch (e) { console.warn('3D: animador', e); animador = null; } }
+      for (const [k, fn] of animadores) { try { fn(dt, { cam, dist:orb.dist }); } catch (e) { console.warn('3D: animador ' + k, e); animadores.delete(k); } }
     }
     ren.render(cena, cam);
-    if (animador) pede();
+    if (animador || animadores.size) pede();
   }
   function redimensiona(){
     const w = host.clientWidth || 1, h = host.clientHeight || 1;
@@ -1004,6 +1005,8 @@ async function cria(host, opcoes){
       pede();
     },
     anima(fn){ animador = typeof fn === 'function' ? fn : null; tAnim = 0; pede(); },
+    /* mais de um animador ao mesmo tempo (a bancada gira o motor enquanto a corrente anda nas trilhas) */
+    animaExtra(nome, fn){ if (typeof fn === 'function') animadores.set(nome, fn); else animadores.delete(nome); tAnim = 0; pede(); },
     projeta(x, y, z){
       posiciona();
       const v = new T.Vector3(x, y, z).project(cam);
@@ -1011,6 +1014,18 @@ async function cria(host, opcoes){
     },
     espessura(){ return ESP; },
     T(){ return T; },
+    /* 1.102.0 (bancada): um STEP da biblioteca vira um Object3D (mesmo leitor, malha e materiais da vista); o ponto do
+       plano Z = z sob o mouse; aplicar os materiais do modo (Padrao/Real View) num objeto de fora */
+    async modeloStep(url, chave){
+      if (typeof HubPcb3dStep === 'undefined') throw new Error('leitor de STEP não carregado');
+      const r = await HubPcb3dStep.carrega(url, { chave:chave || url });
+      const g = malhaDoStep(r.malhas, { matrix:[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] });
+      materiaisDoModo(g);
+      return g;
+    },
+    noPlano(ev, z){ return noPlanoZ(raioDe(ev), z || 0); },
+    materiais(ob){ materiaisDoModo(ob); pede(); },
+    pede(){ pede(); },
     host,
     estado(){ return { steps:est.steps, falhas:est.falhas.slice(), corpos:est.corpos, az:orb.az / RAD, el:orb.el / RAD, dist:orb.dist, realView:modo === 'real' }; },
     destroi(){

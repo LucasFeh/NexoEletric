@@ -125,7 +125,8 @@
         }, Promise.resolve());
       })
       .catch(function () {})
-      .then(function () { if (!parado) setTimeout(pergunta, document.visibilityState === 'hidden' ? 4000 : 1200); });
+      /* 1.102.0: com a simulacao ligada (o NexoCode mandando os GPIO do ESP32), pergunta a cada 120 ms */
+      .then(function () { if (!parado) setTimeout(pergunta, window.HubSimulador && window.HubSimulador.ligado && window.HubSimulador.ligado() ? 120 : document.visibilityState === 'hidden' ? 4000 : 1200); });
   }
   if (location.protocol === 'http:' || location.protocol === 'https:') setTimeout(pergunta, 800);
 })();

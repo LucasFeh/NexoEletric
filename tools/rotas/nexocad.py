@@ -362,6 +362,9 @@ def para_item(it, porid):
                            'fabricante': at.get('fabricante') or '', 'encapsulamento': at.get('encapsulamento') or ''}
     elif isinstance(at.get('footprints'), list):
         o['modelo'] = {'footprints': [str(f) for f in at['footprints']], 'origem': at.get('origem') or ''}
+    # 1.102.0: o item que vai para a BANCADA do simulador (motor, fonte...): terminais, eixo e o eletrico (hub-bancada.js)
+    if isinstance(at.get('bancada'), dict):
+        o['bancada'] = at['bancada']
     return o
 
 

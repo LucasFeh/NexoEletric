@@ -38,6 +38,7 @@
     comps: null, mt: null, sim: null, res: null, an: null,
     sujo: true, ultimaAnalise: 0, folhaFluxo: -1, fluxos: null, fase: new Map(), vmax: 5,
     hover: null, raf: 0, tUlt: 0, osciloscopio: [], amostras: [], erro: '', ultQuadro: 0,
+    hist: new Map(), dados: null, ferramenta: 'sondar',
     /* a aba Simulador do hub (hub-simulador-aba.js) abre o esquema com ?modo=sim: ja simulando, painel fixo */
     aba: (() => { try { return new URLSearchParams(location.search).get('modo') === 'sim'; } catch (_e) { return false; } })(),
   };
@@ -55,6 +56,9 @@
       }
     } catch (_e) { /* sem storage */ }
   }
+  /* a config muda dezenas de vezes por segundo com o NexoCode sincronizado: grava no maximo a cada 2 s */
+  let tGrava = 0;
+  function gravaCfgLeve() { if (tGrava) return; tGrava = setTimeout(() => { tGrava = 0; gravaCfg(); }, 2000); }
   function gravaCfg() {
     try { localStorage.setItem(chave(), JSON.stringify({ cfg: st.cfg, mostrar: st.mostrar, modo: st.modo, velocidade: st.velocidade, calc: st.calc, osciloscopio: st.osciloscopio })); } catch (_e) { /* sem storage */ }
   }
@@ -66,7 +70,8 @@
     if (!v) { st.erro = 'a vista Esquema não ofereceu os ganchos do simulador'; return false; }
     try {
       st.comps = C.doEsquema(v.model(), v.slib(), v.nets(), window.HubCore, { emergencia: v.emergencia });
-      st.mt = C.monta(st.comps, st.cfg);
+      st.mt = C.monta(st.comps, Object.assign({}, st.cfg, { externos: externosDaBancada(st.comps) }));
+      st.mt.cfg = st.cfg;
       st.sim = M.cria(st.mt.elementos, { terra: st.mt.terra, dt: dtDaVelocidade() });
       st.res = st.modo === 'dc' ? st.sim.dc() : st.sim.liga();
       if (st.modo !== 'dc') st.res = st.sim.passo(1);
@@ -89,6 +94,12 @@
     let vm = 1;
     for (const [n, x] of Object.entries(st.res.v)) if (!n.includes('#') && isFinite(x)) vm = Math.max(vm, Math.abs(x));
     st.vmax = vm;
+    /* o historico de cada net (o "sinal" que aparece na dica do pino e do fio): as ultimas 240 analises */
+    if (st.res.modo !== 'dc') for (const [n, x] of Object.entries(st.res.v)) {
+      if (n.includes('#') || !isFinite(x)) continue;
+      let h = st.hist.get(n); if (!h) { h = []; st.hist.set(n, h); }
+      h.push([st.res.t, x]); if (h.length > 240) h.shift();
+    }
     calculaFluxos();
     publica();
     painel.atualiza();
@@ -101,9 +112,49 @@
     const dados = st.ligado && st.an ? { projeto: v && v.projeto ? v.projeto() : '', t: st.res.t, modo: st.res.modo, versao: Date.now(),
       pinos: Object.fromEntries(Object.entries(st.an.pinos).map(([k, p]) => [k, { v: p.v, i: p.i, net: p.net }])),
       nets: Object.fromEntries(Object.entries(st.an.nets).filter(([n]) => !n.includes('#')).map(([n, x]) => [n, x.v])),
-      comps: Object.fromEntries(Object.entries(st.an.comps).map(([r, c]) => [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor }])) } : null;
+      comps: Object.fromEntries(Object.entries(st.an.comps).map(([r, c]) => [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor, rpm: c.rpm, corrente: c.corrente }])) } : null;
     try { topo.__nexoSim = dados; topo.dispatchEvent(new CustomEvent('nexo-sim', { detail: dados })); } catch (_e) { /* outra origem */ }
   }
+
+  /* A BANCADA (hub-bancada.js, na vista PCB): os itens da biblioteca e os fios, guardados no topo da janela
+     (window.top.__nexoBancada[projeto]). Cada fio liga um pad da placa (REF + pad = o pino do esquema) ao terminal de um
+     item, ou dois terminais entre si; o que fica ligado vira a mesma net. O motor e a fonte entram na simulacao. */
+  function bancadaDoTopo() {
+    try {
+      const t = window.top, v = VISTA(); if (!t || !v) return null;
+      t.__nexoBancada = t.__nexoBancada || {};
+      let b = t.__nexoBancada[v.projeto()];
+      /* a bancada guardada (a vista da bancada ainda nao abriu nesta sessao) */
+      if (!b) { try { b = JSON.parse(localStorage.getItem('nexoBancada.' + v.projeto()) || 'null'); } catch (_e) { b = null; } if (b) t.__nexoBancada[v.projeto()] = b; }
+      return b || null;
+    } catch (_e) { return null; }
+  }
+  function externosDaBancada(comps) {
+    const b = bancadaDoTopo();
+    if (!b || !Array.isArray(b.itens) || !b.itens.length) return [];
+    const netDoPino = new Map();
+    for (const c of comps) for (const p of c.pinos) if (p.net) netDoPino.set(c.ref + '-' + p.num, p.net);
+    const pai = new Map();
+    const acha = k => { while (pai.get(k) !== k) { const q = pai.get(pai.get(k)); pai.set(k, q); k = q; } return k; };
+    const no = k => { if (!pai.has(k)) pai.set(k, k); return k; };
+    const une = (a, c) => { a = acha(no(a)); c = acha(no(c)); if (a !== c) pai.set(c, a); };
+    const chaveDe = pt => pt.tipo === 'pad' ? 'P:' + pt.ref + '-' + pt.pad : 'T:' + pt.item + ':' + pt.terminal;
+    for (const f of b.fios || []) if (f && f.a && f.b) une(chaveDe(f.a), chaveDe(f.b));
+    const netDoGrupo = new Map();
+    let n = 0;
+    for (const k of pai.keys()) {
+      const r = acha(k);
+      if (k.startsWith('P:') && netDoPino.has(k.slice(2)) && !netDoGrupo.has(r)) netDoGrupo.set(r, netDoPino.get(k.slice(2)));
+    }
+    const netDe = k => { if (!pai.has(k)) return null; const r = acha(k); if (!netDoGrupo.has(r)) netDoGrupo.set(r, 'BANCADA_' + (++n)); return netDoGrupo.get(r); };
+    return b.itens.filter(it => it.bancada && /^(motor_dc|fonte)$/.test(it.bancada.tipo)).map(it => {
+      const ts = it.bancada.terminais || [];
+      const tp = ts.find(t => /^\+|POS|VERM/i.test(t.nome)) || ts[0], tn = ts.find(t => t !== tp) || ts[1];
+      return { ref: it.ref || it.id, tipo: it.bancada.tipo, rotulo: it.bancada.rotulo || it.nome, eletrico: it.bancada.eletrico || {},
+               nos: [tp ? netDe('T:' + it.id + ':' + tp.nome) : null, tn ? netDe('T:' + it.id + ':' + tn.nome) : null] };
+    }).filter(x => x.nos[0] && x.nos[1]);
+  }
+  try { window.top.addEventListener('nexo-bancada', () => { if (st.ligado) { st.sujo = true; agenda(); } }); } catch (_e) { /* outra origem */ }
 
   /* o laço: transiente pelo orçamento de tempo de cada quadro, desenho a ~30 quadros/s */
   function laco(t) {
@@ -443,7 +494,11 @@
       st.fixo = h.ref; painel.calculos(h.ref);
       return;
     }
-    if (h.tipo === 'pino' || h.tipo === 'fio') { e.stopPropagation(); e.preventDefault(); menu.abre(h, e); }
+    if (h.tipo === 'pino' || h.tipo === 'fio') {
+      e.stopPropagation(); e.preventDefault();
+      if (st.ferramenta === 'ponta' && h.net) { osciloscopio(h.net, !st.osciloscopio.includes(h.net)); st.osc = true; painel.atualiza(true); return; }
+      menu.abre(h, e, st.ferramenta === 'tensao');
+    }
   }
   function aoRodar(e) {
     if (!st.ligado || !st.an) return;
@@ -568,6 +623,14 @@
 .sim-dica .g{display:grid; grid-template-columns:auto 1fr; gap:2px 10px} .sim-dica .g .k{color:#9ca3af} .sim-dica .g .v{text-align:right; font-weight:700; font-variant-numeric:tabular-nums}
 .sim-dica .p{margin-top:5px; color:#a7f3d0} .sim-dica .a{margin-top:5px; color:#fca5a5} .sim-dica .h{margin-top:6px; color:#6b7280; font-size:10.5px}
 .sim-dica .f{font:10.5px var(--mono, ui-monospace, monospace); color:#93c5fd}
+.sim-dica .ds{margin-top:6px; padding:6px 8px; border-radius:7px; background:rgba(59,130,246,.12); color:#dbeafe} .sim-dica .ds .dd{color:#93c5fd; font-size:11px}
+.sim-dica .spark{display:block; margin-top:6px; border-radius:6px; background:#05070a}
+.sim-tb{position:absolute; top:10px; left:10px; z-index:31; display:flex; gap:4px; padding:4px; border-radius:10px; background:rgba(15,18,24,.92);
+  border:1px solid rgba(255,255,255,.1); box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.sim-tb button{height:30px; padding:0 10px; border-radius:7px; border:1px solid transparent; background:transparent; color:#e5e7eb; cursor:pointer; font:12px var(--font, system-ui); display:flex; gap:6px; align-items:center}
+.sim-tb button:hover{background:rgba(255,255,255,.07)} .sim-tb button.on{background:#f59e0b; color:#111; font-weight:600}
+.sim-tb .sep{width:1px; background:rgba(255,255,255,.12); margin:4px 2px}
+.sim-calc .ds{margin-top:8px; padding:7px 9px; border-radius:8px; background:rgba(59,130,246,.1)} .sim-calc .ds a{color:#93c5fd}
 .sim-menu{position:fixed; z-index:61; min-width:210px; padding:6px; border-radius:10px; background:var(--panel, #1c1f26); color:var(--fg, #e5e7eb);
   border:1px solid var(--border, #333); box-shadow:0 12px 32px rgba(0,0,0,.5); font:12px var(--font, system-ui)}
 .sim-menu .t{padding:4px 8px 6px; font-weight:700} .sim-menu .s{padding:2px 8px 4px; color:var(--fg-dim, #9ca3af); font-size:11px}
@@ -596,6 +659,16 @@
         el.append(t, g);
         if (p.papel) el.append($c('div', 'p', p.papel));
         if (p.alerta) el.append($c('div', 'a', '⚠ ' + p.alerta));
+        const ds = pinoDoDatasheet(h.ref, h.num);
+        if (ds) {
+          const d = $c('div', 'ds');
+          d.append($c('b', null, (ds.nome || ('pino ' + h.num)) + (ds.tipo ? ' · ' + ds.tipo : '')));
+          if (ds.funcao) d.append($c('div', null, ds.funcao));
+          if (ds.descricao) d.append($c('div', 'dd', ds.descricao));
+          if (ds.vmax != null || ds.imax != null) d.append($c('div', 'dd', [ds.vmax != null ? 'máx. ' + fmt(+ds.vmax, 'V') : '', ds.imax != null ? fmt(+ds.imax, 'A') : ''].filter(Boolean).join(' · ')));
+          el.append(d);
+        }
+        sinal(el, p.net);
         el.append($c('div', 'h', 'clique: ' + (/^(mcu|ci|desconhecido)$/.test((info(h.ref) || {}).tipo) ? 'GPIO, fonte, osciloscópio' : 'fonte, osciloscópio')));
       } else if (h.tipo === 'fio') {
         const t = $c('div', 't'); t.append($c('span', null, 'Net ' + h.net));
@@ -604,6 +677,7 @@
         if (Math.abs(h.i) > 1e-9) g.append($c('span', 'k', 'Corrente no fio'), $c('span', 'v', fmt(Math.abs(h.i), 'A')));
         el.append(t, g);
         if ((st.res.flutuantes || []).includes(h.net)) el.append($c('div', 'a', 'flutuando: sem caminho DC até o terra'));
+        sinal(el, h.net);
         el.append($c('div', 'h', 'clique: definir fonte nesta net, osciloscópio'));
       } else if (h.tipo === 'comp') {
         const c = st.an.comps[h.ref]; if (!c) { esconde(); return; }
@@ -622,14 +696,45 @@
       el.hidden = false;
     }
     function esconde() { if (el) el.hidden = true; }
+    /* o SINAL da net: o grafico das ultimas analises (so no Tempo real, e so se mexe) */
+    function sinal(box, net) {
+      const h = net && st.hist.get(net);
+      if (!h || h.length < 3) return;
+      let lo = Infinity, hi = -Infinity;
+      for (const [, x] of h) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
+      if (hi - lo < 1e-3) { box.append($c('div', 'h', 'sinal constante em ' + fmt(hi, 'V'))); return; }
+      const W = 230, H = 46, dpr = window.devicePixelRatio || 1;
+      const cv = document.createElement('canvas'); cv.className = 'spark'; cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      const c = cv.getContext('2d'); c.scale(dpr, dpr);
+      const t0 = h[0][0], t1 = h[h.length - 1][0];
+      c.strokeStyle = 'rgba(255,255,255,.08)'; c.beginPath(); c.moveTo(0, H / 2); c.lineTo(W, H / 2); c.stroke();
+      c.strokeStyle = '#facc15'; c.lineWidth = 1.6; c.beginPath();
+      h.forEach(([t, x], i) => { const X = (t - t0) / Math.max(t1 - t0, 1e-12) * W, Y = H - 3 - (x - lo) / (hi - lo) * (H - 6); if (i) c.lineTo(X, Y); else c.moveTo(X, Y); });
+      c.stroke();
+      const leg = $c('div', 'h', 'sinal: ' + fmt(lo, 'V') + ' a ' + fmt(hi, 'V') + ' em ' + fmt(t1 - t0, 's'));
+      box.append(cv, leg);
+    }
     return { mostra, esconde };
   })();
+  /* o pino no banco de dados de datasheet (Libs/componentes-dados.json): pelo numero, senao pelo nome */
+  function pinoDoDatasheet(ref, num) {
+    const inf = info(ref); if (!inf || !st.dados) return null;
+    const d = C.dadosDe(st.dados, Object.assign({}, inf.comp, { valor: inf.valorTxt }), inf.tipo);
+    if (!d || !d.pinos) return null;
+    const p = inf.pinos.find(q => String(q.num) === String(num));
+    return d.pinos[String(num)] || (p && p.name && Object.values(d.pinos).find(x => x && x.nome && String(x.nome).toUpperCase() === String(p.name).toUpperCase())) || null;
+  }
+  async function carregaDados() {
+    try { const r = await fetch('Libs/componentes-dados.json?t=' + Date.now(), { cache: 'no-store' }); st.dados = r.ok ? await r.json() : { componentes: {} }; }
+    catch (_e) { st.dados = { componentes: {} }; }
+    return st.dados;
+  }
 
   /* ------------------------------------------------------------------------------------------------ o menu do clique */
   const menu = (() => {
     let el = null;
     const fecha = () => { if (el) { el.remove(); el = null; } };
-    function abre(h, e) {
+    function abre(h, e, focaTensao) {
       fecha(); dica.esconde();
       el = $c('div', 'sim-menu');
       const net = h.net;
@@ -669,7 +774,7 @@
       const fora = ev => { if (el && !el.contains(ev.target)) { fecha(); window.removeEventListener('mousedown', fora, true); } };
       setTimeout(() => window.addEventListener('mousedown', fora, true), 0);
       for (const ev of ['mousedown', 'wheel', 'contextmenu']) el.addEventListener(ev, x => x.stopPropagation());
-      const i = el.querySelector('input'); if (i && h.tipo === 'fio') i.focus();
+      const i = el.querySelector('input'); if (i && (h.tipo === 'fio' || focaTensao)) i.focus();
     }
     return { abre, fecha, aberto: () => !!el };
   })();
@@ -939,6 +1044,16 @@
         refs.calc.append(d);
       }
       for (const a of c.alertas) refs.calc.append($c('div', 'al', '⚠ ' + a));
+      const inf = info(calcRef), cc = inf ? Object.assign({}, inf.comp, { valor: inf.valorTxt }) : null;
+      const d = inf && st.dados ? C.dadosDe(st.dados, cc, inf.tipo) : null;
+      if (d) {
+        const box = $c('div', 'ds');
+        box.append($c('b', null, 'Datasheet' + (d.fabricante ? ' · ' + d.fabricante : '')));
+        if (d.resumo) box.append($c('div', null, d.resumo));
+        if (d.alimentacao) box.append($c('div', null, 'Alimentação: ' + [d.alimentacao.vmin, d.alimentacao.vmax].map(x => x == null ? '?' : fmt(+x, 'V')).join(' a ')));
+        if (d.datasheet_url) { const a = $c('a', null, 'abrir o datasheet'); a.href = d.datasheet_url; a.target = '_blank'; box.append(a); }
+        refs.calc.append(box);
+      } else if (inf && C.chaveDados(cc, inf.tipo)) refs.calc.append($c('div', 'vazio', 'Sem dados de datasheet — use "Recolher informações".'));
     }
     return {
       abre() { if (!el) cria(); if (el) { el.hidden = false; atualiza(true); } },
@@ -979,14 +1094,117 @@
     host.addEventListener('mousedown', aoApertar, true);
     host.addEventListener('wheel', aoRodar, { capture: true, passive: false });
     window.addEventListener('keydown', e => { if (e.key === 'Escape' && menu.aberto()) menu.fecha(); });
-    if (st.aba) {
-      /* na aba Simulador o espaco e da simulacao: sai o painel da direita do Esquema (Configuracoes/Propriedades); a
-         edicao na folha continua a mesma */
-      const s = document.createElement('style'); s.textContent = '#splitR, #props{display:none !important}'; document.head.append(s);
-      setTimeout(() => { window.dispatchEvent(new Event('resize')); liga(true); }, 300);
-    }
+    carregaDados();
+    if (st.aba) areaDeSimulacao(host);
     return true;
   }
+  /* A AREA DE SIMULACAO (a aba Simulador do hub, ?modo=sim). Pedido do dono: "as ferramentas que aparecem na visão de
+     esquema e PCB são completamente diferentes das ferramentas para construir; é uma área completamente nova, não traz
+     nenhuma das ferramentas" e "o background é preto, as folhas no modo escuro, sem texto e sem template, só os pinos".
+     Sai a barra de desenho, o menu da folha, o painel da direita, a busca e o rodape; a folha fica escura (paleta do
+     HubDraw so neste iframe; o template e os textos nao saem: window.__simVisual) e nada se edita — navegar (roda,
+     arrastar com o botao direito/meio) e as interacoes da simulacao. A barra da simulacao fica no canto. */
+  function areaDeSimulacao(host) {
+    /* a barra de menus do hub (Arquivo, Editar, Colocar...) e da construcao: a area de simulacao nao a oferece */
+    try { Object.defineProperty(window, '__hubMenus', { configurable: true, get: () => null, set: () => {} }); } catch (_e) { /* ok */ }
+    const css = document.createElement('style');
+    css.textContent = '#schtb, #sfMenu, #splitR, #props, #status, #schBusca, .erc{display:none !important} body{background:#000 !important}';
+    document.head.append(css);
+    window.__simVisual = true;
+    /* as marcas do DRC da construcao (triangulo no pino solto, contorno do fora do almoxarifado) nao sao da simulacao */
+    try { window.ercMarcas = false; } catch (_e) { /* ok */ }
+    const D = window.HubDraw;
+    if (D && D.SCH) Object.assign(D.SCH, { sheet: '#0b0e14', border: '#1f2937', grid: '#111722', body: '#7dd3fc', fill: '#0f1a2a', pin: '#7dd3fc',
+      pinnum: '#94a3b8', wire: '#334155', junction: '#64748b', label: '#cbd5e1', power: '#e2e8f0', text: '#cbd5e1', port: '#64748b', portFill: '#1e293b', portText: '#e2e8f0' });
+    document.documentElement.style.setProperty('--sunken', '#000000');
+    window.dispatchEvent(new Event('hubtema'));
+    /* nada se edita: o clique esquerdo que a simulacao nao usou nao chega a vista; teclas so nos campos da simulacao */
+    host.addEventListener('mousedown', e => { if (e.button === 0) e.stopPropagation(); }, true);
+    host.addEventListener('dblclick', e => e.stopPropagation(), true);
+    host.addEventListener('contextmenu', e => { e.stopPropagation(); e.preventDefault(); }, true);
+    window.addEventListener('keydown', e => {
+      const t = e.target;
+      if (t && ((t.closest && t.closest('.sim-p, .sim-menu, .sim-tb')) || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (e.key === 'Escape') { menu.fecha(); return; }
+      e.stopPropagation(); e.preventDefault();
+    }, true);
+    const tb = $c('div', 'sim-tb');
+    const bt = (rot, tit, fn) => { const b = $c('button', null, rot); b.title = tit; b.onclick = fn; tb.append(b); return b; };
+    bt('⤢ Enquadrar', 'Enquadrar a folha', () => enquadra());
+    tb.append($c('span', 'sep'));
+    const fer = {};
+    const poeFer = k => { st.ferramenta = k; for (const [q, b] of Object.entries(fer)) b.classList.toggle('on', q === k); };
+    fer.sondar = bt('◎ Sondar', 'Mouse no pino ou no fio: tensão, corrente, sinal e datasheet; clique: o menu (GPIO, fonte, osciloscópio)', () => poeFer('sondar'));
+    fer.ponta = bt('∿ Ponta de prova', 'Clique num fio ou pino: entra (ou sai) do osciloscópio', () => poeFer('ponta'));
+    fer.tensao = bt('⚡ Aplicar tensão', 'Clique num fio ou pino: digite a tensão para aplicar naquela net', () => poeFer('tensao'));
+    poeFer('sondar');
+    /* as folhas (o menu da folha saiu da area): um seletor quando o projeto tem mais de uma */
+    const v0 = VISTA();
+    if (v0 && v0.folhas && v0.folhas().length > 1) {
+      tb.append($c('span', 'sep'));
+      const sel = $c('select'); sel.title = 'Folha do esquema';
+      sel.style.cssText = 'height:30px;border-radius:7px;background:#111827;color:#e5e7eb;border:1px solid rgba(255,255,255,.15);padding:0 6px';
+      v0.folhas().forEach((n, i) => { const o = $c('option', null, n); o.value = i; sel.append(o); });
+      sel.value = v0.folha();
+      sel.onchange = () => { v0.irFolha(+sel.value); st.folhaFluxo = -1; setTimeout(enquadra, 100); };
+      tb.append(sel);
+    }
+    tb.append($c('span', 'sep'));
+    bt('ⓘ Recolher informações', 'A IA busca o datasheet de cada componente na internet e mapeia os pinos (função, limites); fica salvo no componente, na biblioteca', () => recolher());
+    for (const ev of ['mousedown', 'pointerdown', 'wheel', 'contextmenu', 'dblclick']) tb.addEventListener(ev, e => e.stopPropagation(), { passive: ev === 'wheel' });
+    host.append(tb);
+    setTimeout(() => { window.dispatchEvent(new Event('resize')); liga(true); setTimeout(enquadra, 500); }, 300);
+  }
+  function enquadra() {
+    const v = VISTA(); if (!v || !st.comps) return;
+    const si = v.folha(); let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+    for (const c of st.comps) if (c.folha === si) for (const p of c.pinos) { x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y); x2 = Math.max(x2, p.x); y2 = Math.max(y2, p.y); }
+    if (x1 > x2) return;
+    const m = 400, w = x2 - x1 + 2 * m;
+    v.cam().fit({ x1: x1 - m, y1: y1 - m, x2: x2 + m + (st.aba ? w * 0.35 : 0), y2: y2 + m });
+  }
+  /* RECOLHER INFORMACOES: a IA (o Claude do hub, hub-chat.js) acha o datasheet de cada componente e grava a pinagem no
+     componente (Libs/componentes-dados.json, sincronizado com o NexoBD) pelas ferramentas sim_datasheet_* do MCP */
+  function recolher() {
+    const v = VISTA(); const proj = v && v.projeto ? v.projeto() : '';
+    const cc = c => Object.assign({}, c.comp, { valor: c.valorTxt });
+    const pend = st.mt ? [...st.mt.comps.values()].filter(c => C.chaveDados(cc(c), c.tipo) && !C.dadosDe(st.dados, cc(c), c.tipo)) : [];
+    const lista = [...new Set(pend.map(c => C.chaveDados(cc(c), c.tipo)))];
+    const texto = 'Recolha as informações de datasheet dos componentes do projeto "' + proj + '" para o simulador do NexoEletric. '
+      + 'Rode sim_datasheet_pendentes {projeto:"' + proj + '"}; para cada componente pendente (' + (lista.slice(0, 20).join(', ') || 'nenhum pendente: confira os que já têm dados') + '), '
+      + 'ache o datasheet oficial na internet (IntegrateBrowser: pesquisar e ler_links), leia a pinagem e grave com sim_datasheet_gravar: '
+      + 'cada pino (número do encapsulamento usado no esquema, nome, função, tipo — alimentação, terra, entrada, saída, E/S, analógico —, descrição curta, tensão e corrente máximas), '
+      + 'a faixa de alimentação, o fabricante, um resumo de uma linha e o link do datasheet. Não invente: o que não estiver no datasheet fica de fora. '
+      + 'No fim, diga quantos componentes ficaram com dados e quais não foram achados.';
+    let topo = null;
+    try { topo = window.top !== window ? window.top : null; } catch (_e) { topo = null; }
+    const chat = topo && topo.__hubChat;
+    if (chat && typeof chat.envia === 'function') {
+      try { if (typeof chat.abre === 'function') chat.abre(); } catch (_e) { /* ok */ }
+      setTimeout(() => {
+        let r;
+        try { r = chat.envia(texto); } catch (_e) { r = undefined; }
+        if (r === undefined) copiaPedido(texto, 'entre na IA do hub (botão IA no topo) e cole o pedido');
+        else aviso('A IA está recolhendo os datasheets (' + lista.length + ' componente(s)); os dados aparecem aqui quando ela gravar.', 'ok');
+      }, 400);
+      vigiaDados();
+    } else copiaPedido(texto, 'abra a IA (botão IA do hub ou o Claude Code) e cole o pedido');
+    return { pendentes: lista, texto };
+  }
+  function copiaPedido(texto, onde) {
+    try { navigator.clipboard.writeText(texto); } catch (_e) { /* sem clipboard */ }
+    aviso('Pedido copiado: ' + onde + '.', 'info');
+    vigiaDados();
+  }
+  function aviso(t, k) { if (window.HubDialog && HubDialog.toast) HubDialog.toast(t, k || 'info', 6000); else console.log(t); }
+  /* rele os dados enquanto a IA trabalha (a cada 10 s por 15 min) */
+  let vigia = 0;
+  function vigiaDados() {
+    if (vigia) return;
+    let n = 0;
+    vigia = setInterval(async () => { await carregaDados(); painel.atualiza(true); if (++n > 90) { clearInterval(vigia); vigia = 0; } }, 10000);
+  }
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { if (!instala()) setTimeout(instala, 500); });
   else if (!instala()) setTimeout(instala, 500);
 
@@ -1070,6 +1288,45 @@
         const r = C.verifica(st.an, a.verificar || []);
         return { modo: st.modo, t: st.res.t, aplicadas: mapa, passou: r.every(x => x.ok), resultados: r, alertas: st.an.resumo.alertas, avisos: st.mt.avisos, conectores: conectores() };
       }
+      case 'gpio_lote': {
+        /* o ESP32 simulado do NexoCode (pelo numero do GPIO): {mcu?, gpio:{"25":{modo, duty, f}}, origem} -> aplica sem
+           remontar quando o pino ja tinha modo (so o duty/nivel muda, o tempo continua) e devolve a tensao de todos os
+           GPIO, para o firmware ler as entradas (digitalRead/analogRead) */
+        garante();
+        const mcu = a.mcu ? info(a.mcu) : [...st.mt.comps.values()].find(c => c.tipo === 'mcu') || [...st.mt.comps.values()].find(c => c.tipo === 'ci' && c.pinos.some(p => C.gpioDe(p.name) != null));
+        if (!mcu) throw new Error('nenhum microcontrolador no esquema' + (a.mcu ? ' com o designador ' + a.mcu : ''));
+        const porGpio = new Map();
+        for (const p of mcu.pinos) { const g = C.gpioDe(p.name); if (g != null && !porGpio.has(g)) porGpio.set(g, p); }
+        let remonta = false;
+        const aplicado = [], semPino = [];
+        for (const [g, conf] of Object.entries(a.gpio || {})) {
+          const p = porGpio.get(+g);
+          if (!p) { semPino.push(+g); continue; }
+          const key = mcu.ref + '-' + p.num, atual = st.cfg.gpio[key];
+          if (!conf || !conf.modo) { if (atual) { delete st.cfg.gpio[key]; remonta = true; } continue; }
+          const novo = { modo: conf.modo, duty: conf.duty == null ? 0.5 : +conf.duty, f: +conf.f || 1000, origem: a.origem || 'mcp' };
+          if (atual) Object.assign(atual, novo); else { st.cfg.gpio[key] = novo; remonta = true; }
+          aplicado.push({ gpio: +g, pino: key, modo: novo.modo, duty: novo.modo === 'pwm' ? novo.duty : undefined });
+        }
+        if (remonta) monta();
+        else if (aplicado.length && st.sim) { st.res = st.modo === 'dc' ? st.sim.dc() : st.sim.passo(1); analisa(true); }
+        gravaCfgLeve();
+        const vdd = mcu.alim && mcu.alim[0] && st.res ? st.res.v[mcu.alim[0].net] : 3.3;
+        const pinos = {}, entradas = {};
+        for (const [g, p] of porGpio) {
+          const pin = st.an && st.an.pinos[mcu.ref + '-' + p.num];
+          if (!pin || !p.net || !isFinite(pin.v)) continue;   // pino sem ligacao: nada a ler
+          const nivel = pin.v >= 0.7 * vdd ? 1 : pin.v <= 0.3 * vdd ? 0 : null;
+          pinos[g] = { pino: p.num, nome: p.name, net: p.net, v: pin.v, i: pin.i, nivel };
+          const c = st.cfg.gpio[mcu.ref + '-' + p.num];
+          if (!c || /entrada|pullup|pulldown/.test(c.modo)) entradas[g] = { v: pin.v, nivel };
+        }
+        st.ultimoNexoCode = Date.now();
+        painel.atualiza();
+        return { mcu: mcu.ref, aplicado, sem_pino: semPino, pinos, entradas, t: st.res && st.res.t, modo: st.modo };
+      }
+      case 'recolher': return recolher();
+      case 'dados': await carregaDados(); painel.atualiza(true); return { componentes: Object.keys((st.dados && st.dados.componentes) || {}).length };
       case 'limpar': st.cfg = { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [] }; st.osciloscopio = []; gravaCfg(); st.sujo = true; agenda(); return { limpo: true };
     }
     throw new Error('ação do simulador desconhecida: ' + acao);

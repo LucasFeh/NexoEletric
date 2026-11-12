@@ -5403,7 +5403,8 @@ function desenhaFolha(ctx, si, o){
   }
   ctx.strokeStyle = D.SCH.border; ctx.lineWidth = 8;
   ctx.strokeRect(bb.x1, bb.y1, bb.x2-bb.x1, bb.y2-bb.y1);
-  desenhaTemplate(ctx, si, esc, !o.papel);
+  /* 1.102.0: na aba Simulador (window.__simVisual) a folha fica so com simbolos, pinos e fios: sem o template */
+  if (!(window.__simVisual && !o.papel)) desenhaTemplate(ctx, si, esc, !o.papel);
   /* as formas da barra (1.82.0), por baixo do circuito: um retangulo preenchido em volta de um bloco nao cobre nada */
   for (const f of (s.formas || [])) D.drawForma(ctx, f);
   /* o que tem de ficar POR BAIXO dos fios e dos simbolos (a cruz do cursor do fio) */
@@ -5496,8 +5497,9 @@ function desenhaFolha(ctx, si, o){
        worldText centra a letra na vertical, e o Altium a apoia na base */
     const tr = textoComp(c, 'ref');
     const refVisivel = showState.ref && designadorVisivel(c);
-    if (refVisivel) D.worldText(ctx, tr.s, tr.x, tr.y + tr.h * 0.33, tr.h, 0, '#000000', 'left');
-    if (textoDoCom(c)){
+    const simV = window.__simVisual && !o.papel;
+    if (refVisivel) D.worldText(ctx, tr.s, tr.x, tr.y + tr.h * 0.33, tr.h, 0, simV ? '#94a3b8' : '#000000', 'left');
+    if (textoDoCom(c) && !simV){
       const tc = textoComp(c, 'com');
       D.worldText(ctx, tc.s, tc.x, tc.y + tc.h * 0.33, tc.h, 0, '#333366', 'left');
     }
@@ -5533,7 +5535,7 @@ function desenhaFolha(ctx, si, o){
   for (const l of s.netlabels) D.drawNetLabel(ctx, l, foco && foco === l.net ? D.SCH.hl : undefined);
   for (const p of s.powers)    D.drawPowerPort(ctx, p, foco && foco === p.net ? D.SCH.hl : undefined);
   for (const p of s.ports)     D.drawPort(ctx, p, foco && foco === p.net ? D.SCH.hl : undefined);
-  for (const t of s.texts)     D.worldText(ctx, t.s || '', t.x, t.y, (t.h || 10) * 6, t.rot || 0, corValida(t.cor) ? t.cor : D.SCH.text, 'left');
+  if (!(window.__simVisual && !o.papel)) for (const t of s.texts) D.worldText(ctx, t.s || '', t.x, t.y, (t.h || 10) * 6, t.rot || 0, corValida(t.cor) ? t.cor : D.SCH.text, 'left');
   /* o X por ULTIMO: ele marca um pino, e marca escondida atras do corpo nao marca nada */
   for (const n of s.noercs)    D.drawNoERC(ctx, n.x, n.y, n.color);
 
@@ -7615,6 +7617,7 @@ window.__hubSimVista = {
   cam: () => cam, canvas: () => cv, caixa: c => compBBox(c), redesenha: () => cam.draw(),
   focar: ref => window.__hubSelectComp(ref),
   emergencia: c => desenhoDeEmergencia(c),
+  folhas: () => model.sheets.map(s => s.name), irFolha: i => setSheet(i),
 };
 
 window.__hubSelectComp = function(ref){
