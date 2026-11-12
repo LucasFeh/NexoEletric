@@ -56,6 +56,7 @@
         if (j.velocidade) st.velocidade = j.velocidade;
         if (j.calc != null) st.calc = j.calc;
         if (j.osciloscopio) st.osciloscopio = j.osciloscopio;
+        if (j.oscBase) st.oscBase = j.oscBase;
       }
     } catch (_e) { /* sem storage */ }
   }
@@ -63,7 +64,7 @@
   let tGrava = 0;
   function gravaCfgLeve() { if (tGrava) return; tGrava = setTimeout(() => { tGrava = 0; gravaCfg(); }, 2000); }
   function gravaCfg() {
-    try { localStorage.setItem(chave(), JSON.stringify({ v2: 1, cfg: st.cfg, mostrar: st.mostrar, modo: st.modo, velocidade: st.velocidade, calc: st.calc, osciloscopio: st.osciloscopio })); } catch (_e) { /* sem storage */ }
+    try { localStorage.setItem(chave(), JSON.stringify({ v2: 1, cfg: st.cfg, mostrar: st.mostrar, modo: st.modo, velocidade: st.velocidade, calc: st.calc, osciloscopio: st.osciloscopio, oscBase: st.oscBase })); } catch (_e) { /* sem storage */ }
   }
 
   /* ------------------------------------------------------------------------------------------------ montar e rodar */
@@ -239,9 +240,9 @@
   function amostra() {
     if (!st.osciloscopio.length || !st.res) return;
     const ult = st.amostras[st.amostras.length - 1];
-    if (ult && st.res.t - ult.t < st.velocidade / 400) return;
+    if (ult && st.res.t === ult.t) return;
     st.amostras.push({ t: st.res.t, v: st.osciloscopio.map(n => st.res.v[n]) });
-    if (st.amostras.length > 1200) st.amostras.splice(0, st.amostras.length - 1200);
+    if (st.amostras.length > 6000) st.amostras.splice(0, st.amostras.length - 6000);
   }
 
   /* ------------------------------------------------------------------------------------------------ corrente nos fios */
@@ -733,6 +734,9 @@
 .sim-osc{width:100%; height:120px; display:block; border-radius:8px; background:#0b0e13}
 .sim-osc-l{display:flex; flex-wrap:wrap; gap:6px; margin-top:5px; font-size:11px}
 .sim-osc-l span{display:inline-flex; gap:4px; align-items:center; cursor:pointer} .sim-osc-l i{width:10px; height:3px; border-radius:2px; display:inline-block}
+.sim-osc-m{flex-basis:100%; display:flex; flex-direction:column; gap:3px; font:10.5px ui-monospace, monospace; color:var(--fg-dim, #9ca3af)} .sim-osc-m > div{display:block} .sim-osc-m i{width:10px; height:3px; border-radius:2px; display:inline-block; margin-right:5px; vertical-align:middle}
+.sim-osc-m .av, .sim-an .av{color:var(--warn, #fbbf24); font:10.5px system-ui; margin:1px 0 2px 15px} .sim-an .av{flex-basis:100%; margin:3px 0 0} .sim-an .av button{font-size:10.5px}
+.sim-base{font-size:10.5px; padding:1px 3px; margin-right:6px; background:var(--panel2, transparent); color:inherit; border:1px solid var(--border, #444); border-radius:4px}
 .sim-dica{position:fixed; z-index:60; pointer-events:none; min-width:200px; max-width:340px; padding:9px 11px; border-radius:10px;
   background:rgba(15,18,24,.96); color:#e5e7eb; border:1px solid rgba(255,255,255,.12); box-shadow:0 10px 30px rgba(0,0,0,.5); font:12px var(--font, system-ui)}
 .sim-dica .t{font-weight:700; margin-bottom:5px; display:flex; gap:6px; align-items:center}
@@ -764,7 +768,7 @@
 .sim-an .l{padding:4px 0; border-bottom:1px dashed rgba(255,255,255,.08)} .sim-an .lf{font:10.5px var(--mono, ui-monospace, monospace); color:#93c5fd}
 .sim-an .ds{margin-top:6px; padding:6px 8px; border-radius:7px; background:rgba(59,130,246,.12); color:#dbeafe}
 .sim-an canvas{display:block; width:100%; height:170px; border-radius:8px; background:#05070a}
-.sim-an .leg{display:flex; justify-content:space-between; color:#9ca3af; font:10.5px ui-monospace, monospace; margin-top:4px} .sim-menu .s{padding:2px 8px 4px; color:var(--fg-dim, #9ca3af); font-size:11px}
+.sim-an .leg{display:flex; flex-wrap:wrap; gap:4px 8px; align-items:center; justify-content:space-between; color:#9ca3af; font:10.5px ui-monospace, monospace; margin-top:4px} .sim-menu .s{padding:2px 8px 4px; color:var(--fg-dim, #9ca3af); font-size:11px}
 .sim-menu button{display:block; width:100%; text-align:left; padding:6px 9px; border:0; border-radius:6px; background:transparent; color:inherit; cursor:pointer; font:inherit}
 .sim-menu button:hover, .sim-menu button.on{background:color-mix(in srgb, var(--hi, #f59e0b) 22%, transparent)}
 .sim-menu .lin{display:flex; gap:6px; padding:4px 8px} .sim-menu .lin input{flex:1; min-width:0; height:24px; border-radius:6px; border:1px solid var(--border, #333); background:var(--panel2, #23262e); color:inherit; padding:0 6px}
@@ -978,6 +982,9 @@
         assina(net) { if (net && !assinadas.has(net)) assinadas.set(net, []); return true; },
         solta(net) { assinadas.delete(net); },
         le(net) { return assinadas.get(net) || []; },
+        /* o mesmo osciloscopio do painel (base de tempo, gatilho, medidas, PWM rapido reconstruido) para o cartao do pad */
+        pwmDe(net) { return pwmDaNet(net); },
+        desenha(cv, net, base) { return desenhaCanais(cv, [{ nome: net, cor: '#facc15', A: assinadas.get(net) || [], pwm: pwmDaNet(net) }], base || 'auto'); },
       };
     } catch (_e) { /* outra origem */ }
     function amostra(r) {
@@ -986,14 +993,14 @@
         const ult = A[A.length - 1];
         if (ult && r.t === ult.t) continue;
         A.push({ t: r.t, v: r.v[n] });
-        if (A.length > 1200) A.splice(0, A.length - 1200);
+        if (A.length > 6000) A.splice(0, A.length - 6000);
       }
       for (const j of janelas) {
         if (!j.nets.length) continue;
         const ult = j.amostras[j.amostras.length - 1];
         if (ult && r.t === ult.t) continue;
         j.amostras.push({ t: r.t, v: j.nets.map(n => r.v[n]) });
-        if (j.amostras.length > 1200) j.amostras.splice(0, j.amostras.length - 1200);
+        if (j.amostras.length > 6000) j.amostras.splice(0, j.amostras.length - 6000);
       }
     }
     function atualiza() {
@@ -1043,17 +1050,24 @@
       const A = j.amostras;
       /* no componente de duas pontas, a tensao NELE (a diferenca); no pino/fio, a tensao da net */
       const val = a => (j.nets.length === 2 && h.tipo === 'comp') ? a.v[0] - a.v[1] : a.v[0];
-      if (st.modo === 'dc' || A.length < 2) { c2.fillStyle = '#6b7280'; c2.font = '11px system-ui'; c2.fillText(st.modo === 'dc' ? 'o osciloscópio anda no Tempo real' : 'esperando o sinal…', 10, H / 2); leg.textContent = ''; return; }
-      let lo = Infinity, hi = -Infinity;
-      for (const a of A) { const x = val(a); if (isFinite(x)) { lo = Math.min(lo, x); hi = Math.max(hi, x); } }
-      if (!(hi > lo)) { hi = lo + 0.5; lo -= 0.5; }
-      const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
-      const t0 = A[0].t, t1 = A[A.length - 1].t;
-      c2.strokeStyle = '#facc15'; c2.lineWidth = 1.7; c2.beginPath();
-      A.forEach((a, i) => { const X = (a.t - t0) / Math.max(t1 - t0, 1e-12) * W, Y = H - (val(a) - lo) / (hi - lo) * H; if (i) c2.lineTo(X, Y); else c2.moveTo(X, Y); });
-      c2.stroke();
-      const atual = val(A[A.length - 1]);
-      leg.innerHTML = '<span>' + fmt(lo, 'V') + ' … ' + fmt(hi, 'V') + '</span><span>agora ' + fmt(atual, 'V') + '</span><span>' + fmt(t1 - t0, 's') + '</span>';
+      if (st.modo === 'dc' || A.length < 2) {
+        const dpr = window.devicePixelRatio || 1, W = cv.clientWidth || 340, H = cv.clientHeight || 170;
+        if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+        const c2 = cv.getContext('2d'); c2.setTransform(dpr, 0, 0, dpr, 0, 0); c2.clearRect(0, 0, W, H);
+        c2.fillStyle = '#6b7280'; c2.font = '11px system-ui'; c2.fillText(st.modo === 'dc' ? 'o osciloscópio anda no Tempo real' : 'esperando o sinal…', 10, H / 2); leg.textContent = ''; return;
+      }
+      const canal = { nome: titulo(h), cor: '#facc15', A: A.map(a => ({ t: a.t, v: val(a) })), pwm: h.tipo === 'comp' ? null : pwmDaNet(j.nets[0]) };
+      const l = desenhaCanais(cv, [canal], j.base || 'auto')[0];
+      leg.textContent = '';
+      if (!j.selBase) j.selBase = seletorBase(j.base || 'auto', v => { j.base = v; pinta(j); });
+      const txt = $c('span', null, l ? l.texto : '');
+      leg.append(txt, j.selBase);
+      if (l && l.aviso) {
+        const av = $c('div', 'av', l.aviso);
+        const b = $c('button', null, 'ver de verdade'); b.title = 'Simulação lenta o bastante para o sinal amostrado mostrar o PWM';
+        b.onclick = () => { st.velocidade = velocidadePara(canal.pwm.f); j.amostras = []; gravaCfg(); st.sujo = true; agenda(); };
+        av.append(' ', b); leg.append(av);
+      }
     }
     return { abre, atualiza, amostra, lista: () => janelas };
   })();
@@ -1066,32 +1080,166 @@
     st.amostras = []; st.osc = st.osciloscopio.length > 0 || st.osc;
     gravaCfg(); painel.atualiza(true);
   }
+  /* ------------------------------------------------------------------------------------------------ osciloscopio
+     O que os tres osciloscopios (painel, Analisar e o cartao do pad na PCB) desenham: base de tempo (auto ou por divisao),
+     gatilho na subida (a imagem para), medidas (frequencia, duty, Vmin/Vmax) e o PWM RAPIDO reconstruido. Quando o passo
+     do transiente e maior que um quarto do periodo (20 kHz com dt de 0,7 ms), o pino do GPIO faz sigma-delta (liga ou
+     desliga a cada passo para a MEDIA ser o duty) — desenhar essas amostras dava um trem de bits na "frequencia" do
+     passo, sem nada a ver com o PWM. Nesse caso a net do GPIO (e a que ele alimenta por um resistor, e o dreno/coletor do
+     transistor que ele chaveia, invertida) mostra a onda quadrada ideal com f e duty do GPIO, marcada "reconstruido". */
+  const BASES_OSC = [1e-6, 2e-6, 5e-6, 1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1, 0.2, 0.5, 1];
+  const DIV_X = 10;
+  /** O PWM que manda numa net: {f, duty, inverte, rapido, gpio} ou null. */
+  function pwmDaNet(net) {
+    const els = st.sim ? st.sim.elementos : [];
+    const dt = st.sim ? st.sim.dt : dtDaVelocidade();
+    const deGpio = n => { const e = els.find(x => x.gpio && x.nos && x.nos[0] === n && x.gpio.modo === 'pwm'); if (e) e.gpio._nosPino = e.nos; return e ? e.gpio : null; };
+    const viaR = n => { for (const r of els) if (r.tipo === 'R' && r.nos && r.nos.includes(n)) { const o = r.nos[0] === n ? r.nos[1] : r.nos[0]; const g = deGpio(o); if (g) return g; } return null; };
+    const monta = (g, inverte) => { const f = +g.f || 1000, duty = g.duty == null ? 0.5 : +g.duty; return { f, duty, inverte, rapido: dt * f > 0.25, gpio: g }; };
+    let g = deGpio(net) || viaR(net);
+    if (g) return monta(g, false);
+    for (const q of els) {
+      if (!q.nos || !/MOSFET|BJT/.test(q.papel || '') || q.nos[0] !== net) continue;   // dreno / coletor
+      g = deGpio(q.nos[1]) || viaR(q.nos[1]);
+      if (g) return monta(g, true);
+    }
+    return null;
+  }
+  /** Medidas de um sinal amostrado [{t, v}]: {lo, hi, med, f?, duty?} (f so com 3 bordas de subida ou mais). */
+  function medidas(A) {
+    let lo = Infinity, hi = -Infinity, soma = 0, n = 0;
+    for (const a of A) if (isFinite(a.v)) { lo = Math.min(lo, a.v); hi = Math.max(hi, a.v); soma += a.v; n++; }
+    const out = { lo, hi, med: n ? soma / n : NaN };
+    if (!(hi - lo > 0.05)) return out;
+    const meio = (lo + hi) / 2, histerese = (hi - lo) * 0.1;
+    // instante do cruzamento do meio por interpolação linear (com 8 amostras por período o duty fica certo)
+    const cruza = i => { const a = A[i - 1], b = A[i]; return b.v === a.v ? b.t : a.t + (meio - a.v) / (b.v - a.v) * (b.t - a.t); };
+    let alto = A[0].v > meio;
+    const subidas = [], bordas = [];
+    for (let i = 1; i < A.length; i++) {
+      const v = A[i].v;
+      if (!alto && v > meio + histerese) { alto = true; let k = i; while (k > 1 && A[k - 1].v > meio) k--; const t = cruza(k); subidas.push(t); bordas.push([t, 1]); }
+      else if (alto && v < meio - histerese) { alto = false; let k = i; while (k > 1 && A[k - 1].v < meio) k--; bordas.push([cruza(k), 0]); }
+    }
+    if (subidas.length >= 3) {
+      const t0 = subidas[0], t1 = subidas[subidas.length - 1];
+      out.f = (subidas.length - 1) / (t1 - t0);
+      let h = 0, desde = null;
+      for (const [t, sobe] of bordas) {
+        if (t < t0 || t > t1) continue;
+        if (sobe) desde = t; else if (desde != null) { h += t - desde; desde = null; }
+      }
+      out.duty = h / (t1 - t0);
+    }
+    return out;
+  }
+  /** Base de tempo em s/div: a escolhida, ou auto (5 periodos do PWM ou do sinal medido; sem periodo, a janela toda). */
+  function baseDe(escolha, canais) {
+    if (escolha && escolha !== 'auto') return +escolha;
+    for (const c of canais) { const f = c.pwm && c.pwm.rapido ? c.pwm.f : c.med && c.med.f; if (f) return BASES_OSC.find(b => b * DIV_X >= 5 / f) || 1; }
+    const A = canais[0] && canais[0].A || []; const jan = A.length > 1 ? A[A.length - 1].t - A[0].t : 0;
+    return jan > 0 ? jan / DIV_X : 1e-3;
+  }
+  /**
+   * Desenha os canais num canvas. canais: [{nome, cor, A:[{t,v}], pwm (de pwmDaNet) | null}]; base: 'auto' ou s/div.
+   * Devolve as linhas da legenda [{nome, cor, texto, aviso}].
+   */
+  function desenhaCanais(cv, canais, base) {
+    const dpr = window.devicePixelRatio || 1, W = cv.clientWidth || 340, H = cv.clientHeight || 160;
+    if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+    const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+    c.strokeStyle = 'rgba(255,255,255,.07)'; c.lineWidth = 1;
+    for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(0, H * i / 4); c.lineTo(W, H * i / 4); c.stroke(); }
+    for (let i = 1; i < DIV_X; i++) { c.beginPath(); c.moveTo(W * i / DIV_X, 0); c.lineTo(W * i / DIV_X, H); c.stroke(); }
+    for (const k of canais) k.med = k.A.length > 1 ? medidas(k.A) : null;
+    const sdiv = baseDe(base, canais), jan = sdiv * DIV_X;
+    // escala vertical comum
+    let lo = Infinity, hi = -Infinity;
+    for (const k of canais) {
+      const nos = k.pwm && k.pwm.rapido && !k.pwm.inverte && k.pwm.gpio && k.pwm.gpio._nosPino, rv = st.res && st.res.v;
+      if (nos && rv && isFinite(rv[nos[1]])) { lo = Math.min(lo, rv[nos[2]] || 0); hi = Math.max(hi, rv[nos[1]]); continue; }
+      if (k.med) { lo = Math.min(lo, k.med.lo); hi = Math.max(hi, k.med.hi); }
+    }
+    if (!(hi > lo)) { hi = (isFinite(lo) ? lo : 0) + 0.5; lo = hi - 1; }
+    const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+    const Y = v => H - (v - lo) / (hi - lo) * H;
+    const legenda = [];
+    canais.forEach(k => {
+      c.strokeStyle = k.cor; c.lineWidth = 1.6; c.beginPath();
+      const A = k.A, m = k.med;
+      if (k.pwm && k.pwm.rapido && m) {
+        // reconstruido: onda quadrada ideal entre o minimo e o maximo do pino (o sigma-delta vai de 0 a Vdd)
+        // niveis: a alimentacao do proprio pino (Vdd/terra do GPIO); no dreno/coletor, o que o sinal amostrado mostra
+        const nos = k.pwm.gpio && k.pwm.gpio._nosPino, rv = st.res && st.res.v;
+        const vdd = !k.pwm.inverte && nos && rv && isFinite(rv[nos[1]]) ? rv[nos[1]] : null, vgnd = vdd != null && isFinite(rv[nos[2]]) ? rv[nos[2]] : 0;
+        const per = 1 / k.pwm.f, d = k.pwm.inverte ? 1 - k.pwm.duty : k.pwm.duty, vH = vdd != null ? vdd : m.hi, vL = vdd != null ? vgnd : m.lo;
+        let t = 0; c.moveTo(0, Y(d > 0 ? vH : vL));
+        while (t < jan) {
+          const xs = t / jan * W, xd = Math.min(1, (t + d * per) / jan) * W, xf = Math.min(1, (t + per) / jan) * W;
+          if (d > 0) { c.lineTo(xs, Y(vH)); c.lineTo(xd, Y(vH)); }
+          if (d < 1) { c.lineTo(xd, Y(vL)); c.lineTo(xf, Y(vL)); }
+          t += per;
+        }
+        c.stroke();
+        legenda.push({ nome: k.nome, cor: k.cor, texto: `PWM ${fmt(k.pwm.f, 'Hz')} · duty ${Math.round(d * 100)} % · ${fmt(vL, 'V')}…${fmt(vH, 'V')}`,
+          aviso: `reconstruído: o passo da simulação (${fmt(st.sim ? st.sim.dt : 0, 's')}) é maior que o período (${fmt(per, 's')}); a simulação usa a média (${fmt(m.med, 'V')})` });
+        return;
+      }
+      if (A.length < 2) { legenda.push({ nome: k.nome, cor: k.cor, texto: 'esperando o sinal…' }); return; }
+      // gatilho: a ultima subida que ainda deixa uma janela inteira depois dela; sem subida, rola (os ultimos jan s)
+      const tUlt = A[A.length - 1].t;
+      let t0 = tUlt - jan;
+      if (m && m.hi - m.lo > 0.05 && jan < tUlt - A[0].t) {
+        const meio = (m.lo + m.hi) / 2;
+        for (let i = A.length - 1; i > 0; i--) if (A[i].t + jan <= tUlt && A[i - 1].v <= meio && A[i].v > meio) { t0 = A[i].t; break; }
+      }
+      let primeiro = true;
+      for (const a of A) {
+        if (a.t < t0 - jan * 0.02 || a.t > t0 + jan) continue;
+        const x = (a.t - t0) / jan * W, y = Y(a.v);
+        if (primeiro) { c.moveTo(x, y); primeiro = false; } else c.lineTo(x, y);
+      }
+      c.stroke();
+      const ult = A[A.length - 1].v;
+      const fTxt = m && m.f ? ` · ${fmt(m.f, 'Hz')} · duty ${Math.round(m.duty * 100)} %` : '';
+      legenda.push({ nome: k.nome, cor: k.cor, texto: `${fmt(m.lo, 'V')}…${fmt(m.hi, 'V')} · agora ${fmt(ult, 'V')}${fTxt}`,
+        aviso: k.pwm && !k.pwm.rapido ? '' : (k.pwm ? '' : '') });
+    });
+    c.fillStyle = '#9ca3af'; c.font = '10px ui-monospace, monospace';
+    c.fillText(fmt(hi, 'V'), 4, 11); c.fillText(fmt(lo, 'V'), 4, H - 4);
+    const rot = fmt(sdiv, 's') + '/div'; c.fillText(rot, W - c.measureText(rot).width - 4, H - 4);
+    return legenda;
+  }
+  /** Seletor da base de tempo (auto + 1 µs/div … 1 s/div). */
+  function seletorBase(valor, aoMudar) {
+    const s = document.createElement('select');
+    s.className = 'sim-base'; s.title = 'Base de tempo (por divisão; a tela tem 10 divisões)';
+    s.append(new Option('auto', 'auto'));
+    for (const b of BASES_OSC) s.append(new Option(fmt(b, 's') + '/div', String(b)));
+    s.value = String(valor || 'auto');
+    s.onchange = () => aoMudar(s.value);
+    for (const ev of ['mousedown', 'click', 'keydown', 'wheel']) s.addEventListener(ev, e => e.stopPropagation());
+    return s;
+  }
+  /** Velocidade que deixa ver o PWM de verdade (passo <= 1/8 do periodo). */
+  function velocidadePara(f) { return Math.max(1e-6, 1440 / (8 * f)); }
+
   const CORES_OSC = ['#facc15', '#22d3ee', '#f472b6', '#a3e635'];
   function oscDesenha() {
     const cv = painel.oscCanvas();
     if (!cv || !st.osc || cv.offsetParent === null) return;
-    const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
-    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
-    const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.clearRect(0, 0, W, H);
-    c.strokeStyle = 'rgba(255,255,255,.07)'; c.lineWidth = 1;
-    for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(0, H * i / 4); c.lineTo(W, H * i / 4); c.stroke(); }
-    for (let i = 1; i < 8; i++) { c.beginPath(); c.moveTo(W * i / 8, 0); c.lineTo(W * i / 8, H); c.stroke(); }
     const A = st.amostras;
-    if (A.length < 2) { c.fillStyle = '#6b7280'; c.font = '11px system-ui'; c.fillText(st.modo === 'dc' ? 'o osciloscópio anda no Tempo real' : st.osciloscopio.length ? 'esperando amostras…' : 'clique num fio ou pino › Mostrar no osciloscópio', 8, H / 2); return; }
-    let lo = Infinity, hi = -Infinity;
-    for (const a of A) for (const x of a.v) if (isFinite(x)) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
-    if (!(hi > lo)) { hi = lo + 1; lo -= 1; }
-    const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
-    const t0 = A[0].t, t1 = A[A.length - 1].t;
-    st.osciloscopio.forEach((n, k) => {
-      c.strokeStyle = CORES_OSC[k]; c.lineWidth = 1.6; c.beginPath();
-      A.forEach((a, i) => { const x = (a.t - t0) / Math.max(t1 - t0, 1e-12) * W, y = H - (a.v[k] - lo) / (hi - lo) * H; if (i) c.lineTo(x, y); else c.moveTo(x, y); });
-      c.stroke();
-    });
-    c.fillStyle = '#9ca3af'; c.font = '10px ui-monospace, monospace';
-    c.fillText(fmt(hi, 'V'), 4, 11); c.fillText(fmt(lo, 'V'), 4, H - 4);
-    const jan = t1 - t0; c.fillText(fmt(jan, 's') + ' na tela', W - 86, H - 4);
+    if (A.length < 2 || !st.osciloscopio.length) {
+      const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+      if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+      const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+      c.fillStyle = '#6b7280'; c.font = '11px system-ui';
+      c.fillText(st.modo === 'dc' ? 'o osciloscópio anda no Tempo real' : st.osciloscopio.length ? 'esperando amostras…' : 'clique num fio ou pino › Mostrar no osciloscópio', 8, H / 2);
+      painel.oscLegenda(null);
+      return;
+    }
+    const canais = st.osciloscopio.map((n, k) => ({ nome: n, cor: CORES_OSC[k], A: A.map(a => ({ t: a.t, v: a.v[k] })), pwm: pwmDaNet(n) }));
+    painel.oscLegenda(desenhaCanais(cv, canais, st.oscBase || 'auto'));
   }
 
   /* ------------------------------------------------------------------------------------------------ o painel */
@@ -1162,7 +1310,8 @@
       /* osciloscopio */
       const so = $c('div', 'sim-sec'); const ho = $c('h4');
       refs.oscB = $c('button', 'sim-b', ''); refs.oscB.onclick = () => { st.osc = !st.osc; gravaCfg(); pinta(); };
-      ho.append($c('span', null, 'Osciloscópio'), $c('span', 'esp'), refs.oscB);
+      refs.oscBase = seletorBase(st.oscBase || 'auto', v => { st.oscBase = v; gravaCfg(); oscDesenha(); });
+      ho.append($c('span', null, 'Osciloscópio'), $c('span', 'esp'), refs.oscBase, refs.oscB);
       refs.osc = $c('canvas', 'sim-osc'); refs.oscL = $c('div', 'sim-osc-l');
       refs.oscBox = $c('div'); refs.oscBox.append(refs.osc, refs.oscL);
       so.append(ho, refs.oscBox); corpo.append(so);
@@ -1254,6 +1403,7 @@
       /* legenda do osciloscopio */
       refs.oscL.textContent = '';
       st.osciloscopio.forEach((n, k) => { const s = $c('span'); const i = $c('i'); i.style.background = CORES_OSC[k]; s.append(i, document.createTextNode(n + ' ' + (r ? fmt(r.v[n], 'V') : ''))); s.title = 'clique para tirar'; s.onclick = () => osciloscopio(n, false); refs.oscL.append(s); });
+      refs.oscMed = $c('div', 'sim-osc-m'); refs.oscL.append(refs.oscMed);
     }
     /* cada conector com os pinos: o campo aplica a tensão (Enter), vazio = aberto (só mede) */
     function pintaConectores(forca) {
@@ -1334,10 +1484,28 @@
         refs.calc.append(box);
       } else if (inf && C.chaveDados(cc, inf.tipo)) refs.calc.append($c('div', 'vazio', 'Sem dados de datasheet — use "Recolher informações".'));
     }
+    function oscLegenda(leg) {
+      const m = refs.oscMed; if (!m) return;
+      m.textContent = '';
+      if (!leg) return;
+      let fRapido = 0;
+      for (const l of leg) {
+        const d = $c('div'); const i = $c('i'); i.style.background = l.cor;
+        d.append(i, document.createTextNode(l.texto));
+        if (l.aviso) { const a = $c('div', 'av', l.aviso); d.append(a); const p = pwmDaNet(l.nome); if (p) fRapido = Math.max(fRapido, p.f); }
+        m.append(d);
+      }
+      if (fRapido) {
+        const b = $c('button', 'sim-b', 'ver o PWM de verdade');
+        b.title = 'Deixa a simulação lenta o bastante (passo ≤ 1/8 do período) para o sinal amostrado mostrar o PWM — a placa anda bem devagar';
+        b.onclick = () => { st.velocidade = velocidadePara(fRapido); st.amostras = []; gravaCfg(); st.sujo = true; agenda(); pinta(); };
+        m.append(b);
+      }
+    }
     return {
       abre() { if (!el) cria(); if (el) { el.hidden = false; atualiza(true); } },
       fecha() { if (el) el.hidden = true; },
-      atualiza, calculos, oscCanvas: () => refs.osc || null,
+      atualiza, calculos, oscCanvas: () => refs.osc || null, oscLegenda,
     };
   })();
 

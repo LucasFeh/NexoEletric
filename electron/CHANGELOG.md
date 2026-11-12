@@ -4,6 +4,22 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.102.5 — 2026-11-12
+
+**Osciloscópio com a frequência certa.** Pedido do dono: "a frequência do osciloscópio tá bugada, não mostra a frequência
+certa, junta e vira um sinal nada a ver".
+- A causa: o passo do transiente (velocidade ÷ 1440, ~0,7 ms em tempo real) é maior que o período de um PWM rápido (20 kHz
+  = 50 µs). Nesse caso o pino do GPIO faz sigma-delta (liga ou desliga a cada passo para a média dar o duty), e os três
+  osciloscópios desenhavam esse trem de bits espremido na janela inteira de amostras — sem base de tempo nem medida.
+- Agora o osciloscópio (painel do Simulador, Analisar › Osciloscópio e o cartão do pad na PCB) tem **base de tempo**
+  (auto ou 1 µs/div … 1 s/div, 10 divisões), **gatilho** na subida (a imagem para), **medidas** (frequência e duty pelos
+  cruzamentos, Vmín/Vmáx/agora) e, quando o PWM é mais rápido que o passo, a **onda quadrada reconstruída** com a
+  frequência e o duty do GPIO e os níveis da alimentação do pino — marcada "reconstruído", com a média que a simulação usa
+  — na net do GPIO, na que ele alimenta por um resistor e no dreno/coletor do transistor que ele chaveia (invertida).
+- Botão **"ver o PWM de verdade"**: deixa a simulação lenta o bastante (passo ≤ 1/8 do período) para o sinal amostrado
+  mostrar o PWM.
+- O osciloscópio guarda as amostras de todo passo (6000) para o gatilho e a base de tempo; a base escolhida fica salva.
+
 ## 1.102.4 — 2026-11-12
 
 **Uma simulação por projeto.** Com a aba Simulador aberta, o "Simular" da aba Esquema do mesmo projeto também

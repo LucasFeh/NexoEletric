@@ -487,6 +487,12 @@
       if (!cartao || cartao.hidden || modoCartao !== 'osc' || !cartaoPad) return;
       const cv = cartao.querySelector('canvas'), lg = cartao.querySelector('.lg'); if (!cv) return;
       const S = serieApi(), A = S && netSerie ? S.le(netSerie) : [];
+      /* o osciloscopio do simulador (1.102.5): base de tempo, gatilho, frequencia/duty e o PWM rapido reconstruido */
+      if (S && S.desenha && A.length >= 2) {
+        const l = S.desenha(cv, netSerie, 'auto')[0];
+        if (lg) lg.textContent = l ? l.texto + (l.aviso ? ' · ' + l.aviso : '') : '';
+        return;
+      }
       const dpr = window.devicePixelRatio || 1, W = cv.clientWidth || 300, Hh = cv.clientHeight || 140;
       if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = Hh * dpr; }
       const c2 = cv.getContext('2d'); c2.setTransform(dpr, 0, 0, dpr, 0, 0); c2.clearRect(0, 0, W, Hh);
