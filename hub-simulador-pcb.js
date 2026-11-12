@@ -194,7 +194,9 @@
       return (v / p[0]).toFixed(2).replace('.', ',') + ' ' + p[1] + u;
     };
     const PREF = 'nexoSim.pcb3d';
-    const st = { ligado: (() => { try { return localStorage.getItem(PREF) !== '0'; } catch (_e) { return true; } })(), calc: true,
+    /* a aba Simulador do hub abre a placa com ?modo=sim3d: entra no 3D e liga a corrente sozinha */
+    const naAba = (() => { try { return new URLSearchParams(location.search).get('modo') === 'sim3d'; } catch (_e) { return false; } })();
+    const st = { ligado: naAba || (() => { try { return localStorage.getItem(PREF) !== '0'; } catch (_e) { return true; } })(), calc: true,
                  dados: null, res: null, versao: 0, ui: null, rotulos: [], setas: null, fase: 0, montado: 0 };
     let topo = window;
     try { topo = window.top && window.top.document ? window.top : window; } catch (_e) { topo = window; }
@@ -239,7 +241,7 @@
       u.el.querySelector('[data-a=calc]').classList.toggle('on', st.calc);
       const s = u.el.querySelector('.st'), ol = u.el.querySelector('ol');
       ol.textContent = '';
-      if (!st.dados) { s.textContent = 'Ligue o Simular na vista Esquema deste projeto: a corrente de cada pino vem de lá.'; return; }
+      if (!st.dados) { s.textContent = naAba ? 'Esperando a simulação do esquema (a aba Simulador roda as duas juntas)…' : 'Abra a aba Simulador (ou o Simular no Esquema): a corrente de cada pino vem da simulação do esquema.'; return; }
       if (!st.res) { s.textContent = 'calculando…'; return; }
       const nSeg = st.res.segs.filter(x => Math.abs(x.i) > 1e-6).length;
       s.textContent = (st.dados.modo === 'dc' ? 'DC' : 't = ' + fmt(st.dados.t, 's')) + ' · ' + nSeg + ' trechos com corrente · máx ' + fmt(st.res.imax, 'A') + (st.res.sem.length ? ' · ' + st.res.sem.length + ' pad(s) sem pino no esquema' : '');
@@ -371,6 +373,18 @@
         r.el.style.left = p.x + 'px'; r.el.style.top = p.y + 'px';
         if (!p.atras && !bate) postos.push(cx);
       }
+    }
+    if (naAba) {
+      /* na aba Simulador so a placa: sem o painel da direita e sem o filtro/camadas do canto */
+      const sty = document.createElement('style'); sty.textContent = '#splitR, #props, #cantoesq{display:none !important}'; document.head.append(sty);
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
+      let tentativas = 0;
+      const entra = () => {
+        if (H.em3d()) return;
+        try { if (window.HubMcpVista && typeof window.HubMcpVista.comando === 'function' && H.placa()) window.HubMcpVista.comando('vista3d'); } catch (_e) { /* ainda carregando */ }
+        if (++tentativas < 40) setTimeout(entra, 500);
+      };
+      setTimeout(entra, 600);
     }
     /* o 3D entra e sai, a placa muda, a simulacao chega: confere de tempos em tempos */
     let ultEm3d = false, ultPlaca = null;

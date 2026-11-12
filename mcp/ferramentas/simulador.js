@@ -52,6 +52,24 @@ function semTela(ctx, p, a) {
   const an = C.analisa(mt, res);
   return { mt, res, an, amostras, model, nets };
 }
+/* sem a vista, com as entradas: elas viram fontes (por cima das da config) */
+function semTelaComEntradas(ctx, p, a) {
+  if (!a.entradas) return semTela(ctx, p, a);
+  const s0 = ctx.schematic(p), L = ctx.libsDe(s0), hc = ctx.hc;
+  const model = hc.buildSchModel(s0), nets = hc.extractNets(model, L.schlib);
+  const comps = C.doEsquema(model, L.schlib, nets, hc);
+  const cfg = Object.assign({}, a.config || {});
+  cfg.fontes = Object.assign({}, cfg.fontes || {});
+  for (const [net, f] of Object.entries(C.entradasParaFontes(comps, a.entradas))) { if (f === null) cfg.fontes[net] = { desligada: true }; else cfg.fontes[net] = f; }
+  return semTela(ctx, p, Object.assign({}, a, { config: cfg }));
+}
+function conectoresDe(r) {
+  const { mt, an, res } = r;
+  return [...mt.comps.values()].filter(c => c.tipo === 'conector').map(c => ({ ref: c.ref, comment: c.comp.comment || '',
+    pinos: c.pinos.map(q => { const pin = an.pinos[c.ref + '-' + q.num] || {}; const f = mt.fontes.find(x => x.net === q.net);
+      return { pino: q.num, nome: q.name || '', net: q.net || '', v: pin.v, i: pin.i, entrada: f ? { v: f.v, origem: f.origem, corrente_entregue: (an.fontes.find(x => x.net === f.net) || {}).i } : null,
+               terra: !!q.net && mt.terra.includes(q.net), flutuando: !!q.net && (res.flutuantes || []).includes(q.net) }; }) }));
+}
 const resumoComp = c => ({ titulo: c.titulo, tipo: c.tipo, potencia: c.p, alertas: c.alertas });
 function saidaSemTela(r, a) {
   const { mt, res, an } = r;
@@ -130,6 +148,40 @@ module.exports = {
         const v = await vista(ctx, p.nome, args, Math.min(20, 6 + (+a.duracao || 0) * 2 + (+a.esperar_ms || 0) / 1000));
         if (!v || !v.ok) throw new ErroMcp((v && v.erro) || 'a vista não respondeu' + (v && v.semVista ? ': abra o esquema do projeto (vista_abrir {projeto, aba:"esquema"})' : ''));
         return v.dados;
+      },
+    },
+    {
+      nome: 'sim_conectores', titulo: 'Entradas e saídas da placa', leitura: true,
+      descricao: 'Os conectores da placa (J, CN, P, X...) pino a pino: net, tensão e corrente simuladas, se o pino é ENTRADA (tem fonte: aplicada, pelo nome da net, pelo comment do conector ou suposta), terra, ou saída/medida (aberto), e se está flutuando — a seção "Entradas e saídas" do painel. Ao vivo se a vista Esquema estiver simulando (a aba Simulador), senão pelo arquivo com `config`/`entradas`.',
+      entrada: { type: 'object', properties: { projeto: PROJETO, entradas: { type: 'object', additionalProperties: true, description: 'só sem a vista: {"CN2-1": 24, "+5V": 5}' }, config: CONFIG }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        if (!a.config && !a.entradas) {
+          const v = await vista(ctx, p.nome, { acao: 'conectores' }, 6).catch(() => null);
+          if (v && v.ok && Array.isArray(v.dados) && v.dados.length) return { fonte_dos_dados: 'vista Esquema aberta', conectores: v.dados };
+        }
+        const r = semTelaComEntradas(ctx, p, a);
+        return { fonte_dos_dados: 'arquivo', conectores: conectoresDe(r) };
+      },
+    },
+    {
+      nome: 'sim_testar', titulo: 'Aplicar tensões nas entradas e conferir o esperado', leitura: true,
+      descricao: 'O banco de testes da placa: aplica tensões nas ENTRADAS (`entradas`: {"CN2-1": 24, "J1-2": {v:5, onda:{forma:"quadrada", v:5, f:1000}}, "+12V": 12, "CN3-4": null = abre}; a chave é o pino REF-NUM do conector ou o nome da net), simula (modo "dc" ou "tempo" por `duracao` s) e CONFERE cada ponto de `verificar`: [{alvo: pino "U1-2" | net "+3.3V" | componente "R5", esperado, tol, min, max, grandeza: "v" (padrão) | "i" | "p"}] — devolve medido, ok/falhou e o motivo, mais os alertas (dissipação, dropout, LED, alimentação fora da faixa) e todos os conectores. Use para responder "sai o esperado?": defina o que cada saída deveria dar e leia os que falharam. ao_vivo (padrão, com a vista Esquema/aba Simulador aberta) aplica NA TELA — a pessoa vê; sem a vista, calcula pelo arquivo.',
+      entrada: { type: 'object', properties: { projeto: PROJETO, entradas: { type: 'object', additionalProperties: true },
+        verificar: { type: 'array', items: { type: 'object', properties: { alvo: { type: 'string' }, esperado: { type: 'number' }, tol: { type: 'number' }, min: { type: 'number' }, max: { type: 'number' }, grandeza: { type: 'string', enum: ['v', 'i', 'p'] } }, required: ['alvo'] } },
+        modo: { type: 'string', enum: ['dc', 'tempo'] }, duracao: { type: 'number' }, ao_vivo: { type: 'boolean' }, config: CONFIG }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        if (a.ao_vivo !== false && !a.config) {
+          const v = await vista(ctx, p.nome, { acao: 'testar', entradas: a.entradas || {}, verificar: a.verificar || [], modo: a.modo, duracao: a.duracao }, Math.min(20, 8 + (+a.duracao || 0) * 3)).catch(e => ({ ok: false, erro: e.message }));
+          if (v && v.ok && v.dados) return Object.assign({ fonte_dos_dados: 'vista Esquema aberta (aplicado na tela)' }, v.dados);
+          if (v && !v.semVista && v.erro && !/nenhum hub|nenhuma vista|não tem as rotas/.test(v.erro)) throw new ErroMcp(v.erro);
+        }
+        const r = semTelaComEntradas(ctx, p, a);
+        const res = C.verifica(r.an, a.verificar || []);
+        return { fonte_dos_dados: 'arquivo (sem a vista: a pessoa não está vendo)', modo: r.res.modo, t: r.res.t, convergiu: r.res.ok,
+          passou: res.every(x => x.ok), resultados: res, alertas: r.an.resumo.alertas, avisos: r.mt.avisos,
+          fontes: r.an.fontes.map(f => ({ net: f.net, v: f.v, origem: f.origem, corrente: f.i })), conectores: conectoresDe(r) };
       },
     },
     {

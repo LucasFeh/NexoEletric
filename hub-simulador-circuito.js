@@ -1215,8 +1215,47 @@
     return out;
   }
 
+  /* as ENTRADAS da placa para a config de fontes: {"CN2-1": 12, "+5V": 5, "J1-3": {v, onda}, "CN2-2": null} -> {net: {v,
+     onda} | null}. A chave e um pino (REF-NUM) ou o nome de uma net; null tira a fonte (o pino fica aberto, so mede) */
+  function entradasParaFontes(componentes, entradas) {
+    const porPino = new Map(), nets = new Set();
+    for (const c of componentes || []) for (const p of c.pinos || []) if (p.net) { porPino.set(c.ref + '-' + p.num, p.net); nets.add(p.net); }
+    const out = {};
+    for (const [k, val] of Object.entries(entradas || {})) {
+      const net = porPino.get(k) || (nets.has(k) ? k : null);
+      if (!net) throw new Error('entrada "' + k + '": não é pino (REF-NUM) nem net do esquema');
+      if (val === null || val === false) { out[net] = null; continue; }
+      const o = typeof val === 'object' ? val : { v: +val };
+      out[net] = { v: +o.v || 0, onda: o.onda || null, desligada: false };
+    }
+    return out;
+  }
+  /* VERIFICAR: [{alvo: "CN2-3" | net | "U1" (componente: a potencia), min, max, esperado, tol (padrao 5 % ou 50 mV),
+     grandeza: "v" | "i" | "p"}] contra a analise -> [{alvo, medido, ok, motivo}] */
+  function verifica(an, lista) {
+    return (lista || []).map(q => {
+      const g = q.grandeza || 'v';
+      let medido = NaN, de = '';
+      const pin = an.pinos[q.alvo];
+      if (pin) { medido = g === 'i' ? pin.i : g === 'p' ? pin.i * pin.v : pin.v; de = 'pino'; }
+      else if (an.nets[q.alvo]) { medido = an.nets[q.alvo].v; de = 'net'; }
+      else if (an.comps[q.alvo]) { const c = an.comps[q.alvo]; medido = g === 'i' ? c.corrente : c.p; de = 'componente'; }
+      if (!isFinite(medido)) return { alvo: q.alvo, ok: false, medido: null, motivo: 'não achei "' + q.alvo + '" (pino REF-NUM, net ou componente)' };
+      let ok = true, motivo = '';
+      if (q.esperado != null) {
+        const tol = q.tol != null ? +q.tol : Math.max(Math.abs(q.esperado) * 0.05, g === 'v' ? 0.05 : 1e-6);
+        ok = Math.abs(medido - q.esperado) <= tol;
+        motivo = 'esperado ' + q.esperado + ' ± ' + tol;
+      }
+      if (q.min != null && medido < q.min) { ok = false; motivo += (motivo ? '; ' : '') + 'abaixo do mínimo ' + q.min; }
+      if (q.max != null && medido > q.max) { ok = false; motivo += (motivo ? '; ' : '') + 'acima do máximo ' + q.max; }
+      const u = g === 'i' ? 'A' : g === 'p' ? 'W' : 'V';
+      return { alvo: q.alvo, de, grandeza: g, medido, medido_txt: fmt(medido, u), ok, motivo: motivo || 'dentro' };
+    });
+  }
+
   /* monta + guarda a config (para o analisa saber o modo dos GPIO) */
   function montaComConfig(componentes, cfg) { const m = monta(componentes, cfg); m.cfg = cfg || {}; return m; }
 
-  return { monta: montaComConfig, analisa, doEsquema, leValor, fmt, tensaoDoNome, RE_TERRA, commentResolvido, potenciaDoFootprint };
+  return { monta: montaComConfig, analisa, doEsquema, entradasParaFontes, verifica, leValor, fmt, tensaoDoNome, RE_TERRA, commentResolvido, potenciaDoFootprint };
 });

@@ -37,7 +37,9 @@
     cfg: { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [] },
     comps: null, mt: null, sim: null, res: null, an: null,
     sujo: true, ultimaAnalise: 0, folhaFluxo: -1, fluxos: null, fase: new Map(), vmax: 5,
-    hover: null, raf: 0, tUlt: 0, osciloscopio: [], amostras: [], erro: '',
+    hover: null, raf: 0, tUlt: 0, osciloscopio: [], amostras: [], erro: '', ultQuadro: 0,
+    /* a aba Simulador do hub (hub-simulador-aba.js) abre o esquema com ?modo=sim: ja simulando, painel fixo */
+    aba: (() => { try { return new URLSearchParams(location.search).get('modo') === 'sim'; } catch (_e) { return false; } })(),
   };
   const chave = () => { const v = VISTA(); return 'nexoSim.' + (v && v.projeto ? v.projeto() : ''); };
   function leCfg() {
@@ -107,6 +109,7 @@
   function laco(t) {
     st.raf = 0;
     if (!st.ligado) return;
+    st.ultQuadro = performance.now();
     const dtReal = st.tUlt ? Math.min(0.1, (t - st.tUlt) / 1000) : 1 / 60;
     st.tUlt = t;
     if (st.sujo) monta();
@@ -131,6 +134,13 @@
     st.raf = requestAnimationFrame(laco);
   }
   function agenda() { if (!st.raf && st.ligado) st.raf = requestAnimationFrame(laco); }
+  /* o iframe escondido (a aba Simulador no modo Placa 3D) para o requestAnimationFrame: o relogio de reserva segue
+     andando a simulacao, para a placa continuar recebendo a corrente */
+  setInterval(() => {
+    if (!st.ligado || performance.now() - st.ultQuadro < 450) return;
+    if (st.raf) { cancelAnimationFrame(st.raf); st.raf = 0; }
+    laco(performance.now());
+  }, 250);
   function amostra() {
     if (!st.osciloscopio.length || !st.res) return;
     const ult = st.amostras[st.amostras.length - 1];
@@ -499,6 +509,10 @@
   background:color-mix(in srgb, var(--panel, #1c1f26) 94%, transparent); color:var(--fg, #e5e7eb); border:1px solid var(--border, #333);
   border-radius:12px; box-shadow:0 14px 40px rgba(0,0,0,.45); font:12px var(--font, system-ui); backdrop-filter:blur(8px); overflow:hidden}
 .sim-p[hidden]{display:none}
+.sim-p.fixo{top:0; right:0; bottom:0; max-height:none; height:100%; border-radius:0; border-width:0 0 0 1px; width:350px; box-shadow:-8px 0 24px rgba(0,0,0,.25)}
+.sim-p.fixo .sim-hd{cursor:default}
+.sim-p.mini .sim-corpo{display:none}
+.sim-p.mini{width:auto; height:auto; bottom:auto; max-height:none; border-radius:0 0 0 10px; border-width:0 0 1px 1px}
 .sim-hd{display:flex; align-items:center; gap:7px; padding:9px 10px 8px 12px; border-bottom:1px solid var(--border, #333); cursor:move; user-select:none}
 .sim-hd b{font-size:13px; letter-spacing:.2px} .sim-hd .esp{flex:1}
 .sim-pt{width:9px; height:9px; border-radius:50%; background:#22c55e; box-shadow:0 0 8px #22c55e}
@@ -536,6 +550,14 @@
 .sim-calc .lf{font:11px var(--mono, ui-monospace, monospace); color:#93c5fd; margin-top:2px; word-break:break-word}
 .sim-calc .al{margin-top:6px; padding:5px 8px; border-radius:6px; background:rgba(239,68,68,.12); color:#fca5a5}
 .sim-calc .vazio{color:var(--fg-dim, #9ca3af)}
+.sim-con{margin:8px 0 3px; font-size:12px; color:var(--fg-dim, #9ca3af)} .sim-con b{color:var(--fg, #e5e7eb)}
+.sim-pino{display:grid; grid-template-columns:62px 1fr 64px 92px; gap:6px; align-items:center; padding:2px 0}
+.sim-pino .nm{font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sim-pino .net{color:var(--fg-dim, #9ca3af); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px}
+.sim-pino input{height:22px; border-radius:6px; border:1px solid var(--border, #333); background:var(--panel2, #23262e); color:inherit; padding:0 5px; font:inherit; text-align:right; min-width:0}
+.sim-pino input:disabled{opacity:.5}
+.sim-pino .med{text-align:right; font-variant-numeric:tabular-nums; font-weight:600; font-size:11.5px}
+.sim-pino .med.ent{color:#34d399}
 .sim-osc{width:100%; height:120px; display:block; border-radius:8px; background:#0b0e13}
 .sim-osc-l{display:flex; flex-wrap:wrap; gap:6px; margin-top:5px; font-size:11px}
 .sim-osc-l span{display:inline-flex; gap:4px; align-items:center; cursor:pointer} .sim-osc-l i{width:10px; height:3px; border-radius:2px; display:inline-block}
@@ -696,17 +718,20 @@
       css();
       const v = VISTA(); if (!v) return;
       const host = v.canvas().parentElement;
-      el = $c('div', 'sim-p'); el.setAttribute('role', 'region'); el.setAttribute('aria-label', 'Simulação');
+      el = $c('div', 'sim-p' + (st.aba ? ' fixo' : '')); el.setAttribute('role', 'region'); el.setAttribute('aria-label', 'Simulação');
       const hd = $c('div', 'sim-hd');
       refs.pt = $c('span', 'sim-pt'); refs.t = $c('span', 'sim-t', '');
       refs.play = $c('button', 'sim-b', '⏸'); refs.play.title = 'Pausar / continuar (o tempo da simulação)';
       const rel = $c('button', 'sim-b', '⟲'); rel.title = 'Religar: tudo descarregado em t = 0, como ao ligar a placa';
       const x = $c('button', 'sim-b', '×'); x.title = 'Desligar a simulação';
-      hd.append(refs.pt, $c('b', null, 'Simulação'), $c('span', 'esp'), refs.t, refs.play, rel, x);
+      const mini = $c('button', 'sim-b', '▾'); mini.title = 'Recolher/abrir o painel (a folha fica livre; a simulação continua)';
+      mini.onclick = () => { el.classList.toggle('mini'); mini.textContent = el.classList.contains('mini') ? '▸' : '▾'; try { localStorage.setItem('nexoSim.mini', el.classList.contains('mini') ? '1' : '0'); } catch (_e) { /* ok */ } };
+      try { if (localStorage.getItem('nexoSim.mini') === '1') { el.classList.add('mini'); mini.textContent = '▸'; } } catch (_e) { /* ok */ }
+      hd.append(refs.pt, $c('b', null, 'Simulação'), $c('span', 'esp'), refs.t, refs.play, rel, mini, x);
       refs.play.onclick = () => { st.rodando = !st.rodando; pinta(); agenda(); };
       rel.onclick = () => religa();
       x.onclick = () => liga(false);
-      arrasta(hd);
+      if (st.aba) x.hidden = true; else arrasta(hd);
       const corpo = $c('div', 'sim-corpo');
       /* modo e velocidade */
       const sm = $c('div', 'sim-sec');
@@ -735,6 +760,10 @@
       /* fontes */
       const sf = $c('div', 'sim-sec'); const hf = $c('h4'); hf.append($c('span', null, 'Fontes'), $c('span', 'esp'));
       refs.fontes = $c('div'); sf.append(hf, refs.fontes); corpo.append(sf);
+      /* entradas e saidas da placa: os conectores, pino a pino (pedido do dono: "aplicar tensão nas entradas da pcb
+         pelo simulador e ver os valores simulados") */
+      const se = $c('div', 'sim-sec'); const he = $c('h4'); he.append($c('span', null, 'Entradas e saídas (conectores)'), $c('span', 'esp'));
+      refs.es = $c('div', 'sim-es'); se.append(he, refs.es); corpo.append(se);
       /* resumo e alertas */
       const sr = $c('div', 'sim-sec'); sr.append($c('h4', null, 'Resumo'));
       refs.res = $c('div', 'sim-res'); refs.al = $c('ul', 'sim-al'); sr.append(refs.res, refs.al); corpo.append(sr);
@@ -817,6 +846,7 @@
         if (st.mt && !st.mt.fontes.length) refs.fontes.append($c('div', 'sim-calc', 'Nenhuma fonte. Clique num fio › Fonte, ou nomeie as nets de alimentação (+5V, 3V3, 12V…).'));
       }
       if (st.mt && a) for (const f of a.fontes) if (f._el) f._el.textContent = (f.origem === 'suposta' ? '⚠ ' : '') + 'entrega ' + fmt(f.i, 'A') + ' · ' + fmt(f.p, 'W') + (f.origem === 'suposta' ? ' — tensão suposta' : '');
+      pintaConectores(forca);
       /* resumo */
       refs.res.textContent = '';
       if (a) {
@@ -840,6 +870,58 @@
       /* legenda do osciloscopio */
       refs.oscL.textContent = '';
       st.osciloscopio.forEach((n, k) => { const s = $c('span'); const i = $c('i'); i.style.background = CORES_OSC[k]; s.append(i, document.createTextNode(n + ' ' + (r ? fmt(r.v[n], 'V') : ''))); s.title = 'clique para tirar'; s.onclick = () => osciloscopio(n, false); refs.oscL.append(s); });
+    }
+    /* cada conector com os pinos: o campo aplica a tensão (Enter), vazio = aberto (só mede) */
+    function pintaConectores(forca) {
+      if (!st.mt || !st.an) return;
+      const cons = [...st.mt.comps.values()].filter(c => c.tipo === 'conector' && c.pinos.some(p => p.net));
+      const fontes = st.cfg.fontes || {};
+      const assin = JSON.stringify([cons.map(c => c.ref + c.pinos.map(p => p.num + p.net).join()), Object.keys(fontes).sort().map(n => n + (fontes[n] && fontes[n].v))]);
+      if (forca || assin !== refs.assinEs) {
+        refs.assinEs = assin; refs.es.textContent = ''; refs.medidos = [];
+        if (!cons.length) refs.es.append($c('div', 'sim-calc', 'O esquema não tem conectores (J, CN, P, X…). Para aplicar tensão em qualquer ponto: clique no fio › Fonte.'));
+        for (const c of cons) {
+          const cab = $c('div', 'sim-con'); cab.append($c('b', null, c.ref), $c('span', null, ' ' + (c.comp.comment && !/CONE|CONN/i.test(c.comp.comment) ? c.comp.comment : '')));
+          cab.title = 'clique para ver o conector na folha'; cab.style.cursor = 'pointer';
+          cab.onclick = () => { const v = VISTA(); if (v) v.focar(c.ref); };
+          refs.es.append(cab);
+          for (const p of c.pinos.slice().sort((a, b) => String(a.num).localeCompare(String(b.num), undefined, { numeric: true }))) {
+            const ln = $c('div', 'sim-pino');
+            const nome = $c('span', 'nm', p.num + (p.name && p.name !== String(p.num) ? ' ' + p.name : ''));
+            const net = $c('span', 'net', p.net || '—');
+            const terra = p.net && (st.mt.terra || []).includes(p.net);
+            const inp = $c('input'); inp.placeholder = terra ? 'terra' : 'aberto';
+            inp.disabled = !p.net || terra;
+            const f = p.net && fontes[p.net];
+            const fa = !f && p.net ? st.mt.fontes.find(x => x.net === p.net) : null;
+            if (f && !f.desligada && f.v != null) inp.value = String(f.v).replace('.', ',');
+            else if (fa) inp.placeholder = String(fa.v).replace('.', ',') + ' auto';
+            inp.title = 'tensão aplicada neste pino (V) — Enter aplica, vazio = aberto (só mede)';
+            const aplica = () => {
+              const t = String(inp.value).trim();
+              if (!t) { if (fontes[p.net]) defineFonte(p.net, null); return; }
+              const v = parseFloat(t.replace(',', '.'));
+              if (isFinite(v)) defineFonte(p.net, { v, onda: null, desligada: false });
+            };
+            inp.onkeydown = ev => { if (ev.key === 'Enter') aplica(); };
+            inp.onchange = aplica;
+            const med = $c('span', 'med', '');
+            ln.append(nome, net, inp, med);
+            refs.es.append(ln);
+            refs.medidos.push({ el: med, net: p.net, key: c.ref + '-' + p.num, ent: !!(f || fa) });
+          }
+        }
+      }
+      for (const m of refs.medidos || []) {
+        const pin = st.an.pinos[m.key];
+        if (!m.net || !pin) { m.el.textContent = ''; continue; }
+        /* na entrada, a corrente que a fonte entrega (o pino do conector em si e so um ponto da net) */
+        const fe = m.ent ? st.an.fontes.find(x => x.net === m.net) : null;
+        const ii = fe && isFinite(fe.i) ? fe.i : pin.i;
+        m.el.textContent = fmt(pin.v, 'V') + (Math.abs(ii) > 1e-7 ? ' · ' + fmt(Math.abs(ii), 'A') : '');
+        m.el.title = m.ent ? 'entrada: a fonte entrega ' + fmt(Math.abs(ii), 'A') : (st.res.flutuantes || []).includes(m.net) ? 'flutuando' : 'saída/medida';
+        m.el.classList.toggle('ent', m.ent);
+      }
     }
     function calculos(ref) {
       if (!el) return;
@@ -868,14 +950,17 @@
   /* ------------------------------------------------------------------------------------------------ o botao na barra */
   const botao = (() => {
     let b = null;
+    /* dentro do hub, o botao do Esquema leva para a aba Simulador; na propria aba nao ha botao (ja simula) */
+    const topo = () => { try { return window.top !== window && typeof window.top.goTab === 'function' ? window.top : null; } catch (_e) { return null; } };
     function poe() {
       const tb = document.getElementById('schtb');
-      if (!tb || b) return;
+      if (!tb || b || st.aba) return;
       b = document.createElement('button');
       b.id = 'btnSim';
       b.title = 'Simular o circuito: tensão e corrente na folha, como no Falstad (mouse no pino mostra a tensão; clique na chave; roda no potenciômetro)';
       b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M2 12h3l2-6 4 12 3-9 2 3h6"/></svg><span class="lb">Simular</span>';
-      b.addEventListener('click', () => liga());
+      b.addEventListener('click', () => { const t = topo(); if (t && !st.ligado) t.goTab('sim'); else liga(); });
+      if (topo()) b.title = 'Abrir este esquema na aba Simulador: tensão e corrente na folha, como no Falstad';
       const erc = document.getElementById('btnErc');
       if (erc && erc.nextSibling) tb.insertBefore(b, erc.nextSibling); else tb.append(b);
     }
@@ -894,6 +979,12 @@
     host.addEventListener('mousedown', aoApertar, true);
     host.addEventListener('wheel', aoRodar, { capture: true, passive: false });
     window.addEventListener('keydown', e => { if (e.key === 'Escape' && menu.aberto()) menu.fecha(); });
+    if (st.aba) {
+      /* na aba Simulador o espaco e da simulacao: sai o painel da direita do Esquema (Configuracoes/Propriedades); a
+         edicao na folha continua a mesma */
+      const s = document.createElement('style'); s.textContent = '#splitR, #props{display:none !important}'; document.head.append(s);
+      setTimeout(() => { window.dispatchEvent(new Event('resize')); liga(true); }, 300);
+    }
     return true;
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { if (!instala()) setTimeout(instala, 500); });
@@ -913,6 +1004,13 @@
     return out;
   }
   function espera(ms) { return new Promise(r => setTimeout(r, ms)); }
+  function conectores() {
+    if (!st.mt || !st.an) return [];
+    return [...st.mt.comps.values()].filter(c => c.tipo === 'conector').map(c => ({ ref: c.ref, comment: c.comp.comment || '',
+      pinos: c.pinos.map(p => { const pin = st.an.pinos[c.ref + '-' + p.num] || {}; const f = st.mt.fontes.find(x => x.net === p.net);
+        return { pino: p.num, nome: p.name || '', net: p.net || '', v: pin.v, i: pin.i, entrada: f ? { v: f.v, origem: f.origem, corrente_entregue: (st.an.fontes.find(x => x.net === f.net) || {}).i } : null,
+                 terra: !!p.net && (st.mt.terra || []).includes(p.net), flutuando: !!p.net && (st.res.flutuantes || []).includes(p.net) }; }) }));
+  }
   async function mcp(a) {
     a = a || {};
     const acao = a.acao || 'estado';
@@ -948,6 +1046,29 @@
         const dur = +a.duracao || 0.1; const fim = st.res.t + dur; let n = 0;
         while (st.res.t < fim && n < 2e6) { st.res = st.sim.passo(10); n += 10; amostra(); }
         analisa(true); return estado(false);
+      }
+      case 'conectores': garante(); return conectores();
+      case 'entradas': {
+        /* {entradas: {"CN2-1": 12, "+5V": 5, "J1-3": {v, onda}, "CN2-2": null (abre)}}: pino REF-NUM ou net */
+        garante();
+        const mapa = C.entradasParaFontes(st.comps, a.entradas || {});
+        for (const [net, f] of Object.entries(mapa)) { if (f === null) delete st.cfg.fontes[net]; else st.cfg.fontes[net] = f; }
+        gravaCfg(); monta();
+        if (st.modo !== 'dc' && a.duracao) { const fim = st.res.t + +a.duracao; while (st.res.t < fim) { st.res = st.sim.passo(10); amostra(); } analisa(true); }
+        painel.atualiza(true);
+        return { aplicadas: mapa, conectores: conectores() };
+      }
+      case 'testar': {
+        /* aplica as entradas, anda o tempo (modo tempo) e confere: [{alvo, min, max, esperado, tol, grandeza}] */
+        garante();
+        if (a.modo) st.modo = a.modo === 'tempo' ? 'tempo' : 'dc';
+        const mapa = C.entradasParaFontes(st.comps, a.entradas || {});
+        for (const [net, f] of Object.entries(mapa)) { if (f === null) delete st.cfg.fontes[net]; else st.cfg.fontes[net] = f; }
+        gravaCfg(); monta();
+        if (st.modo !== 'dc') { const fim = st.res.t + (+a.duracao || 0.2); while (st.res.t < fim) { st.res = st.sim.passo(10); amostra(); } }
+        analisa(true); painel.atualiza(true);
+        const r = C.verifica(st.an, a.verificar || []);
+        return { modo: st.modo, t: st.res.t, aplicadas: mapa, passou: r.every(x => x.ok), resultados: r, alertas: st.an.resumo.alertas, avisos: st.mt.avisos, conectores: conectores() };
       }
       case 'limpar': st.cfg = { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [] }; st.osciloscopio = []; gravaCfg(); st.sujo = true; agenda(); return { limpo: true };
     }

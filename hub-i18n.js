@@ -48,6 +48,7 @@ const DICT = {
   /* abas */
   'tab.esquema':     'Esquema',
   'tab.pcb':         'PCB',
+  'tab.sim':         'Simulador',
   'tab.comp':        'Componentes',
   'tab.nets':        'Nets',
   'tab.fp':          'Footprints',
@@ -263,6 +264,7 @@ const DICT = {
 
   'tab.esquema':     'Schematic',
   'tab.pcb':         'PCB',
+  'tab.sim':         'Simulator',
   'tab.comp':        'Components',
   'tab.nets':        'Nets',
   'tab.fp':          'Footprints',

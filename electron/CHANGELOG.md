@@ -11,7 +11,13 @@ simulador que mostra tensão, corrente, igual ao Falstad, com uma área mostrand
 cálculo, bonito, usando as mesmas mecânicas de edição do esquema e da PCB, com acesso total ao MCP; dá pra ver a corrente
 passando; se der, a placa 3D com a direção da corrente nas trilhas e os cálculos em cima de cada" e "CI com tensão de
 alimentação, ponto de sinal, tudo mostrando bonitinho se eu coloco o mouse em cima do pino".
-- Botão **Simular** na barra do esquema. A simulação roda em cima do esquema de verdade (mesma edição: mexeu, refaz):
+- Aba **Simulador** ao lado de Esquema e PCB (pedido do dono: "era pra ser uma aba, uma área só pra simulação"): o esquema
+  do projeto já simulando, com o painel fixo à direita (recolhe pelo ▾), a **Placa 3D** com a corrente nas trilhas, ou os
+  dois **lado a lado** — as duas vistas andam juntas. O botão Simular do Esquema leva para ela.
+- **Entradas e saídas da placa** (pedido do dono: "aplicar tensão nas entradas da PCB pelo simulador e ver os valores"):
+  cada conector pino a pino no painel — digite a tensão no pino de entrada (Enter aplica; vazio = aberto) e veja ao lado a
+  tensão e a corrente simuladas de todos os pinos; a fonte automática (pelo nome da net ou suposta) aparece como "auto".
+- Na mesma simulação do Esquema (botão **Simular**, fora do hub) e na aba: a simulação roda em cima do esquema de verdade (mesma edição: mexeu, refaz):
   os fios pintados pela tensão (verde positivo, vermelho negativo), os **pontos andando no sentido da corrente** (mais
   rápidos quanto maior), por dentro dos componentes de dois pinos também, o **LED acende** na cor dele com o brilho da
   corrente e cada net ganha o rótulo da tensão.
@@ -36,8 +42,11 @@ alimentação, ponto de sinal, tudo mostrando bonitinho se eu coloco o mouse em 
   setas andam no sentido dela e o rótulo em cima de cada trilha traz I, R, ΔV e ΔT; a lista ao lado traz a conta
   (R = ρ·L/(w·t), ΔV = I·R, P = I²·R, ΔT pela IPC-2221 e a corrente máxima para +10 °C). A corrente de cada pino vem da
   simulação do Esquema e se divide pelo cobre (trilhas, vias e polígonos).
-- MCP, grupo **sim**: `sim_rodar`, `sim_pinos`, `sim_componente`, `sim_controlar` (tudo o que o painel faz, ao vivo) e
-  `sim_trilhas`; a ação `simulador` da vista ao vivo nos dois hubs (o Python e o da janela Rust).
+- MCP, grupo **sim**: `sim_rodar`, `sim_pinos`, `sim_componente`, `sim_controlar` (tudo o que o painel faz, ao vivo),
+  `sim_trilhas`, `sim_conectores` (as entradas e saídas da placa) e **`sim_testar`** — a IA aplica tensões nas entradas
+  (`{"CN2-1": 24}`), simula e confere cada saída contra o esperado (`[{alvo:"J2-1", esperado:6}, {alvo:"LD1", grandeza:"i",
+  max:0.02}]`), com ok/falhou e o motivo; com a aba aberta, aplica na tela. A ação `simulador` da vista ao vivo nos dois hubs
+  (o Python e o da janela Rust).
 
 ## 1.100.0 — 2026-11-12
 

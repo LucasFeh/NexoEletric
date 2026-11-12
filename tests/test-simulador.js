@@ -13,7 +13,8 @@
    6. a corrente nas trilhas: a lei de Kirchhoff no cobre (o que entra num pad sai pelas trilhas), R = ρ·L/(w·t);
    7. as placas do acervo (Projects/, só leitura) convergem;
    8. o MCP: o grupo sim registrado, sim_rodar/sim_componente/sim_trilhas pelo arquivo;
-   9. as vistas: os ganchos no schframe.js/pcbframe.js e os <script> nas cascas, a ação "simulador" nos dois hubs. */
+   9. as vistas: os ganchos no schframe.js/pcbframe.js e os <script> nas cascas, a ação "simulador" nos dois hubs, a aba
+      Simulador do hub (hub-simulador-aba.js) e as entradas pelos conectores (sim_testar). */
 'use strict';
 const assert = require('assert');
 const fs = require('fs'), path = require('path');
@@ -190,6 +191,26 @@ caso('contas: Ohm com sentido, potência acima da nominal pelo footprint, GPIO',
   perto(x.an.pinos['U1-2'].i, 0.08, 0.01, 'consumo do ESP32 no pino 3V3');
 });
 
+caso('entradas pelos conectores e a verificação do esperado (sim_testar)', () => {
+  const comps = [
+    { ref: 'J1', comment: 'ENTRADA', pinos: [pin(1, '1', 'ENT'), pin(2, '2', 'GND')] },
+    { ref: 'R1', valor: '470', pinos: [pin(1, '1', 'ENT'), pin(2, '2', 'A')] }, { ref: 'LD1', comment: 'VERMELHO', pinos: [pin('A', 'A', 'A'), pin('K', 'K', 'GND')] },
+    { ref: 'R2', valor: '10k', pinos: [pin(1, '1', 'ENT'), pin(2, '2', 'S')] }, { ref: 'R3', valor: '10k', pinos: [pin(1, '1', 'S'), pin(2, '2', 'GND')] },
+    { ref: 'J2', comment: 'SAIDA', pinos: [pin(1, '1', 'S'), pin(2, '2', 'GND')] },
+  ];
+  const f = C.entradasParaFontes(comps, { 'J1-1': 12 });
+  assert.deepStrictEqual(Object.keys(f), ['ENT']);
+  assert.throws(() => C.entradasParaFontes(comps, { 'J9-1': 5 }), /não é pino/);
+  const x = roda(comps, { fontes: f });
+  const r = C.verifica(x.an, [{ alvo: 'J2-1', esperado: 6 }, { alvo: 'S', min: 5.9, max: 6.1 }, { alvo: 'LD1', grandeza: 'i', max: 0.02 }, { alvo: 'R1', grandeza: 'p', max: 0.25 }, { alvo: 'X9' }]);
+  assert.ok(r[0].ok && r[1].ok, 'divisor na saída J2: ' + JSON.stringify(r.slice(0, 2)));
+  assert.ok(!r[2].ok && /acima do máximo/.test(r[2].motivo), 'LED com 21 mA passa do máximo: ' + JSON.stringify(r[2]));
+  assert.ok(r[3].ok, 'R1 dissipa ~0,2 W');
+  assert.ok(!r[4].ok && /não achei/.test(r[4].motivo));
+  const sem = roda(comps, {});
+  assert.ok(!sem.mt.fontes.some(q => q.net === 'ENT'), 'sem a entrada aplicada a net fica aberta');
+});
+
 /* ------------------------------------------------------------------ 6. a corrente nas trilhas */
 caso('trilhas: Kirchhoff no cobre e R = ρ·L/(w·t)', () => {
   const eb = {
@@ -259,6 +280,11 @@ caso('ganchos nas vistas, <script> nas cascas, ação "simulador" nos dois hubs'
   assert.ok(/'simulador'/.test(ler('mcp/rotas_hub.py')), 'rotas_hub.py');
   assert.ok(/"simulador"/.test(ler('rust/crates/nexo-hub/src/mcp.rs')), 'nexo-hub (Rust)');
   assert.ok(/case 'simulador'/.test(ler('mcp/hub-mcpvista.js')), 'hub-mcpvista.js');
+  const hub = ler('hub.html');
+  assert.ok(/\{ id:'sim', key:'tab\.sim' \}/.test(hub) && /data-pane="sim"/.test(hub) && /HubSimAba\.pane/.test(hub) && /hub-simulador-aba\.js/.test(hub), 'a aba Simulador no hub.html');
+  assert.ok((ler('hub-i18n.js').match(/'tab\.sim':/g) || []).length === 2, 'tab.sim em pt e en');
+  assert.ok(/modo=sim'/.test(ler('hub-simulador-aba.js')) && /modo=sim3d'/.test(ler('hub-simulador-aba.js')), 'a aba abre as duas vistas no modo da simulação');
+  for (const k of ['sim_conectores', 'sim_testar']) assert.ok(require('../mcp/ferramentas/simulador.js').ferramentas.some(t => t.nome === k), k);
 });
 
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');

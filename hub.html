@@ -64,6 +64,7 @@
 <link rel="stylesheet" href="hub-tema.css">
 <script src="hub-tema.js"></script>
 <script src="hub-semhub.js" defer></script>
+<script src="hub-simulador-aba.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
@@ -823,6 +824,7 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
     <div class="pane" data-pane="esquema"></div>
     <div class="pane" data-pane="pcb"></div>
     <div class="pane" data-pane="gerber"></div>
+    <div class="pane" data-pane="sim"></div>
 
     <div class="pane" data-pane="comp">
       <div class="comp-grid">
@@ -1307,6 +1309,8 @@ const TABS = [
       /* Componentes e Nets sairam da PCB (pedido do dono, 2026-10-14): a vista PCB ja tem a lista
          de componentes no painel e o realce de net no Ctrl+clique */
   ]},
+  /* 1.101.0: o Simulador (hub-simulador-aba.js) — uma area so para a simulacao, ao lado do Esquema e da PCB */
+  { id:'sim', key:'tab.sim' },
   /* Biblioteca nao depende do projeto: o contador vem das libs, nao do detalhe.
      UMA aba so, desde 2026-09-17: as quatro sub-abas viraram tres VISTAS do mesmo acervo,
      e elas moram no aside da direita (hub-libview.js). A busca da esquerda e uma so para as
@@ -1439,6 +1443,7 @@ function renderPipeline() {
    em editar e nao leva pra tela de edicao". */
 function goTab(id) {
   if (id === 'comp' || id === 'nets') id = 'pcb';     /* as sub-abas que sairam (link ou URL antigos) */
+  if (id === 'simulador' || id === 'simulacao') id = 'sim';
   if (id === 'libsym') {
     S.tab = 'lib'; syncURL(); renderTabs(); renderPanes();
     if (window.__hubLibView) { try { window.__hubLibView.ir('componentes'); } catch (e) {} }
@@ -3387,6 +3392,11 @@ function renderPanes() {
     }
     return;
   }
+  if (S.tab === 'sim') {
+    const pane = document.querySelector('.pane[data-pane="sim"]');
+    if (pane.dataset.proj !== S.projId && window.HubSimAba && proj()) { pane.textContent = ''; pane.append(HubSimAba.pane(proj().name)); pane.dataset.proj = S.projId; }
+    return;
+  }
   if (S.tab === 'comp') return renderComponents();
   if (S.tab === 'nets') {
     const tb = $('#netRows'); tb.textContent = '';
@@ -4717,7 +4727,7 @@ async function loadProject(id) {
      ficavam vivas e escondidas com o projeto ANTERIOR, cada uma relendo o disco a cada aviso.
      Trocou de projeto, saem; a da frente o renderPanes remonta, as outras quando a aba abrir. */
   if (trocouProjeto) {
-    document.querySelectorAll('.pane[data-pane="esquema"], .pane[data-pane="pcb"], .pane[data-pane="gerber"]')
+    document.querySelectorAll('.pane[data-pane="esquema"], .pane[data-pane="pcb"], .pane[data-pane="gerber"], .pane[data-pane="sim"]')
       .forEach(p => { p.textContent = ''; delete p.dataset.proj; });
     const nd = $('#ndViewport');
     if (nd) { nd.textContent = ''; delete nd.dataset.proj; }
