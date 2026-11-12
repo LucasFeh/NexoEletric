@@ -7810,6 +7810,12 @@ const V = {
 
 /* os ganchos do MCP (mcp/hub-mcpvista.js): a IA foca um ponto, seleciona por id/ref e roda
    qualquer acao da barra/teclado pelo nome (drc, gerber, pdf, repour...) */
+/* 1.101.0: os ganchos da CORRENTE NAS TRILHAS (hub-simulador-pcb.js): a vista 3D, a placa efetiva e o projeto */
+window.__hubPcbSim = {
+  vista3d: () => V3, em3d: () => !!modo3d, placa: () => EB,
+  projeto: () => new URLSearchParams(location.search).get('p') || '',
+  host3d: () => $('v3d'),
+};
 window.HubMcpVista = {
   focar(x, y, zoom){ if (isNum(x) && isNum(y)) { view.cx = x; view.cy = y; if (isNum(zoom) && zoom > 0) view.scale = zoom; pede(); } return true; },
   selecionar(o){

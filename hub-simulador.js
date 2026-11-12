@@ -1,0 +1,962 @@
+/* NexoEletric - hub-simulador.js — o SIMULADOR na vista Esquema (1.101.0).
+   Pedido do dono (2026-11-12): "um simulador que mostra tensão, corrente, igual ao Falstad, com uma área mostrando
+   cálculo, podendo suprimir ou não o cálculo, bonito, usando as mesmas mecânicas de edição do esquema e da PCB, com
+   canvas para orientar e acesso total ao MCP; dá para ver a corrente passando" e "CI com tensão de alimentação, ponto
+   de sinal, tudo mostrando bonitinho se eu coloco o mouse em cima do pino".
+
+   O simulador roda EM CIMA do esquema de verdade (o mesmo canvas, a mesma edição: mexeu no esquema, a simulação
+   refaz): hub-simulador-circuito.js reconhece os componentes, hub-simulador-motor.js resolve. Na folha:
+     · os fios pintados pela tensão (verde = positivo, vermelho = negativo, cinza = 0 V) e os PONTOS andando no sentido
+       da corrente (mais rápidos quanto maior a corrente), também por dentro dos componentes de dois pinos
+     · o LED acende na cor dele com o brilho da corrente; o rótulo de tensão em cada net
+     · mouse no PINO: tensão, corrente entrando/saindo, o papel (alimentação na faixa ✓, terra, GPIO lê 0/1, saída)
+     · mouse no COMPONENTE: os cálculos com a fórmula e os números (Ohm, potência, divisor, Vf do LED, β, dropout...)
+     · clique na chave/jumper abre e fecha, o botão fica apertado enquanto o clique segura, a roda gira o potenciômetro
+     · clique no pino de um CI: GPIO alto / baixo / PWM / entrada / pull-up; clique no fio: fonte nesta net, osciloscópio
+   O painel (canto direito): ligar/pausar/religar, Tempo real (transiente desde o "ligar") ou DC, velocidade, o que
+   mostrar, as FONTES (deduzidas pelo nome das nets, pelo conector, ou supostas — tudo editável), os alertas, a área
+   de CÁLCULOS (o olho suprime) e o OSCILOSCÓPIO.
+   A simulação vai para o topo da janela (window.top.__nexoSim + evento 'nexo-sim'): a vista 3D da PCB mostra a
+   corrente nas trilhas (hub-simulador-pcb.js). O MCP comanda tudo por HubSimulador.mcp (mcp/ferramentas/simulador.js).
+
+   Ganchos da vista (schframe.js): window.__hubSimVista (o modelo, as nets, a câmera), HubSimulador.desenha(ctx, cam) no
+   drawWorld e HubSimulador.mudou() no reapply. */
+(function () {
+  'use strict';
+  if (typeof window === 'undefined' || window.HubSimulador) return;
+  const M = window.HubSimMotor, C = window.HubSimCircuito;
+  const VISTA = () => window.__hubSimVista || null;
+  const fmt = (v, u) => C.fmt(v, u);
+  const $c = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+
+  /* ------------------------------------------------------------------------------------------------ estado */
+  const st = {
+    ligado: false, rodando: true, modo: 'tempo', velocidade: 1,
+    mostrar: { pontos: true, cores: true, tensoes: true, valores: false, brilho: true },
+    calc: true, osc: false, fixo: null,
+    cfg: { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [] },
+    comps: null, mt: null, sim: null, res: null, an: null,
+    sujo: true, ultimaAnalise: 0, folhaFluxo: -1, fluxos: null, fase: new Map(), vmax: 5,
+    hover: null, raf: 0, tUlt: 0, osciloscopio: [], amostras: [], erro: '',
+  };
+  const chave = () => { const v = VISTA(); return 'nexoSim.' + (v && v.projeto ? v.projeto() : ''); };
+  function leCfg() {
+    try {
+      const j = JSON.parse(localStorage.getItem(chave()) || 'null');
+      if (j && typeof j === 'object') {
+        Object.assign(st.cfg, j.cfg || {});
+        if (j.mostrar) Object.assign(st.mostrar, j.mostrar);
+        if (j.modo) st.modo = j.modo;
+        if (j.velocidade) st.velocidade = j.velocidade;
+        if (j.calc != null) st.calc = j.calc;
+        if (j.osciloscopio) st.osciloscopio = j.osciloscopio;
+      }
+    } catch (_e) { /* sem storage */ }
+  }
+  function gravaCfg() {
+    try { localStorage.setItem(chave(), JSON.stringify({ cfg: st.cfg, mostrar: st.mostrar, modo: st.modo, velocidade: st.velocidade, calc: st.calc, osciloscopio: st.osciloscopio })); } catch (_e) { /* sem storage */ }
+  }
+
+  /* ------------------------------------------------------------------------------------------------ montar e rodar */
+  function dtDaVelocidade() { return Math.min(1e-3, Math.max(1e-8, st.velocidade / 60 / 24)); }
+  function monta() {
+    const v = VISTA();
+    if (!v) { st.erro = 'a vista Esquema não ofereceu os ganchos do simulador'; return false; }
+    try {
+      st.comps = C.doEsquema(v.model(), v.slib(), v.nets(), window.HubCore, { emergencia: v.emergencia });
+      st.mt = C.monta(st.comps, st.cfg);
+      st.sim = M.cria(st.mt.elementos, { terra: st.mt.terra, dt: dtDaVelocidade() });
+      st.res = st.modo === 'dc' ? st.sim.dc() : st.sim.liga();
+      if (st.modo !== 'dc') st.res = st.sim.passo(1);
+      st.erro = '';
+    } catch (e) {
+      console.warn('simulador:', e);
+      st.erro = 'a simulação falhou: ' + (e && e.message || e);
+      st.res = null;
+    }
+    st.sujo = false; st.amostras = []; st.folhaFluxo = -1;
+    analisa(true);
+    return !st.erro;
+  }
+  function analisa(forca) {
+    if (!st.res || !st.mt) { st.an = null; painel.atualiza(); return; }
+    const agora = performance.now();
+    if (!forca && agora - st.ultimaAnalise < 90) return;
+    st.ultimaAnalise = agora;
+    st.an = C.analisa(st.mt, st.res);
+    let vm = 1;
+    for (const [n, x] of Object.entries(st.res.v)) if (!n.includes('#') && isFinite(x)) vm = Math.max(vm, Math.abs(x));
+    st.vmax = vm;
+    calculaFluxos();
+    publica();
+    painel.atualiza();
+  }
+  /* o resultado vai para o topo da janela: a vista PCB (3D) mostra a corrente nas trilhas */
+  function publica() {
+    let topo = window;
+    try { topo = window.top && window.top.document ? window.top : window; } catch (_e) { topo = window; }
+    const v = VISTA();
+    const dados = st.ligado && st.an ? { projeto: v && v.projeto ? v.projeto() : '', t: st.res.t, modo: st.res.modo, versao: Date.now(),
+      pinos: Object.fromEntries(Object.entries(st.an.pinos).map(([k, p]) => [k, { v: p.v, i: p.i, net: p.net }])),
+      nets: Object.fromEntries(Object.entries(st.an.nets).filter(([n]) => !n.includes('#')).map(([n, x]) => [n, x.v])),
+      comps: Object.fromEntries(Object.entries(st.an.comps).map(([r, c]) => [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor }])) } : null;
+    try { topo.__nexoSim = dados; topo.dispatchEvent(new CustomEvent('nexo-sim', { detail: dados })); } catch (_e) { /* outra origem */ }
+  }
+
+  /* o laço: transiente pelo orçamento de tempo de cada quadro, desenho a ~30 quadros/s */
+  function laco(t) {
+    st.raf = 0;
+    if (!st.ligado) return;
+    const dtReal = st.tUlt ? Math.min(0.1, (t - st.tUlt) / 1000) : 1 / 60;
+    st.tUlt = t;
+    if (st.sujo) monta();
+    if (st.rodando && st.modo === 'tempo' && st.sim && st.res) {
+      st.sim.dt = dtDaVelocidade();
+      const alvo = st.velocidade * dtReal;
+      let n = Math.max(1, Math.round(alvo / st.sim.dt));
+      const t0 = performance.now();
+      while (n > 0 && performance.now() - t0 < 14) {
+        const k = Math.min(n, 4);
+        try { st.res = st.sim.passo(k); } catch (e) { st.erro = 'o transiente falhou: ' + e.message; st.rodando = false; break; }
+        n -= k;
+        amostra();
+      }
+      analisa(false);
+    }
+    /* os pontos andam mesmo no DC (a corrente de regime) */
+    if (st.rodando) andaPontos(dtReal);
+    const v = VISTA();
+    if (v) v.redesenha();
+    oscDesenha();
+    st.raf = requestAnimationFrame(laco);
+  }
+  function agenda() { if (!st.raf && st.ligado) st.raf = requestAnimationFrame(laco); }
+  function amostra() {
+    if (!st.osciloscopio.length || !st.res) return;
+    const ult = st.amostras[st.amostras.length - 1];
+    if (ult && st.res.t - ult.t < st.velocidade / 400) return;
+    st.amostras.push({ t: st.res.t, v: st.osciloscopio.map(n => st.res.v[n]) });
+    if (st.amostras.length > 1200) st.amostras.splice(0, st.amostras.length - 1200);
+  }
+
+  /* ------------------------------------------------------------------------------------------------ corrente nos fios */
+  /* Por net da folha ativa: o grafo dos trechos de fio (partidos onde algo encosta no meio), a corrente que cada pino
+     joga na net, e os nomeadores (rótulo, power, port) num nó só que fecha a conta com o resto da net (a corrente "pula"
+     pelo nome, como na folha). Resolve a rede de condutâncias (1/comprimento): a corrente de cada trecho. */
+  function calculaFluxos() {
+    const v = VISTA();
+    st.fluxos = null;
+    if (!v || !st.an) return;
+    const si = v.folha(), sh = v.model().sheets[si], nets = v.nets();
+    if (!sh) return;
+    st.folhaFluxo = si;
+    const K = (x, y) => Math.round(x * 2) + '|' + Math.round(y * 2);
+    const porNet = new Map();
+    const net = n => { let g = porNet.get(n); if (!g) { g = { nos: new Map(), segs: [], inj: new Map(), nomeados: new Set() }; porNet.set(n, g); } return g; };
+    const no = (g, x, y) => { const k = K(x, y); if (!g.nos.has(k)) g.nos.set(k, { x, y, i: g.nos.size }); return k; };
+    const wn = (nets.wireNet && nets.wireNet[si]) || [];
+    const pontos = new Map();     // net -> [{x,y}] pontos que podem cair no meio de um trecho
+    const pp = (n, x, y) => { if (!pontos.has(n)) pontos.set(n, []); pontos.get(n).push({ x, y }); };
+    sh.wires.forEach((w, wi) => { const n = wn[wi]; if (!n) return; for (const p of w.pts || []) pp(n, p[0], p[1]); });
+    for (const c of st.comps || []) if (c.folha === si) for (const p of c.pinos) if (p.net) pp(p.net, p.x, p.y);
+    const nomeadores = [].concat(sh.netlabels || [], sh.powers || [], sh.junctions || []);
+    for (const l of sh.netlabels || []) pp(l.net, l.x, l.y);
+    for (const l of sh.powers || []) pp(l.net, l.x, l.y);
+    sh.wires.forEach((w, wi) => {
+      const n = wn[wi]; if (!n) return;
+      const g = net(n), pts = w.pts || [], ps = pontos.get(n) || [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [x1, y1] = pts[i], [x2, y2] = pts[i + 1];
+        const L = Math.hypot(x2 - x1, y2 - y1); if (L < 1e-6) continue;
+        const ux = (x2 - x1) / L, uy = (y2 - y1) / L;
+        const meio = [];
+        for (const q of ps) {
+          const t = (q.x - x1) * ux + (q.y - y1) * uy;
+          if (t <= 0.5 || t >= L - 0.5) continue;
+          if (Math.abs((q.x - x1) * uy - (q.y - y1) * ux) <= 0.5) meio.push(t);
+        }
+        meio.sort((a, b) => a - b);
+        let ta = 0;
+        for (const tb of meio.concat([L])) {
+          if (tb - ta < 0.5) continue;
+          const a = { x: x1 + ux * ta, y: y1 + uy * ta }, b = { x: x1 + ux * tb, y: y1 + uy * tb };
+          g.segs.push({ a: no(g, a.x, a.y), b: no(g, b.x, b.y), ax: a.x, ay: a.y, bx: b.x, by: b.y, len: tb - ta, id: si + ':' + wi + ':' + i + ':' + Math.round(ta), i: 0 });
+          ta = tb;
+        }
+      }
+    });
+    for (const c of st.comps || []) if (c.folha === si) for (const p of c.pinos) {
+      if (!p.net) continue;
+      const pin = st.an.pinos[c.ref + '-' + p.num];
+      if (!pin || !isFinite(pin.i)) continue;
+      const g = net(p.net), k = no(g, p.x, p.y);
+      g.inj.set(k, (g.inj.get(k) || 0) - pin.i);   // o pino joga na net o contrário do que entra no componente
+    }
+    for (const l of [].concat(sh.netlabels || [], sh.powers || [])) { const g = porNet.get(l.net); if (g) g.nomeados.add(no(g, l.x, l.y)); }
+    for (const p of sh.ports || []) { const g = porNet.get(p.net); if (g) g.nomeados.add(no(g, p.x, p.y)); }
+    void nomeadores;
+    const todos = [];
+    for (const [n, g] of porNet) {
+      if (!g.segs.length) continue;
+      /* nós: os nomeados viram um só (o índice 0) */
+      const idx = new Map(); let nn = 1;
+      for (const k of g.nos.keys()) idx.set(k, g.nomeados.has(k) ? 0 : nn++);
+      const temNome = g.nomeados.size > 0;
+      const N = nn - 1;   // incógnitas: nós 1..nn-1 (o 0 é a referência: os nomeados, ou o primeiro nó)
+      if (!temNome) { // sem nomeador: o primeiro nó vira a referência
+        const k0 = g.nos.keys().next().value; const ant = idx.get(k0);
+        for (const [k, i] of idx) if (i > ant) idx.set(k, i - 1);
+        idx.set(k0, 0);
+      }
+      const n2 = temNome ? N : N - 1;
+      if (n2 <= 0 && !g.segs.some(s => idx.get(s.a) !== idx.get(s.b))) continue;
+      const A = new Float64Array(Math.max(1, n2 * n2)), b = new Float64Array(Math.max(1, n2));
+      for (const s of g.segs) {
+        const a = idx.get(s.a), c = idx.get(s.b), gg = 1 / Math.max(s.len, 1);
+        if (a) A[(a - 1) * n2 + a - 1] += gg;
+        if (c) A[(c - 1) * n2 + c - 1] += gg;
+        if (a && c) { A[(a - 1) * n2 + c - 1] -= gg; A[(c - 1) * n2 + a - 1] -= gg; }
+      }
+      for (let i = 0; i < n2; i++) A[i * n2 + i] += 1e-9;
+      for (const [k, ij] of g.inj) { const i = idx.get(k); if (i) b[i - 1] += ij; }
+      if (n2 > 0) M.resolve(A, b, n2);
+      const pot = i => i === 0 ? 0 : b[i - 1];
+      for (const s of g.segs) { s.i = (pot(idx.get(s.a)) - pot(idx.get(s.b))) / Math.max(s.len, 1); s.net = n; todos.push(s); }
+    }
+    st.fluxos = todos;
+  }
+
+  function andaPontos(dt) {
+    if (!st.fluxos) return;
+    for (const s of st.fluxos) {
+      const v = velocidadePonto(s.i);
+      if (!v) continue;
+      st.fase.set(s.id, ((st.fase.get(s.id) || 0) + v * dt));
+    }
+    if (st.an) for (const [ref, c] of Object.entries(st.an.comps)) {
+      if (c.corrente == null) continue;
+      const v = velocidadePonto(c.corrente);
+      if (v) st.fase.set('c:' + ref, (st.fase.get('c:' + ref) || 0) + v * dt);
+    }
+  }
+  /* pixels por segundo na tela: logarítmico na corrente (1 µA anda devagar, 1 A voa) */
+  function velocidadePonto(i) {
+    const a = Math.abs(i);
+    if (!(a > 2e-7)) return 0;
+    return Math.sign(i) * Math.min(220, 14 + 26 * Math.log10(a / 2e-7));
+  }
+
+  /* ------------------------------------------------------------------------------------------------ desenho na folha */
+  function corDaTensao(v, alfa) {
+    if (!isFinite(v)) return 'rgba(140,140,150,' + (alfa || 1) + ')';
+    const t = Math.max(-1, Math.min(1, v / st.vmax));
+    const g = [128, 134, 145];
+    const fim = t >= 0 ? [34, 197, 94] : [239, 68, 68];
+    const k = Math.pow(Math.abs(t), 0.5);
+    const c = g.map((x, i) => Math.round(x + (fim[i] - x) * k));
+    return 'rgba(' + c.join(',') + ',' + (alfa == null ? 1 : alfa) + ')';
+  }
+  function desenha(ctx, cam) {
+    if (!st.ligado || !st.an) return;
+    const v = VISTA(); if (!v) return;
+    const si = v.folha();
+    if (si !== st.folhaFluxo) calculaFluxos();
+    const px = 1 / cam.scale;
+    ctx.save();
+    /* fios pintados pela tensao */
+    if (st.mostrar.cores && st.fluxos) {
+      ctx.lineCap = 'round';
+      ctx.lineWidth = Math.max(3.2 * px, 14);   // cobre o fio da folha mesmo de perto
+      for (const s of st.fluxos) {
+        ctx.strokeStyle = corDaTensao(st.res.v[s.net], 0.95);
+        ctx.beginPath(); ctx.moveTo(s.ax, s.ay); ctx.lineTo(s.bx, s.by); ctx.stroke();
+      }
+    }
+    /* brilho dos LEDs */
+    if (st.mostrar.brilho) for (const c of st.comps || []) {
+      if (c.folha !== si) continue;
+      const a = st.an.comps[c.ref];
+      if (!a || !a.brilho || a.brilho < 0.02) continue;
+      const cx = c.pinos.reduce((s, p) => s + p.x, 0) / c.pinos.length, cy = c.pinos.reduce((s, p) => s + p.y, 0) / c.pinos.length;
+      const r = 260 * (0.5 + a.brilho);
+      const gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      gr.addColorStop(0, hexA(a.cor || '#ff3b30', 0.75 * a.brilho + 0.15));
+      gr.addColorStop(0.35, hexA(a.cor || '#ff3b30', 0.35 * a.brilho));
+      gr.addColorStop(1, hexA(a.cor || '#ff3b30', 0));
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    }
+    /* os pontos da corrente */
+    if (st.mostrar.pontos) {
+      const passo = Math.max(22 * px, 60), raio = Math.max(2.6 * px, 6);
+      ctx.fillStyle = '#facc15';
+      ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 0.8 * px;
+      const pontosEm = (ax, ay, bx, by, fase) => {
+        const L = Math.hypot(bx - ax, by - ay); if (L < 1e-6) return;
+        const ux = (bx - ax) / L, uy = (by - ay) / L;
+        let d = ((fase * px) % passo + passo) % passo;
+        for (; d < L; d += passo) { ctx.beginPath(); ctx.arc(ax + ux * d, ay + uy * d, raio, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+      };
+      if (st.fluxos) for (const s of st.fluxos) if (velocidadePonto(s.i)) pontosEm(s.ax, s.ay, s.bx, s.by, st.fase.get(s.id) || 0);
+      /* por dentro do componente de dois pinos: do pino por onde a corrente entra ao outro */
+      for (const c of st.comps || []) {
+        if (c.folha !== si || c.pinos.length !== 2) continue;
+        const a = st.an.comps[c.ref];
+        if (!a || a.corrente == null || !velocidadePonto(a.corrente)) continue;
+        const [p, q] = c.pinos;
+        pontosEm(p.x, p.y, q.x, q.y, st.fase.get('c:' + c.ref) || 0);
+      }
+    }
+    /* textos em pixels de tela */
+    const dpr = window.devicePixelRatio || 1;
+    const cvs = ctx.canvas, W = cvs.width / dpr, H = cvs.height / dpr;
+    const tela = (x, y) => ({ x: (x - cam.cx) * cam.scale + W / 2, y: H / 2 - (y - cam.cy) * cam.scale });
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = '600 11px ' + (getComputedStyle(document.body).getPropertyValue('--font') || 'system-ui');
+    ctx.textBaseline = 'middle';
+    if (st.mostrar.tensoes && cam.scale > 0.035) {
+      const feitas = new Set();
+      const sh = v.model().sheets[si];
+      const ancoras = [];
+      for (const l of [].concat(sh.netlabels || [], sh.powers || [])) ancoras.push({ net: l.net, x: l.x, y: l.y });
+      if (st.fluxos) for (const s of st.fluxos) ancoras.push({ net: s.net, x: (s.ax + s.bx) / 2, y: (s.ay + s.by) / 2, fio: true });
+      for (const a of ancoras) {
+        if (feitas.has(a.net) || !(a.net in st.res.v)) continue;
+        feitas.add(a.net);
+        const p = tela(a.x, a.y);
+        if (p.x < -50 || p.y < -20 || p.x > W + 50 || p.y > H + 20) continue;
+        pilula(ctx, p.x + 8, p.y - 12, fmt(st.res.v[a.net], 'V'), corDaTensao(st.res.v[a.net], 1), (st.res.flutuantes || []).includes(a.net));
+      }
+    }
+    if (st.mostrar.valores && cam.scale > 0.05) for (const c of st.comps || []) {
+      if (c.folha !== si || !c.pinos.length) continue;
+      const a = st.an.comps[c.ref]; if (!a) continue;
+      const txt = a.corrente != null && Math.abs(a.corrente) > 1e-9 ? fmt(Math.abs(a.corrente), 'A') : Math.abs(a.p) > 1e-6 ? fmt(a.p, 'W') : '';
+      if (!txt) continue;
+      const cx = c.pinos.reduce((s, p) => s + p.x, 0) / c.pinos.length, cy = Math.min(...c.pinos.map(p => p.y));
+      const p = tela(cx, cy);
+      pilula(ctx, p.x - 20, p.y + 16, txt, '#facc15', false);
+    }
+    /* alerta no componente: o triângulo laranja */
+    for (const c of st.comps || []) {
+      if (c.folha !== si || !c.pinos.length) continue;
+      const a = st.an.comps[c.ref];
+      if (!a || !a.alertas.length || /^(fora|ignorado|desconhecido|solto|conector)$/.test(a.tipo)) continue;
+      const p = tela(Math.max(...c.pinos.map(q => q.x)), Math.max(...c.pinos.map(q => q.y)));
+      ctx.fillStyle = '#f97316';
+      ctx.beginPath(); ctx.moveTo(p.x + 8, p.y - 20); ctx.lineTo(p.x + 16, p.y - 6); ctx.lineTo(p.x, p.y - 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#111'; ctx.fillText('!', p.x + 6.5, p.y - 11);
+    }
+    /* o pino sob o mouse */
+    if (st.hover && st.hover.tipo === 'pino') {
+      const p = tela(st.hover.x, st.hover.y);
+      ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function hexA(hex, a) {
+    const h = String(hex).replace('#', '');
+    const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + Math.max(0, Math.min(1, a)) + ')';
+  }
+  function pilula(ctx, x, y, txt, cor, flut) {
+    const w = ctx.measureText(txt).width + 12, h = 17;
+    ctx.fillStyle = 'rgba(17,20,26,.88)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y - h / 2, w, h, 8); else ctx.rect(x, y - h / 2, w, h);
+    ctx.fill();
+    ctx.strokeStyle = cor; ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.fillStyle = flut ? '#9ca3af' : '#f3f4f6';
+    ctx.fillText(txt, x + 6, y + 0.5);
+  }
+
+  /* ------------------------------------------------------------------------------------------------ mouse */
+  function mundoDe(e) {
+    const v = VISTA(); if (!v) return null;
+    const cv = v.canvas(), r = cv.getBoundingClientRect();
+    return v.cam().toWorld(e.clientX - r.left, e.clientY - r.top);
+  }
+  function acha(w) {
+    const v = VISTA(); if (!v || !st.comps || !w) return null;
+    const si = v.folha(), cam = v.cam().cam || v.cam(), tol = 9 / cam.scale;   // mkCamera devolve {cam:{scale, cx, cy}, toWorld...}
+    let melhor = null, dm = tol;
+    for (const c of st.comps) {
+      if (c.folha !== si) continue;
+      for (const p of c.pinos) { const d = Math.hypot(p.x - w.x, p.y - w.y); if (d < dm) { dm = d; melhor = { tipo: 'pino', ref: c.ref, num: p.num, net: p.net, x: p.x, y: p.y }; } }
+    }
+    if (melhor) return melhor;
+    const sh = v.model().sheets[si];
+    for (const comp of sh.comps) {
+      const b = v.caixa(comp);
+      if (b && w.x >= b.x1 && w.x <= b.x2 && w.y >= b.y1 && w.y <= b.y2) return { tipo: 'comp', ref: comp.ref };
+    }
+    if (st.fluxos) {
+      const tf = 6 / cam.scale;
+      for (const s of st.fluxos) {
+        const L = Math.hypot(s.bx - s.ax, s.by - s.ay); if (!L) continue;
+        const t = ((w.x - s.ax) * (s.bx - s.ax) + (w.y - s.ay) * (s.by - s.ay)) / (L * L);
+        if (t < 0 || t > 1) continue;
+        const d = Math.hypot(s.ax + t * (s.bx - s.ax) - w.x, s.ay + t * (s.by - s.ay) - w.y);
+        if (d < tf) return { tipo: 'fio', net: s.net, i: s.i, x: w.x, y: w.y };
+      }
+    }
+    return null;
+  }
+  function info(ref) { return st.mt && st.mt.comps.get(String(ref)); }
+
+  function aoMover(e) {
+    if (!st.ligado || !st.an) return;
+    const h = acha(mundoDe(e));
+    const antes = st.hover && JSON.stringify([st.hover.tipo, st.hover.ref, st.hover.num, st.hover.net]);
+    st.hover = h;
+    if (h && h.tipo === 'comp' && !st.fixo) painel.calculos(h.ref);
+    dica.mostra(h, e);
+    if (antes !== (h && JSON.stringify([h.tipo, h.ref, h.num, h.net]))) { const v = VISTA(); if (v) v.redesenha(); }
+    const inf = h && h.tipo === 'comp' ? info(h.ref) : null;
+    const cv = VISTA() && VISTA().canvas();
+    if (cv) cv.style.cursor = inf && (inf.interativo === 'chave' || inf.interativo === 'botao') ? 'pointer' : inf && inf.interativo === 'pot' ? 'ns-resize' : '';
+  }
+  function aoApertar(e) {
+    if (!st.ligado || e.button !== 0 || !st.an) return;
+    const h = acha(mundoDe(e));
+    if (!h) return;
+    if (h.tipo === 'comp') {
+      const inf = info(h.ref);
+      if (inf && inf.interativo === 'chave') { e.stopPropagation(); e.preventDefault(); alternaChave(h.ref); return; }
+      if (inf && inf.interativo === 'botao') {
+        e.stopPropagation(); e.preventDefault();
+        defineChave(h.ref, true);
+        const solta = () => { defineChave(h.ref, false); window.removeEventListener('mouseup', solta, true); };
+        window.addEventListener('mouseup', solta, true);
+        return;
+      }
+      st.fixo = h.ref; painel.calculos(h.ref);
+      return;
+    }
+    if (h.tipo === 'pino' || h.tipo === 'fio') { e.stopPropagation(); e.preventDefault(); menu.abre(h, e); }
+  }
+  function aoRodar(e) {
+    if (!st.ligado || !st.an) return;
+    const h = acha(mundoDe(e));
+    const inf = h && h.tipo === 'comp' ? info(h.ref) : null;
+    if (!inf || inf.interativo !== 'pot') return;
+    e.stopPropagation(); e.preventDefault();
+    definePot(h.ref, (inf.pos == null ? 0.5 : inf.pos) + (e.deltaY < 0 ? 0.05 : -0.05));
+  }
+
+  /* ------------------------------------------------------------------------------------------------ comandos (tela e MCP) */
+  function alternaChave(ref) { const inf = info(ref); defineChave(ref, !(inf && inf.fechada)); }
+  function defineChave(ref, fechada) {
+    const inf = info(ref); if (!inf || !inf.sw) return false;
+    inf.fechada = !!fechada; inf.sw.fechada = !!fechada;
+    if (inf.sw2) inf.sw2.fechada = !fechada;
+    inf.rotulo = inf.rotulo.replace(/\((fechad[oa]|abert[oa])\)/, fechada ? '(fechado)' : '(aberto)');
+    st.cfg.chaves[ref] = !!fechada; gravaCfg();
+    if (st.modo === 'dc') st.res = st.sim.dc(); else st.res = st.sim.passo(1);
+    analisa(true); agenda();
+    return true;
+  }
+  function definePot(ref, pos) {
+    const inf = info(ref); if (!inf) return false;
+    pos = Math.max(0, Math.min(1, pos));
+    inf.pos = pos; st.cfg.pots[ref] = pos; gravaCfg();
+    if (inf.r1 && inf.r2) { inf.r1.r = Math.max(1, inf.r * (1 - pos)); inf.r2.r = Math.max(1, inf.r * pos); inf.rotulo = inf.rotulo.replace(/\(\d+ %\)/, '(' + Math.round(pos * 100) + ' %)'); }
+    else { st.sujo = true; }
+    if (!st.sujo) { st.res = st.modo === 'dc' ? st.sim.dc() : st.sim.passo(1); analisa(true); }
+    agenda();
+    return true;
+  }
+  function defineFonte(net, f) {
+    if (f === null) delete st.cfg.fontes[net];
+    else st.cfg.fontes[net] = Object.assign({}, st.cfg.fontes[net] || {}, f);
+    gravaCfg();
+    /* so mudou o valor de uma fonte que ja existe: troca na hora, sem religar */
+    const el = st.sim && st.sim.elementos.find(e => e.id === 'FONTE:' + net);
+    if (el && f && !f.desligada && f.v != null && !f.onda && !('onda' in (st.cfg.fontes[net] || {}))) {
+      el.v = +f.v; el.onda = undefined; if (el.fonte) el.fonte.v = +f.v;
+      st.res = st.modo === 'dc' ? st.sim.dc() : st.sim.passo(1); analisa(true);
+    } else st.sujo = true;
+    agenda();
+  }
+  function defineGpio(key, g) {
+    if (!g || g.modo === 'nada') delete st.cfg.gpio[key]; else st.cfg.gpio[key] = g;
+    gravaCfg(); st.sujo = true; agenda();
+  }
+  function liga(on) {
+    on = on == null ? !st.ligado : !!on;
+    if (on === st.ligado) return st.ligado;
+    st.ligado = on;
+    if (on) { leCfg(); st.sujo = true; st.rodando = true; st.tUlt = 0; painel.abre(); agenda(); }
+    else { painel.fecha(); dica.esconde(); menu.fecha(); st.an = null; publica(); const v = VISTA(); if (v) v.redesenha(); }
+    botao.pinta();
+    return st.ligado;
+  }
+  function religa() { st.sujo = true; st.rodando = true; st.fase.clear(); agenda(); }
+
+  /* ------------------------------------------------------------------------------------------------ CSS */
+  const CSS = `
+.sim-p{position:absolute; top:10px; right:10px; z-index:32; width:340px; max-height:calc(100% - 20px); display:flex; flex-direction:column;
+  background:color-mix(in srgb, var(--panel, #1c1f26) 94%, transparent); color:var(--fg, #e5e7eb); border:1px solid var(--border, #333);
+  border-radius:12px; box-shadow:0 14px 40px rgba(0,0,0,.45); font:12px var(--font, system-ui); backdrop-filter:blur(8px); overflow:hidden}
+.sim-p[hidden]{display:none}
+.sim-hd{display:flex; align-items:center; gap:7px; padding:9px 10px 8px 12px; border-bottom:1px solid var(--border, #333); cursor:move; user-select:none}
+.sim-hd b{font-size:13px; letter-spacing:.2px} .sim-hd .esp{flex:1}
+.sim-pt{width:9px; height:9px; border-radius:50%; background:#22c55e; box-shadow:0 0 8px #22c55e}
+.sim-pt.aviso{background:#f59e0b; box-shadow:0 0 8px #f59e0b} .sim-pt.erro{background:#ef4444; box-shadow:0 0 8px #ef4444} .sim-pt.pausa{background:#9ca3af; box-shadow:none}
+.sim-t{font:11px var(--mono, ui-monospace, monospace); color:var(--fg-dim, #9ca3af); min-width:64px; text-align:right}
+.sim-b{height:26px; min-width:26px; padding:0 8px; border-radius:7px; border:1px solid var(--border, #333); background:var(--panel2, #23262e); color:inherit; cursor:pointer; font:inherit}
+.sim-b:hover{border-color:var(--hi, #f59e0b)} .sim-b.on{background:var(--hi, #f59e0b); color:var(--on-hi, #111); border-color:var(--hi, #f59e0b)}
+.sim-corpo{overflow:auto; padding:4px 0 8px}
+.sim-sec{padding:8px 12px 6px} .sim-sec + .sim-sec{border-top:1px solid color-mix(in srgb, var(--border, #333) 60%, transparent)}
+.sim-sec h4{margin:0 0 6px; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim, #9ca3af); display:flex; align-items:center; gap:6px}
+.sim-sec h4 .esp{flex:1}
+.sim-seg{display:flex; border:1px solid var(--border, #333); border-radius:8px; overflow:hidden}
+.sim-seg button{flex:1; height:26px; border:0; background:transparent; color:inherit; cursor:pointer; font:inherit}
+.sim-seg button.on{background:var(--hi, #f59e0b); color:var(--on-hi, #111); font-weight:600}
+.sim-linha{display:flex; align-items:center; gap:8px; margin-top:6px}
+.sim-linha input[type=range]{flex:1; accent-color:var(--hi, #f59e0b)}
+.sim-chips{display:flex; flex-wrap:wrap; gap:5px}
+.sim-chip{padding:3px 9px; border-radius:12px; border:1px solid var(--border, #333); cursor:pointer; user-select:none; color:var(--fg-dim, #9ca3af)}
+.sim-chip.on{border-color:var(--hi, #f59e0b); color:var(--fg, #e5e7eb); background:color-mix(in srgb, var(--hi, #f59e0b) 18%, transparent)}
+.sim-fonte{display:grid; grid-template-columns:1fr 74px auto; gap:6px; align-items:center; padding:4px 0}
+.sim-fonte .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600}
+.sim-fonte .or{font-size:10px; padding:1px 6px; border-radius:8px; border:1px solid currentColor; margin-left:5px; font-weight:500}
+.sim-fonte .or.suposta{color:#f59e0b} .sim-fonte .or.nome{color:#60a5fa} .sim-fonte .or.conector{color:#a78bfa} .sim-fonte .or.definida{color:#34d399}
+.sim-fonte input{width:100%; height:24px; border-radius:6px; border:1px solid var(--border, #333); background:var(--panel2, #23262e); color:inherit; padding:0 6px; font:inherit; text-align:right}
+.sim-fonte .i{grid-column:1/-1; color:var(--fg-dim, #9ca3af); font-size:11px; margin-top:-3px}
+.sim-res{display:grid; grid-template-columns:1fr auto; gap:3px 10px}
+.sim-res .k{color:var(--fg-dim, #9ca3af)} .sim-res .v{font-variant-numeric:tabular-nums; text-align:right; font-weight:600}
+.sim-al{list-style:none; margin:4px 0 0; padding:0; display:flex; flex-direction:column; gap:3px}
+.sim-al li{padding:4px 7px; border-radius:6px; background:rgba(249,115,22,.12); color:#fdba74; cursor:pointer}
+.sim-al li b{color:#fed7aa}
+.sim-calc .tit{font-weight:700; font-size:12.5px; margin-bottom:6px}
+.sim-calc .l{padding:5px 0; border-bottom:1px dashed color-mix(in srgb, var(--border, #333) 70%, transparent)}
+.sim-calc .l:last-child{border-bottom:0}
+.sim-calc .lt{display:flex; gap:8px} .sim-calc .lt span:first-child{flex:1; color:var(--fg-dim, #9ca3af)} .sim-calc .lt span:last-child{font-weight:700; font-variant-numeric:tabular-nums}
+.sim-calc .lf{font:11px var(--mono, ui-monospace, monospace); color:#93c5fd; margin-top:2px; word-break:break-word}
+.sim-calc .al{margin-top:6px; padding:5px 8px; border-radius:6px; background:rgba(239,68,68,.12); color:#fca5a5}
+.sim-calc .vazio{color:var(--fg-dim, #9ca3af)}
+.sim-osc{width:100%; height:120px; display:block; border-radius:8px; background:#0b0e13}
+.sim-osc-l{display:flex; flex-wrap:wrap; gap:6px; margin-top:5px; font-size:11px}
+.sim-osc-l span{display:inline-flex; gap:4px; align-items:center; cursor:pointer} .sim-osc-l i{width:10px; height:3px; border-radius:2px; display:inline-block}
+.sim-dica{position:fixed; z-index:60; pointer-events:none; min-width:200px; max-width:340px; padding:9px 11px; border-radius:10px;
+  background:rgba(15,18,24,.96); color:#e5e7eb; border:1px solid rgba(255,255,255,.12); box-shadow:0 10px 30px rgba(0,0,0,.5); font:12px var(--font, system-ui)}
+.sim-dica .t{font-weight:700; margin-bottom:5px; display:flex; gap:6px; align-items:center}
+.sim-dica .t .net{font-weight:500; color:#9ca3af}
+.sim-dica .g{display:grid; grid-template-columns:auto 1fr; gap:2px 10px} .sim-dica .g .k{color:#9ca3af} .sim-dica .g .v{text-align:right; font-weight:700; font-variant-numeric:tabular-nums}
+.sim-dica .p{margin-top:5px; color:#a7f3d0} .sim-dica .a{margin-top:5px; color:#fca5a5} .sim-dica .h{margin-top:6px; color:#6b7280; font-size:10.5px}
+.sim-dica .f{font:10.5px var(--mono, ui-monospace, monospace); color:#93c5fd}
+.sim-menu{position:fixed; z-index:61; min-width:210px; padding:6px; border-radius:10px; background:var(--panel, #1c1f26); color:var(--fg, #e5e7eb);
+  border:1px solid var(--border, #333); box-shadow:0 12px 32px rgba(0,0,0,.5); font:12px var(--font, system-ui)}
+.sim-menu .t{padding:4px 8px 6px; font-weight:700} .sim-menu .s{padding:2px 8px 4px; color:var(--fg-dim, #9ca3af); font-size:11px}
+.sim-menu button{display:block; width:100%; text-align:left; padding:6px 9px; border:0; border-radius:6px; background:transparent; color:inherit; cursor:pointer; font:inherit}
+.sim-menu button:hover, .sim-menu button.on{background:color-mix(in srgb, var(--hi, #f59e0b) 22%, transparent)}
+.sim-menu .lin{display:flex; gap:6px; padding:4px 8px} .sim-menu .lin input{flex:1; min-width:0; height:24px; border-radius:6px; border:1px solid var(--border, #333); background:var(--panel2, #23262e); color:inherit; padding:0 6px}
+#btnSim.on{background:var(--hi, #f59e0b); color:var(--on-hi, #111); border-color:var(--hi, #f59e0b)}
+`;
+  function css() { if (document.getElementById('sim-css')) return; const s = document.createElement('style'); s.id = 'sim-css'; s.textContent = CSS; document.head.append(s); }
+
+  /* ------------------------------------------------------------------------------------------------ a dica do mouse */
+  const dica = (() => {
+    let el = null;
+    function mostra(h, e) {
+      if (!h || !st.an || menu.aberto()) { esconde(); return; }
+      if (!el) { el = $c('div', 'sim-dica'); document.body.append(el); }
+      el.textContent = '';
+      if (h.tipo === 'pino') {
+        const p = st.an.pinos[h.ref + '-' + h.num]; if (!p) { esconde(); return; }
+        const t = $c('div', 't'); t.append($c('span', null, p.texto), $c('span', 'net', p.net ? '· ' + p.net : '· sem ligação'));
+        const g = $c('div', 'g');
+        const kv = (k, v) => g.append($c('span', 'k', k), $c('span', 'v', v));
+        kv('Tensão', fmt(p.v, 'V'));
+        if (Math.abs(p.i) > 1e-10) kv('Corrente', fmt(Math.abs(p.i), 'A') + (p.i > 0 ? ' entrando ↓' : ' saindo ↑'));
+        if (Math.abs(p.i * p.v) > 1e-7) kv('Potência', fmt(Math.abs(p.i * p.v), 'W'));
+        el.append(t, g);
+        if (p.papel) el.append($c('div', 'p', p.papel));
+        if (p.alerta) el.append($c('div', 'a', '⚠ ' + p.alerta));
+        el.append($c('div', 'h', 'clique: ' + (/^(mcu|ci|desconhecido)$/.test((info(h.ref) || {}).tipo) ? 'GPIO, fonte, osciloscópio' : 'fonte, osciloscópio')));
+      } else if (h.tipo === 'fio') {
+        const t = $c('div', 't'); t.append($c('span', null, 'Net ' + h.net));
+        const g = $c('div', 'g');
+        g.append($c('span', 'k', 'Tensão'), $c('span', 'v', fmt(st.res.v[h.net], 'V')));
+        if (Math.abs(h.i) > 1e-9) g.append($c('span', 'k', 'Corrente no fio'), $c('span', 'v', fmt(Math.abs(h.i), 'A')));
+        el.append(t, g);
+        if ((st.res.flutuantes || []).includes(h.net)) el.append($c('div', 'a', 'flutuando: sem caminho DC até o terra'));
+        el.append($c('div', 'h', 'clique: definir fonte nesta net, osciloscópio'));
+      } else if (h.tipo === 'comp') {
+        const c = st.an.comps[h.ref]; if (!c) { esconde(); return; }
+        el.append($c('div', 't', c.titulo));
+        const g = $c('div', 'g');
+        for (const l of c.linhas.slice(0, st.calc ? 4 : 8)) g.append($c('span', 'k', l.t), $c('span', 'v', l.r));
+        el.append(g);
+        for (const a of c.alertas.slice(0, 3)) el.append($c('div', 'a', '⚠ ' + a));
+        const inf = info(h.ref);
+        if (inf && inf.interativo) el.append($c('div', 'h', inf.interativo === 'pot' ? 'roda do mouse: gira o cursor' : inf.interativo === 'botao' ? 'segure o clique: aperta o botão' : 'clique: abre/fecha'));
+        else if (st.calc) el.append($c('div', 'h', 'os cálculos completos estão no painel (clique fixa)'));
+      }
+      const x = e.clientX + 16, y = e.clientY + 14;
+      el.style.left = Math.min(x, window.innerWidth - 350) + 'px';
+      el.style.top = Math.min(y, window.innerHeight - el.offsetHeight - 8) + 'px';
+      el.hidden = false;
+    }
+    function esconde() { if (el) el.hidden = true; }
+    return { mostra, esconde };
+  })();
+
+  /* ------------------------------------------------------------------------------------------------ o menu do clique */
+  const menu = (() => {
+    let el = null;
+    const fecha = () => { if (el) { el.remove(); el = null; } };
+    function abre(h, e) {
+      fecha(); dica.esconde();
+      el = $c('div', 'sim-menu');
+      const net = h.net;
+      if (h.tipo === 'pino') {
+        const p = st.an.pinos[h.ref + '-' + h.num] || {};
+        el.append($c('div', 't', p.texto || h.ref), $c('div', 's', (net || 'sem ligação') + ' · ' + fmt(p.v, 'V')));
+        const inf = info(h.ref);
+        if (inf && /^(mcu|ci|desconhecido)$/.test(inf.tipo) && net) {
+          const key = h.ref + '-' + h.num, atual = (st.cfg.gpio[key] || {}).modo || 'nada';
+          for (const [m, rot] of [['nada', 'Alta impedância (padrão)'], ['alto', 'Saída ALTA'], ['baixo', 'Saída BAIXA'], ['pwm', 'PWM 50 % · 1 kHz'], ['entrada', 'Entrada'], ['pullup', 'Entrada com pull-up'], ['pulldown', 'Entrada com pull-down']]) {
+            const b = $c('button', atual === m ? 'on' : '', (atual === m ? '● ' : '') + 'GPIO: ' + rot);
+            b.onclick = () => { defineGpio(key, m === 'nada' ? null : { modo: m, duty: 0.5, f: 1000 }); fecha(); };
+            el.append(b);
+          }
+        }
+      } else el.append($c('div', 't', 'Net ' + net), $c('div', 's', fmt(st.res.v[net], 'V')));
+      if (net && !(st.mt.terra || []).includes(net)) {
+        const lin = $c('div', 'lin'), inp = $c('input'); inp.placeholder = 'tensão (V)'; inp.value = (st.cfg.fontes[net] && st.cfg.fontes[net].v) || '';
+        const ok = $c('button', null, 'Fonte'); ok.style.width = 'auto';
+        ok.onclick = () => { const v = parseFloat(String(inp.value).replace(',', '.')); if (isFinite(v)) defineFonte(net, { v }); fecha(); };
+        inp.onkeydown = ev => { if (ev.key === 'Enter') ok.onclick(); if (ev.key === 'Escape') fecha(); };
+        lin.append(inp, ok); el.append(lin);
+        if (st.cfg.fontes[net]) { const b = $c('button', null, 'Tirar a fonte desta net'); b.onclick = () => { defineFonte(net, null); fecha(); }; el.append(b); }
+      }
+      if (net) {
+        const no = st.osciloscopio.includes(net);
+        const b = $c('button', null, no ? 'Tirar do osciloscópio' : 'Mostrar no osciloscópio');
+        b.onclick = () => { osciloscopio(net, !no); fecha(); };
+        el.append(b);
+        const t = $c('button', null, 'Usar como terra (0 V)');
+        t.onclick = () => { st.cfg.terra = [...new Set((st.cfg.terra || []).concat(net))]; gravaCfg(); st.sujo = true; agenda(); fecha(); };
+        if (!(st.mt.terra || []).includes(net)) el.append(t);
+      }
+      document.body.append(el);
+      el.style.left = Math.min(e.clientX + 6, window.innerWidth - 230) + 'px';
+      el.style.top = Math.min(e.clientY + 6, window.innerHeight - el.offsetHeight - 8) + 'px';
+      const fora = ev => { if (el && !el.contains(ev.target)) { fecha(); window.removeEventListener('mousedown', fora, true); } };
+      setTimeout(() => window.addEventListener('mousedown', fora, true), 0);
+      for (const ev of ['mousedown', 'wheel', 'contextmenu']) el.addEventListener(ev, x => x.stopPropagation());
+      const i = el.querySelector('input'); if (i && h.tipo === 'fio') i.focus();
+    }
+    return { abre, fecha, aberto: () => !!el };
+  })();
+
+  function osciloscopio(net, on) {
+    const i = st.osciloscopio.indexOf(net);
+    if (on && i < 0) st.osciloscopio.push(net);
+    if (!on && i >= 0) st.osciloscopio.splice(i, 1);
+    if (st.osciloscopio.length > 4) st.osciloscopio.shift();
+    st.amostras = []; st.osc = st.osciloscopio.length > 0 || st.osc;
+    gravaCfg(); painel.atualiza(true);
+  }
+  const CORES_OSC = ['#facc15', '#22d3ee', '#f472b6', '#a3e635'];
+  function oscDesenha() {
+    const cv = painel.oscCanvas();
+    if (!cv || !st.osc || cv.offsetParent === null) return;
+    const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+    const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, W, H);
+    c.strokeStyle = 'rgba(255,255,255,.07)'; c.lineWidth = 1;
+    for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(0, H * i / 4); c.lineTo(W, H * i / 4); c.stroke(); }
+    for (let i = 1; i < 8; i++) { c.beginPath(); c.moveTo(W * i / 8, 0); c.lineTo(W * i / 8, H); c.stroke(); }
+    const A = st.amostras;
+    if (A.length < 2) { c.fillStyle = '#6b7280'; c.font = '11px system-ui'; c.fillText(st.modo === 'dc' ? 'o osciloscópio anda no Tempo real' : st.osciloscopio.length ? 'esperando amostras…' : 'clique num fio ou pino › Mostrar no osciloscópio', 8, H / 2); return; }
+    let lo = Infinity, hi = -Infinity;
+    for (const a of A) for (const x of a.v) if (isFinite(x)) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
+    if (!(hi > lo)) { hi = lo + 1; lo -= 1; }
+    const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+    const t0 = A[0].t, t1 = A[A.length - 1].t;
+    st.osciloscopio.forEach((n, k) => {
+      c.strokeStyle = CORES_OSC[k]; c.lineWidth = 1.6; c.beginPath();
+      A.forEach((a, i) => { const x = (a.t - t0) / Math.max(t1 - t0, 1e-12) * W, y = H - (a.v[k] - lo) / (hi - lo) * H; if (i) c.lineTo(x, y); else c.moveTo(x, y); });
+      c.stroke();
+    });
+    c.fillStyle = '#9ca3af'; c.font = '10px ui-monospace, monospace';
+    c.fillText(fmt(hi, 'V'), 4, 11); c.fillText(fmt(lo, 'V'), 4, H - 4);
+    const jan = t1 - t0; c.fillText(fmt(jan, 's') + ' na tela', W - 86, H - 4);
+  }
+
+  /* ------------------------------------------------------------------------------------------------ o painel */
+  const painel = (() => {
+    let el = null, refs = {};
+    let calcRef = null;
+    function cria() {
+      css();
+      const v = VISTA(); if (!v) return;
+      const host = v.canvas().parentElement;
+      el = $c('div', 'sim-p'); el.setAttribute('role', 'region'); el.setAttribute('aria-label', 'Simulação');
+      const hd = $c('div', 'sim-hd');
+      refs.pt = $c('span', 'sim-pt'); refs.t = $c('span', 'sim-t', '');
+      refs.play = $c('button', 'sim-b', '⏸'); refs.play.title = 'Pausar / continuar (o tempo da simulação)';
+      const rel = $c('button', 'sim-b', '⟲'); rel.title = 'Religar: tudo descarregado em t = 0, como ao ligar a placa';
+      const x = $c('button', 'sim-b', '×'); x.title = 'Desligar a simulação';
+      hd.append(refs.pt, $c('b', null, 'Simulação'), $c('span', 'esp'), refs.t, refs.play, rel, x);
+      refs.play.onclick = () => { st.rodando = !st.rodando; pinta(); agenda(); };
+      rel.onclick = () => religa();
+      x.onclick = () => liga(false);
+      arrasta(hd);
+      const corpo = $c('div', 'sim-corpo');
+      /* modo e velocidade */
+      const sm = $c('div', 'sim-sec');
+      sm.append($c('h4', null, 'Análise'));
+      const seg = $c('div', 'sim-seg');
+      refs.mTempo = $c('button', null, 'Tempo real'); refs.mDc = $c('button', null, 'DC (regime)');
+      refs.mTempo.title = 'Transiente: liga a placa em t = 0 (capacitores descarregados) e anda no tempo — 555, PWM, RC, relé';
+      refs.mDc.title = 'Ponto de operação: o regime permanente (capacitor aberto, indutor em curto, PWM pela média)';
+      refs.mTempo.onclick = () => { st.modo = 'tempo'; gravaCfg(); religa(); pinta(); };
+      refs.mDc.onclick = () => { st.modo = 'dc'; gravaCfg(); religa(); pinta(); };
+      seg.append(refs.mTempo, refs.mDc);
+      const lv = $c('div', 'sim-linha');
+      refs.vel = $c('input'); refs.vel.type = 'range'; refs.vel.min = -6; refs.vel.max = 1; refs.vel.step = 0.25;
+      refs.velT = $c('span', 'sim-t', '');
+      refs.vel.oninput = () => { st.velocidade = Math.pow(10, +refs.vel.value); gravaCfg(); pinta(); };
+      lv.append($c('span', null, 'Velocidade'), refs.vel, refs.velT);
+      sm.append(seg, lv); corpo.append(sm);
+      /* o que mostrar */
+      const sv = $c('div', 'sim-sec'); sv.append($c('h4', null, 'Mostrar'));
+      const chips = $c('div', 'sim-chips'); refs.chips = {};
+      for (const [k, rot] of [['pontos', 'Corrente (pontos)'], ['cores', 'Cores de tensão'], ['tensoes', 'Tensão nas nets'], ['valores', 'Valores nos componentes'], ['brilho', 'Brilho dos LEDs']]) {
+        const ch = $c('span', 'sim-chip', rot); ch.onclick = () => { st.mostrar[k] = !st.mostrar[k]; gravaCfg(); pinta(); const vv = VISTA(); if (vv) vv.redesenha(); };
+        refs.chips[k] = ch; chips.append(ch);
+      }
+      sv.append(chips); corpo.append(sv);
+      /* fontes */
+      const sf = $c('div', 'sim-sec'); const hf = $c('h4'); hf.append($c('span', null, 'Fontes'), $c('span', 'esp'));
+      refs.fontes = $c('div'); sf.append(hf, refs.fontes); corpo.append(sf);
+      /* resumo e alertas */
+      const sr = $c('div', 'sim-sec'); sr.append($c('h4', null, 'Resumo'));
+      refs.res = $c('div', 'sim-res'); refs.al = $c('ul', 'sim-al'); sr.append(refs.res, refs.al); corpo.append(sr);
+      /* calculos */
+      const sc = $c('div', 'sim-sec'); const hc = $c('h4');
+      refs.olho = $c('button', 'sim-b', ''); refs.olho.title = 'Mostrar ou suprimir a área de cálculos';
+      refs.olho.onclick = () => { st.calc = !st.calc; gravaCfg(); pinta(); calculos(calcRef); };
+      refs.solta = $c('button', 'sim-b', '📌'); refs.solta.title = 'Fixado no componente clicado — clique para soltar e seguir o mouse';
+      refs.solta.onclick = () => { st.fixo = null; pinta(); };
+      hc.append($c('span', null, 'Cálculos'), $c('span', 'esp'), refs.solta, refs.olho);
+      refs.calc = $c('div', 'sim-calc'); sc.append(hc, refs.calc); corpo.append(sc);
+      /* osciloscopio */
+      const so = $c('div', 'sim-sec'); const ho = $c('h4');
+      refs.oscB = $c('button', 'sim-b', ''); refs.oscB.onclick = () => { st.osc = !st.osc; gravaCfg(); pinta(); };
+      ho.append($c('span', null, 'Osciloscópio'), $c('span', 'esp'), refs.oscB);
+      refs.osc = $c('canvas', 'sim-osc'); refs.oscL = $c('div', 'sim-osc-l');
+      refs.oscBox = $c('div'); refs.oscBox.append(refs.osc, refs.oscL);
+      so.append(ho, refs.oscBox); corpo.append(so);
+      el.append(hd, corpo);
+      for (const ev of ['mousedown', 'pointerdown', 'wheel', 'contextmenu', 'dblclick', 'keydown']) el.addEventListener(ev, e => e.stopPropagation(), { passive: ev === 'wheel' });
+      host.append(el);
+    }
+    function arrasta(hd) {
+      hd.addEventListener('mousedown', e => {
+        if (e.target.closest('button')) return;
+        const r = el.getBoundingClientRect(), pr = el.parentElement.getBoundingClientRect();
+        const ox = e.clientX - r.left, oy = e.clientY - r.top;
+        const mv = ev => { el.style.left = Math.max(0, Math.min(pr.width - r.width, ev.clientX - pr.left - ox)) + 'px'; el.style.top = Math.max(0, Math.min(pr.height - 40, ev.clientY - pr.top - oy)) + 'px'; el.style.right = 'auto'; };
+        const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+        window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+      });
+    }
+    function pinta() {
+      if (!el) return;
+      refs.play.textContent = st.rodando ? '⏸' : '▶';
+      refs.mTempo.classList.toggle('on', st.modo === 'tempo'); refs.mDc.classList.toggle('on', st.modo === 'dc');
+      refs.vel.value = Math.log10(st.velocidade); refs.vel.disabled = st.modo === 'dc';
+      refs.velT.textContent = st.velocidade >= 1 ? (st.velocidade === 1 ? 'tempo real' : st.velocidade.toFixed(0) + '×') : fmt(st.velocidade, 's') + '/s';
+      for (const [k, ch] of Object.entries(refs.chips)) ch.classList.toggle('on', !!st.mostrar[k]);
+      refs.olho.textContent = st.calc ? '👁 ligado' : '👁 suprimido';
+      refs.olho.classList.toggle('on', st.calc);
+      refs.calc.hidden = !st.calc;
+      refs.solta.hidden = !st.fixo;
+      refs.oscB.textContent = st.osc ? 'esconder' : 'mostrar';
+      refs.oscBox.hidden = !st.osc;
+    }
+    function atualiza(forca) {
+      if (!el) return;
+      pinta();
+      const r = st.res, a = st.an;
+      refs.pt.className = 'sim-pt' + (st.erro ? ' erro' : !st.rodando ? ' pausa' : (r && (!r.ok || r.aviso)) || (a && a.resumo.alertas.length) ? ' aviso' : '');
+      refs.pt.title = st.erro || (r && r.aviso) || (a && a.resumo.alertas.length ? a.resumo.alertas.length + ' alerta(s)' : 'ok');
+      refs.t.textContent = r ? (r.modo === 'dc' ? 'DC' : 't = ' + fmt(r.t, 's')) : '';
+      /* fontes (redesenha so quando muda a lista: senao o input perde o foco) */
+      const assin = st.mt ? JSON.stringify(st.mt.fontes.map(f => [f.net, f.v, f.origem])) : '';
+      if (forca || assin !== refs.assinFontes) {
+        refs.assinFontes = assin;
+        refs.fontes.textContent = '';
+        if (st.mt) for (const f of st.mt.fontes) {
+          const ln = $c('div', 'sim-fonte');
+          const nm = $c('span', 'nm', f.net); nm.title = f.motivo; nm.append($c('span', 'or ' + f.origem, f.origem));
+          const inp = $c('input'); inp.value = String(f.v).replace('.', ','); inp.title = 'tensão (V) — Enter aplica';
+          inp.onkeydown = ev => { if (ev.key === 'Enter') { const v = parseFloat(String(inp.value).replace(',', '.')); if (isFinite(v)) defineFonte(f.net, { v }); } };
+          inp.onchange = () => { const v = parseFloat(String(inp.value).replace(',', '.')); if (isFinite(v) && v !== f.v) defineFonte(f.net, { v }); };
+          const sel = $c('select'); sel.className = 'sim-b';
+          for (const [k, rot] of [['dc', 'DC'], ['seno', '∿'], ['quadrada', '⊓'], ['triangular', '△'], ['off', 'off']]) { const o = $c('option', null, rot); o.value = k; sel.append(o); }
+          const cf = st.cfg.fontes[f.net];
+          sel.value = cf && cf.desligada ? 'off' : f.onda ? f.onda.forma : 'dc';
+          sel.title = 'forma de onda (seno, quadrada e triangular com 1 kHz; mude a frequência pelo MCP sim_fonte)';
+          sel.onchange = () => {
+            const k = sel.value;
+            if (k === 'off') defineFonte(f.net, { desligada: true });
+            else if (k === 'dc') defineFonte(f.net, { v: f.v, onda: null, desligada: false });
+            else defineFonte(f.net, { v: f.v, desligada: false, onda: { forma: k, v: f.v, f: (f.onda && f.onda.f) || 1000, off: k === 'seno' ? 0 : 0, duty: 0.5 } });
+          };
+          ln.append(nm, inp, sel);
+          const iT = $c('span', 'i', ''); ln.append(iT); f._el = iT;
+          refs.fontes.append(ln);
+        }
+        if (st.mt && !st.mt.fontes.length) refs.fontes.append($c('div', 'sim-calc', 'Nenhuma fonte. Clique num fio › Fonte, ou nomeie as nets de alimentação (+5V, 3V3, 12V…).'));
+      }
+      if (st.mt && a) for (const f of a.fontes) if (f._el) f._el.textContent = (f.origem === 'suposta' ? '⚠ ' : '') + 'entrega ' + fmt(f.i, 'A') + ' · ' + fmt(f.p, 'W') + (f.origem === 'suposta' ? ' — tensão suposta' : '');
+      /* resumo */
+      refs.res.textContent = '';
+      if (a) {
+        const kv = (k, v) => refs.res.append($c('span', 'k', k), $c('span', 'v', v));
+        kv('Potência das fontes', fmt(a.resumo.potencia, 'W'));
+        kv('Componentes simulados', String([...st.mt.comps.values()].filter(c => c.elementos.length).length) + ' de ' + st.mt.comps.size);
+        if (r && r.aviso) kv('Motor', r.aviso);
+        if (st.erro) kv('Erro', st.erro);
+        const sem = [...st.mt.comps.values()].filter(c => c.tipo === 'desconhecido');
+        if (sem.length) kv('Sem modelo', sem.slice(0, 5).map(c => c.ref).join(', ') + (sem.length > 5 ? '…' : ''));
+      }
+      refs.al.textContent = '';
+      if (st.mt) for (const av of st.mt.avisos.slice(0, 4)) { const li = $c('li', null, av); li.style.background = 'rgba(96,165,250,.12)'; li.style.color = '#bfdbfe'; li.style.cursor = 'default'; refs.al.append(li); }
+      if (a) for (const al of a.resumo.alertas.slice(0, 8)) {
+        const li = $c('li'); li.append($c('b', null, al.ref + ' '), document.createTextNode(al.texto));
+        li.onclick = () => { const v = VISTA(); if (v) v.focar(al.ref); st.fixo = al.ref; calculos(al.ref); };
+        refs.al.append(li);
+      }
+      if (a && a.resumo.alertas.length > 8) refs.al.append($c('li', null, '+ ' + (a.resumo.alertas.length - 8) + ' alertas'));
+      calculos(st.fixo || calcRef);
+      /* legenda do osciloscopio */
+      refs.oscL.textContent = '';
+      st.osciloscopio.forEach((n, k) => { const s = $c('span'); const i = $c('i'); i.style.background = CORES_OSC[k]; s.append(i, document.createTextNode(n + ' ' + (r ? fmt(r.v[n], 'V') : ''))); s.title = 'clique para tirar'; s.onclick = () => osciloscopio(n, false); refs.oscL.append(s); });
+    }
+    function calculos(ref) {
+      if (!el) return;
+      calcRef = st.fixo || ref || calcRef;
+      refs.solta.hidden = !st.fixo;
+      if (!st.calc) return;
+      refs.calc.textContent = '';
+      const c = calcRef && st.an && st.an.comps[calcRef];
+      if (!c) { refs.calc.append($c('div', 'vazio', 'Passe o mouse num componente para ver as contas (clique fixa).')); return; }
+      refs.calc.append($c('div', 'tit', c.titulo));
+      if (!c.linhas.length) refs.calc.append($c('div', 'vazio', 'Sem contas para este componente.'));
+      for (const l of c.linhas) {
+        const d = $c('div', 'l'); const lt = $c('div', 'lt'); lt.append($c('span', null, l.t), $c('span', null, l.r)); d.append(lt);
+        if (l.f) d.append($c('div', 'lf', l.f));
+        refs.calc.append(d);
+      }
+      for (const a of c.alertas) refs.calc.append($c('div', 'al', '⚠ ' + a));
+    }
+    return {
+      abre() { if (!el) cria(); if (el) { el.hidden = false; atualiza(true); } },
+      fecha() { if (el) el.hidden = true; },
+      atualiza, calculos, oscCanvas: () => refs.osc || null,
+    };
+  })();
+
+  /* ------------------------------------------------------------------------------------------------ o botao na barra */
+  const botao = (() => {
+    let b = null;
+    function poe() {
+      const tb = document.getElementById('schtb');
+      if (!tb || b) return;
+      b = document.createElement('button');
+      b.id = 'btnSim';
+      b.title = 'Simular o circuito: tensão e corrente na folha, como no Falstad (mouse no pino mostra a tensão; clique na chave; roda no potenciômetro)';
+      b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M2 12h3l2-6 4 12 3-9 2 3h6"/></svg><span class="lb">Simular</span>';
+      b.addEventListener('click', () => liga());
+      const erc = document.getElementById('btnErc');
+      if (erc && erc.nextSibling) tb.insertBefore(b, erc.nextSibling); else tb.append(b);
+    }
+    function pinta() { if (b) { b.classList.toggle('on', st.ligado); b.setAttribute('aria-pressed', st.ligado ? 'true' : 'false'); } }
+    return { poe, pinta };
+  })();
+
+  /* ------------------------------------------------------------------------------------------------ ligar na vista */
+  function instala() {
+    const v = VISTA();
+    if (!v) return false;
+    botao.poe();
+    const host = v.canvas().parentElement;
+    host.addEventListener('mousemove', aoMover, { passive: true });
+    host.addEventListener('mouseleave', () => { st.hover = null; dica.esconde(); }, { passive: true });
+    host.addEventListener('mousedown', aoApertar, true);
+    host.addEventListener('wheel', aoRodar, { capture: true, passive: false });
+    window.addEventListener('keydown', e => { if (e.key === 'Escape' && menu.aberto()) menu.fecha(); });
+    return true;
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { if (!instala()) setTimeout(instala, 500); });
+  else if (!instala()) setTimeout(instala, 500);
+
+  /* ------------------------------------------------------------------------------------------------ MCP */
+  function estado(detalhe) {
+    const a = st.an, r = st.res;
+    const out = { ligado: st.ligado, rodando: st.rodando, modo: st.modo, velocidade: st.velocidade, t: r ? r.t : null, ok: r ? r.ok : null, aviso: r ? r.aviso : '', erro: st.erro,
+      mostrar: st.mostrar, calculos: st.calc, osciloscopio: st.osciloscopio.slice(), config: st.cfg };
+    if (!a) return out;
+    out.fontes = a.fontes.map(f => ({ net: f.net, v: f.v, origem: f.origem, motivo: f.motivo, corrente: f.i, potencia: f.p, onda: f.onda || null }));
+    out.potencia_total = a.resumo.potencia;
+    out.alertas = a.resumo.alertas;
+    out.nets = Object.fromEntries(Object.entries(a.nets).filter(([n]) => !n.includes('#')).map(([n, x]) => [n, { v: x.v, flutuante: x.flutuante }]));
+    out.componentes = Object.fromEntries(Object.entries(a.comps).map(([ref, c]) => [ref, detalhe ? { titulo: c.titulo, tipo: c.tipo, potencia: c.p, linhas: c.linhas, alertas: c.alertas } : { tipo: c.tipo, titulo: c.titulo, potencia: c.p, alertas: c.alertas.length }]));
+    return out;
+  }
+  function espera(ms) { return new Promise(r => setTimeout(r, ms)); }
+  async function mcp(a) {
+    a = a || {};
+    const acao = a.acao || 'estado';
+    const garante = () => { if (!st.ligado) liga(true); if (st.sujo) monta(); };
+    switch (acao) {
+      case 'ligar': liga(true); if (a.modo) { st.modo = a.modo === 'dc' ? 'dc' : 'tempo'; } if (a.velocidade) st.velocidade = +a.velocidade; monta(); await espera(+a.esperar_ms || 300); return estado(false);
+      case 'desligar': liga(false); return { ligado: false };
+      case 'pausar': st.rodando = false; painel.atualiza(); return { rodando: false };
+      case 'continuar': st.rodando = true; agenda(); return { rodando: true };
+      case 'religar': garante(); religa(); await espera(+a.esperar_ms || 300); return estado(false);
+      case 'estado': if (st.ligado && st.sujo) monta(); return estado(!!a.detalhe);
+      case 'modo': st.modo = a.modo === 'dc' ? 'dc' : 'tempo'; if (a.velocidade) st.velocidade = +a.velocidade; gravaCfg(); garante(); religa(); await espera(200); return estado(false);
+      case 'mostrar': Object.assign(st.mostrar, a.mostrar || {}); if (a.calculos != null) st.calc = !!a.calculos; gravaCfg(); painel.atualiza(true); { const v = VISTA(); if (v) v.redesenha(); } return { mostrar: st.mostrar, calculos: st.calc };
+      case 'pinos': {
+        garante(); const out = {};
+        for (const [k, p] of Object.entries(st.an ? st.an.pinos : {})) if ((!a.ref || p.ref === a.ref) && (!a.net || p.net === a.net)) out[k] = p;
+        return { t: st.res && st.res.t, pinos: out };
+      }
+      case 'componente': { garante(); const c = st.an && st.an.comps[a.ref]; if (!c) throw new Error('componente ' + a.ref + ' não está na simulação'); if (a.mostrar !== false) { st.fixo = a.ref; painel.calculos(a.ref); const v = VISTA(); if (v) v.focar(a.ref); } return c; }
+      case 'chave': garante(); if (!defineChave(a.ref, a.fechada == null ? !(info(a.ref) || {}).fechada : !!a.fechada)) throw new Error(a.ref + ' não é chave, botão ou jumper'); return { ref: a.ref, fechada: (info(a.ref) || {}).fechada };
+      case 'pot': garante(); if (!definePot(a.ref, +a.posicao)) throw new Error(a.ref + ' não é potenciômetro/LDR'); return { ref: a.ref, posicao: (info(a.ref) || {}).pos };
+      case 'fonte': garante(); defineFonte(a.net, a.remover ? null : { v: a.v != null ? +a.v : undefined, onda: a.onda || null, desligada: !!a.desligada }); monta(); return estado(false).fontes;
+      case 'gpio': garante(); defineGpio(a.ref + '-' + a.pino, a.modo ? { modo: a.modo, duty: a.duty, f: a.f } : null); monta(); return { pino: a.ref + '-' + a.pino, ...(st.an && st.an.pinos[a.ref + '-' + a.pino] || {}) };
+      case 'terra': garante(); st.cfg.terra = (a.nets || []).slice(); gravaCfg(); monta(); return { terra: st.mt.terra };
+      case 'valor': garante(); if (a.valor == null) delete st.cfg.valores[a.ref]; else st.cfg.valores[a.ref] = String(a.valor); gravaCfg(); monta(); return st.an && st.an.comps[a.ref];
+      case 'desligar_componente': garante(); { const s = new Set(st.cfg.desligados || []); if (a.desligado === false) s.delete(a.ref); else s.add(a.ref); st.cfg.desligados = [...s]; } gravaCfg(); monta(); return estado(false);
+      case 'osciloscopio': garante(); for (const n of a.nets || []) osciloscopio(n, a.remover ? false : true); st.osc = st.osciloscopio.length > 0; painel.atualiza(true);
+        if (a.esperar_ms) await espera(+a.esperar_ms);
+        return { nets: st.osciloscopio, amostras: st.amostras.slice(-(+a.amostras || 200)).map(x => ({ t: x.t, v: Object.fromEntries(st.osciloscopio.map((n, k) => [n, x.v[k]])) })) };
+      case 'rodar': {
+        /* avanca o tempo da simulacao sem esperar o relogio (duracao em segundos de simulacao) */
+        garante(); if (st.modo === 'dc') return estado(false);
+        const dur = +a.duracao || 0.1; const fim = st.res.t + dur; let n = 0;
+        while (st.res.t < fim && n < 2e6) { st.res = st.sim.passo(10); n += 10; amostra(); }
+        analisa(true); return estado(false);
+      }
+      case 'limpar': st.cfg = { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [] }; st.osciloscopio = []; gravaCfg(); st.sujo = true; agenda(); return { limpo: true };
+    }
+    throw new Error('ação do simulador desconhecida: ' + acao);
+  }
+
+  window.HubSimulador = {
+    liga, desenha, mcp, estado,
+    mudou() { if (st.ligado) { st.sujo = true; agenda(); } },
+    ligado: () => st.ligado,
+  };
+})();

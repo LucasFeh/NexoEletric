@@ -1646,6 +1646,8 @@ function reapply(){
      commit, undo, redo, recarga de biblioteca e troca de simbolo. Repintar aqui e o que
      separa "miniatura" de "foto do carregamento". */
   renderSheetCards();
+  /* 1.101.0: o simulador (hub-simulador.js) refaz o circuito quando o esquema muda */
+  if (window.HubSimulador) window.HubSimulador.mudou();
   cam.draw();
 }
 /* O Salvar grava o schematic.js. Ele gravava tambem o annotations.js; com o sinalizador
@@ -5681,6 +5683,8 @@ function drawWorld(ctx, cam){
   desenhaFolha(ctx, sheetIdx, { grid: showState.grid, foco: selNet, esc: cam.scale, textosNaMao: textosNaMao(),
                                 antesDosFios: tool === 'wire' ? c => desenhaCruzDoFio(c, 1 / cam.scale) : null });
   desenhaErcNaTela(ctx, cam);
+  /* 1.101.0: a simulação por cima da folha (cores de tensão, pontos da corrente, brilho do LED, rótulos) */
+  if (window.HubSimulador) window.HubSimulador.desenha(ctx, cam);
   drawSelection(ctx, cam);
   drawFerramenta(ctx, cam);
 }
@@ -7603,6 +7607,14 @@ window.__hubEsquemaFirmware = function(){
     }
   return { projeto:SCH_P, params:schematic.params || '', componentes,
            nets:(nets.nets || []).map(n => ({ name:n.name, pins:n.pins.slice() })) };
+};
+
+/* 1.101.0: os ganchos do SIMULADOR (hub-simulador.js) — o modelo, as nets e a câmera desta vista, sem copiar */
+window.__hubSimVista = {
+  projeto: () => SCH_P, model: () => model, slib: () => SLIB, nets: () => nets, folha: () => sheetIdx,
+  cam: () => cam, canvas: () => cv, caixa: c => compBBox(c), redesenha: () => cam.draw(),
+  focar: ref => window.__hubSelectComp(ref),
+  emergencia: c => desenhoDeEmergencia(c),
 };
 
 window.__hubSelectComp = function(ref){

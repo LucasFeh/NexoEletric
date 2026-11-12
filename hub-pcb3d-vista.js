@@ -168,11 +168,20 @@ async function cria(host, opcoes){
     cam.updateProjectionMatrix();
   }
   function pede(){ if (!agendado && vivo) agendado = requestAnimationFrame(desenha); }
+  /* 1.101.0: camadas extras na cena (a corrente nas trilhas do simulador, hub-simulador-pcb.js) e um animador por
+     quadro: enquanto houver animador, a vista desenha sem parar */
+  const extras = new Map();
+  let animador = null, tAnim = 0;
   function desenha(){
     agendado = 0; if (!vivo) return;
     posiciona();
     if (gGiz.visible) gGiz.scale.setScalar(orb.dist * 0.11);
+    if (animador) {
+      const t = performance.now(), dt = tAnim ? Math.min(0.1, (t - tAnim) / 1000) : 0; tAnim = t;
+      try { animador(dt, { cam, dist:orb.dist }); } catch (e) { console.warn('3D: animador', e); animador = null; }
+    }
     ren.render(cena, cam);
+    if (animador) pede();
   }
   function redimensiona(){
     const w = host.clientWidth || 1, h = host.clientHeight || 1;
@@ -986,6 +995,23 @@ async function cria(host, opcoes){
       c.drawImage(cv, 0, 0);
       return out;
     },
+    /* 1.101.0 (simulador): extra(nome, Object3D|null) poe/tira uma camada na cena; anima(fn(dt)|null) chama fn a cada
+       quadro; projeta(x, y, z) -> {x, y, atras} em px do host (para os rotulos HTML); espessura() da placa; T() o three */
+    extra(nome, ob){
+      const ant = extras.get(nome);
+      if (ant) { cena.remove(ant); limpa(ant); extras.delete(nome); }
+      if (ob) { cena.add(ob); extras.set(nome, ob); }
+      pede();
+    },
+    anima(fn){ animador = typeof fn === 'function' ? fn : null; tAnim = 0; pede(); },
+    projeta(x, y, z){
+      posiciona();
+      const v = new T.Vector3(x, y, z).project(cam);
+      return { x:(v.x + 1) / 2 * (host.clientWidth || 1), y:(1 - v.y) / 2 * (host.clientHeight || 1), atras:v.z > 1 || v.z < -1 };
+    },
+    espessura(){ return ESP; },
+    T(){ return T; },
+    host,
     estado(){ return { steps:est.steps, falhas:est.falhas.slice(), corpos:est.corpos, az:orb.az / RAD, el:orb.el / RAD, dist:orb.dist, realView:modo === 'real' }; },
     destroi(){
       vivo = false;

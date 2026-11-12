@@ -96,6 +96,10 @@
         /* as fotos 3D da placa (pcb_render_3d): uma Promise, respondida quando as imagens ficam prontas */
         if (typeof g.render3d !== 'function') throw new Error('esta vista não fotografa em 3D (falta HubMcpVista.render3d: atualize o NexoEletric)');
         return g.render3d(a);
+      case 'simulador':
+        /* 1.101.0: o simulador do esquema (hub-simulador.js) e a corrente nas trilhas do 3D (hub-simulador-pcb.js) */
+        if (!window.HubSimulador || typeof window.HubSimulador.mcp !== 'function') throw new Error('esta vista não tem o simulador (atualize o NexoEletric)');
+        return window.HubSimulador.mcp(a);
       case 'comando': {
         var dna = (window.HubAltiumDNA || window.HubAltiumDna);
         if (typeof g.comando === 'function') return { resultado: g.comando(a.comando, a) };

@@ -4,6 +4,41 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.101.0 — 2026-11-12
+
+**Simulador de circuito no esquema (estilo Falstad), com a corrente nas trilhas da placa em 3D.** Pedido do dono: "um
+simulador que mostra tensão, corrente, igual ao Falstad, com uma área mostrando cálculo, podendo suprimir ou não o
+cálculo, bonito, usando as mesmas mecânicas de edição do esquema e da PCB, com acesso total ao MCP; dá pra ver a corrente
+passando; se der, a placa 3D com a direção da corrente nas trilhas e os cálculos em cima de cada" e "CI com tensão de
+alimentação, ponto de sinal, tudo mostrando bonitinho se eu coloco o mouse em cima do pino".
+- Botão **Simular** na barra do esquema. A simulação roda em cima do esquema de verdade (mesma edição: mexeu, refaz):
+  os fios pintados pela tensão (verde positivo, vermelho negativo), os **pontos andando no sentido da corrente** (mais
+  rápidos quanto maior), por dentro dos componentes de dois pinos também, o **LED acende** na cor dele com o brilho da
+  corrente e cada net ganha o rótulo da tensão.
+- **Mouse no pino**: tensão, corrente entrando/saindo, potência e o papel — alimentação do CI com a faixa dele (✓ ou
+  fora), terra, GPIO (saída alta/baixa/PWM, entrada que lê 0/1/indefinido), sinal, flutuando. **Mouse no componente**: as
+  contas. **Clique** na chave/jumper abre e fecha, o botão fica apertado enquanto segura, a **roda** gira o
+  potenciômetro/LDR; clique no pino de um CI escolhe o GPIO; clique no fio põe uma fonte, manda ao osciloscópio ou vira terra.
+- Painel **Simulação**: Tempo real (liga a placa em t = 0, capacitores descarregados) ou DC (regime), velocidade, o que
+  mostrar, as **Fontes** (deduzidas pelo nome da net: +5V, 3V3, P12/N12, VCC...; pelo comment do conector; ou supostas na
+  entrada do regulador — editáveis, com onda seno/quadrada/triangular), o resumo com os alertas, a área de **Cálculos**
+  com a fórmula e os números (o olho suprime) e o **Osciloscópio** de até 4 nets.
+- Componentes: R (potência pelo footprint), C (tensão nominal), L, ferrite, fusível/PTC (corrente de disparo), diodo,
+  Schottky, zener, TVS, ponte, LED pela cor, BJT NPN/PNP/Darlington e MOSFET N/P pelo nome, reguladores 78xx/79xx/
+  AMS1117/LDO/LM317 (ADJ), conversores LM2575/2596/MP1584/XL4015/MT3608 (modelo médio, com rendimento), 555, amp-ops e
+  comparadores, optoacoplador, ULN2003, portas 74xx/40xx, MCU (ESP32, STM32, AVR, RP2040... com consumo e GPIO), relé,
+  chave, botão, jumper (aberto por padrão), potenciômetro, LDR, NTC, bateria, buzzer, motor; CI desconhecido = consumo
+  entre alimentação e terra. O símbolo que não está na biblioteca (o desenho emprestado) também entra.
+- O motor (hub-simulador-motor.js): análise nodal modificada com Newton, busca em linha, continuação pseudo-transiente
+  (o multivibrador e o 555 viram sem travar) e corte do passo de tempo, como um SPICE pequeno. Conferido contra a teoria:
+  555 (0,693·(RA+2RB)·C), buck pelo FB, LM317 (1,25·(1+R2/R1)), amp-op, multivibrador; as placas do acervo convergem.
+- **Vista PCB › 3D**: a opção **Corrente nas trilhas** — cada trilha acende pela corrente (azul → amarelo → vermelho), as
+  setas andam no sentido dela e o rótulo em cima de cada trilha traz I, R, ΔV e ΔT; a lista ao lado traz a conta
+  (R = ρ·L/(w·t), ΔV = I·R, P = I²·R, ΔT pela IPC-2221 e a corrente máxima para +10 °C). A corrente de cada pino vem da
+  simulação do Esquema e se divide pelo cobre (trilhas, vias e polígonos).
+- MCP, grupo **sim**: `sim_rodar`, `sim_pinos`, `sim_componente`, `sim_controlar` (tudo o que o painel faz, ao vivo) e
+  `sim_trilhas`; a ação `simulador` da vista ao vivo nos dois hubs (o Python e o da janela Rust).
+
 ## 1.100.0 — 2026-11-12
 
 **NexoCODE no esquema: o firmware da placa pela IA, no NexoCode.** Pedido do dono: "na tela do esquema tenha NexoCODE que
