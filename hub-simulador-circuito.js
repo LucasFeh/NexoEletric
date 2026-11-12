@@ -1151,7 +1151,7 @@
           const r = elRes.get(info.el); if (!r) break;
           const vm = r.v[0] - r.v[1], i = r.i[0];
           const rpm = info.w * 60 / (2 * Math.PI);
-          out.rpm = rpm; out.corrente = i;
+          out.rpm = rpm; out.corrente = i; out.tensao = vm; out.kv = info.kv;
           out.linhas.push(L('Tensão no motor', 'V', fmt(vm, 'V')));
           out.linhas.push(L('Corrente', res.modo === 'dc' ? 'I = V / (R + Ke²/b) (regime)' : 'I = (V − Ke·ω) / R = (' + fmt(vm, 'V') + ' − ' + fmt(info.Ke * info.w, 'V') + ') / ' + fmt(info.R, 'Ω'), fmt(i, 'A')));
           out.linhas.push(L('Rotação', 'ω·60/2π (Kv = ' + info.kv + ' rpm/V)', Math.round(rpm).toLocaleString('pt-BR') + ' rpm'));

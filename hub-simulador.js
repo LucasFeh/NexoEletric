@@ -1625,7 +1625,10 @@
         }
         st.ultimoNexoCode = Date.now();
         painel.atualiza();
-        return { mcu: mcu.ref, aplicado, acionados, sem_pino: semPino, pinos, entradas, t: st.res && st.res.t, modo: st.modo };
+        /* os MOTORES da bancada (e do esquema): o painel do motor do NexoCode mostra a rotacao e fecha a malha de rpm com ela */
+        const motores = {};
+        for (const [ref, c] of Object.entries((st.an && st.an.comps) || {})) if (c.tipo === 'motor' && c.rpm != null) motores[ref] = { rpm: Math.round(c.rpm), corrente: c.corrente, tensao: c.tensao, kv: c.kv, titulo: c.titulo };
+        return { mcu: mcu.ref, aplicado, acionados, sem_pino: semPino, pinos, entradas, motores, t: st.res && st.res.t, modo: st.modo };
       }
       case 'recolher': return recolher();
       case 'dados': await carregaDados(); painel.atualiza(true); return { componentes: Object.keys((st.dados && st.dados.componentes) || {}).length };

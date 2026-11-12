@@ -4,6 +4,14 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.102.3 — 2026-11-12
+
+**O motor da bancada volta para o NexoCode.** A resposta do `gpio_lote` (o sincronismo do ESP32 simulado) traz
+`motores: {"M1": {rpm, corrente, tensao, kv, titulo}}`: os motores da Bancada ligados à placa, e os motores do esquema.
+O painel do motor do NexoCode usa esses dados para mostrar a rotação, a corrente e a tensão, e para ajustar o PWM até
+o rpm pedido. Pedido do dono: "no simulador do NexoCode aumentar a velocidade, ligar e desligar a rotação, programar o
+ligamento, ajustar rpm e PWM, e isso tem que ser entregue na simulação da bancada".
+
 ## 1.102.2 — 2026-11-12
 
 **PCB do Simulador: os balões surgem no clique, sem o painel "Corrente nas trilhas"; correção do primeiro sincronismo com o NexoCode.**
