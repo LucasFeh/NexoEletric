@@ -139,7 +139,13 @@
     analise.atualiza();
   }
   /* o resultado vai para o topo da janela: a vista PCB (3D) mostra a corrente nas trilhas */
+  /* a aba Simulador aberta para este projeto (outra janela que nao esta): ela manda */
+  function abaDoProjeto() {
+    if (st.aba) return null;
+    try { const pj = new URLSearchParams(location.search).get('p') || '', w = window.top.__nexoSimAba && window.top.__nexoSimAba[pj]; return w && w !== window && !w.closed && w.HubSimulador ? w : null; } catch (_e) { return null; }
+  }
   function publica() {
+    if (abaDoProjeto()) return;   // quem publica para a PCB e a aba Simulador
     let topo = window;
     try { topo = window.top && window.top.document ? window.top : window; } catch (_e) { topo = window; }
     const v = VISTA();
@@ -1378,6 +1384,17 @@
      HubDraw so neste iframe; o template e os textos nao saem: window.__simVisual) e nada se edita — navegar (roda,
      arrastar com o botao direito/meio) e as interacoes da simulacao. A barra da simulacao fica no canto. */
   function areaDeSimulacao(host) {
+    /* UMA simulacao por projeto: a aba Simulador se registra no topo (window.top.__nexoSimAba[projeto]); o Simular da
+       aba Esquema do mesmo projeto passa a ela os pedidos do MCP/NexoCode e nao publica para a PCB (antes as duas
+       respondiam alternadas e o painel do motor do NexoCode via dois motores, com tempos diferentes) */
+    try {
+      const t = window.top, pj = new URLSearchParams(location.search).get('p') || '';
+      if (t && pj) {
+        t.__nexoSimAba = t.__nexoSimAba || {};
+        t.__nexoSimAba[pj] = window;
+        window.addEventListener('pagehide', () => { try { if (t.__nexoSimAba[pj] === window) delete t.__nexoSimAba[pj]; } catch (_e) { /* ok */ } });
+      }
+    } catch (_e) { /* outra origem */ }
     /* a barra de menus do hub (Arquivo, Editar, Colocar...) e da construcao: a area de simulacao nao a oferece */
     try { Object.defineProperty(window, '__hubMenus', { configurable: true, get: () => null, set: () => {} }); } catch (_e) { /* ok */ }
     const css = document.createElement('style');
@@ -1504,6 +1521,7 @@
   }
   async function mcp(a) {
     a = a || {};
+    { const w = abaDoProjeto(); if (w) return w.HubSimulador.mcp(a); }   // a aba Simulador do projeto responde
     const acao = a.acao || 'estado';
     const garante = () => { if (!st.ligado) liga(true); if (st.sujo) monta(); };
     switch (acao) {

@@ -4,6 +4,14 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.102.4 — 2026-11-12
+
+**Uma simulação por projeto.** Com a aba Simulador aberta, o "Simular" da aba Esquema do mesmo projeto também
+respondia aos pedidos do NexoCode e do MCP e publicava para a PCB. As duas simulações respondiam alternadamente, cada
+uma com o seu tempo (t ≈ 65 s numa, ≈ 115 s na outra), e o painel do motor do NexoCode via dois motores diferentes: a
+malha de rpm oscilava. Agora a aba Simulador se registra no topo da janela, e o Esquema passa a ela os pedidos e não
+publica para a PCB.
+
 ## 1.102.3 — 2026-11-12
 
 **O motor da bancada volta para o NexoCode.** A resposta do `gpio_lote` (o sincronismo do ESP32 simulado) traz
