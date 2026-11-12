@@ -32,7 +32,9 @@
   /* ------------------------------------------------------------------------------------------------ estado */
   const st = {
     ligado: false, rodando: true, modo: 'tempo', velocidade: 1,
-    mostrar: { pontos: true, cores: true, tensoes: true, valores: false, brilho: true },
+    /* tensoes (as pilulas em toda net) comeca DESLIGADO desde a 1.102.1: o dono nao quer balao em tudo — o valor de um
+       ponto aparece no clique > Analisar; quem quiser liga em "Tensao nas nets" */
+    mostrar: { pontos: true, cores: true, tensoes: false, valores: false, brilho: true },
     calc: true, osc: false, fixo: null,
     cfg: { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [] },
     comps: null, mt: null, sim: null, res: null, an: null,
@@ -49,6 +51,7 @@
       if (j && typeof j === 'object') {
         Object.assign(st.cfg, j.cfg || {});
         if (j.mostrar) Object.assign(st.mostrar, j.mostrar);
+        if (!j.v2) st.mostrar.tensoes = false;   // o padrao novo vale tambem para quem ja tinha gravado
         if (j.modo) st.modo = j.modo;
         if (j.velocidade) st.velocidade = j.velocidade;
         if (j.calc != null) st.calc = j.calc;
@@ -60,7 +63,7 @@
   let tGrava = 0;
   function gravaCfgLeve() { if (tGrava) return; tGrava = setTimeout(() => { tGrava = 0; gravaCfg(); }, 2000); }
   function gravaCfg() {
-    try { localStorage.setItem(chave(), JSON.stringify({ cfg: st.cfg, mostrar: st.mostrar, modo: st.modo, velocidade: st.velocidade, calc: st.calc, osciloscopio: st.osciloscopio })); } catch (_e) { /* sem storage */ }
+    try { localStorage.setItem(chave(), JSON.stringify({ v2: 1, cfg: st.cfg, mostrar: st.mostrar, modo: st.modo, velocidade: st.velocidade, calc: st.calc, osciloscopio: st.osciloscopio })); } catch (_e) { /* sem storage */ }
   }
 
   /* ------------------------------------------------------------------------------------------------ montar e rodar */
@@ -85,12 +88,39 @@
     analisa(true);
     return !st.erro;
   }
+  /* O QUE APARECE e a MEDIA (pedido do dono: "as descrições ficam brilhando quando o ESP manda o sinal"): o PWM do ESP32
+     chaveia a cada passo do tempo, e os rotulos, as cores, os calculos e os alertas mostravam o valor do instante. Os
+     passos entre duas analises sao somados (acumula) e a media ainda passa por um filtro de ~0,3 s — o que um
+     multimetro mostraria. O osciloscopio continua com o valor de cada instante (st.hist / st.amostras). */
+  function acumula(r) {
+    if (!r || r.modo === 'dc') return;
+    const a = st.acc || (st.acc = { n: 0, v: Object.create(null), i: r.el.map(e => e.i.map(() => 0)), p: r.el.map(() => 0) });
+    if (a.i.length !== r.el.length) { st.acc = null; return acumula(r); }
+    a.n++;
+    for (const k in r.v) a.v[k] = (a.v[k] || 0) + r.v[k];
+    r.el.forEach((e, j) => { const ai = a.i[j]; for (let q = 0; q < e.i.length; q++) ai[q] += e.i[q]; a.p[j] += e.p; });
+  }
+  function resParaMostrar() {
+    const r = st.res;
+    if (!r || r.modo === 'dc' || !st.acc || !st.acc.n) { st.vis = null; return r; }
+    const a = st.acc, n = a.n;
+    const med = { v: {}, el: r.el.map((e, j) => Object.assign({}, e, { i: a.i[j].map(x => x / n), p: a.p[j] / n })) };
+    for (const k in a.v) med.v[k] = a.v[k] / n;
+    st.acc = null;
+    const ant = st.vis, k = ant ? 0.2 : 1;
+    if (ant && ant.el.length === med.el.length) {
+      for (const q in med.v) if (q in ant.v) med.v[q] = ant.v[q] + (med.v[q] - ant.v[q]) * k;
+      med.el.forEach((e, j) => { const b = ant.el[j]; if (!b) return; e.i = e.i.map((x, q) => b.i[q] + (x - b.i[q]) * k); e.p = b.p + (e.p - b.p) * k; });
+    }
+    st.vis = med;
+    return Object.assign({}, r, { v: med.v, el: med.el });
+  }
   function analisa(forca) {
     if (!st.res || !st.mt) { st.an = null; painel.atualiza(); return; }
     const agora = performance.now();
     if (!forca && agora - st.ultimaAnalise < 90) return;
     st.ultimaAnalise = agora;
-    st.an = C.analisa(st.mt, st.res);
+    st.an = C.analisa(st.mt, resParaMostrar());
     let vm = 1;
     for (const [n, x] of Object.entries(st.res.v)) if (!n.includes('#') && isFinite(x)) vm = Math.max(vm, Math.abs(x));
     st.vmax = vm;
@@ -103,6 +133,7 @@
     calculaFluxos();
     publica();
     painel.atualiza();
+    analise.atualiza();
   }
   /* o resultado vai para o topo da janela: a vista PCB (3D) mostra a corrente nas trilhas */
   function publica() {
@@ -170,10 +201,14 @@
       let n = Math.max(1, Math.round(alvo / st.sim.dt));
       const t0 = performance.now();
       while (n > 0 && performance.now() - t0 < 14) {
-        const k = Math.min(n, 4);
+        /* um passo de cada vez: o PWM chaveia passo a passo e medir de 4 em 4 caia sempre no mesmo estado (o duty de
+           50 % aparecia 0 V na media e no osciloscopio) */
+        const k = 1;
         try { st.res = st.sim.passo(k); } catch (e) { st.erro = 'o transiente falhou: ' + e.message; st.rodando = false; break; }
+        acumula(st.res);
         n -= k;
         amostra();
+        analise.amostra(st.res);
       }
       analisa(false);
     }
@@ -329,7 +364,7 @@
       ctx.lineCap = 'round';
       ctx.lineWidth = Math.max(3.2 * px, 14);   // cobre o fio da folha mesmo de perto
       for (const s of st.fluxos) {
-        ctx.strokeStyle = corDaTensao(st.res.v[s.net], 0.95);
+        ctx.strokeStyle = corDaTensao(vMostra(s.net), 0.95);
         ctx.beginPath(); ctx.moveTo(s.ax, s.ay); ctx.lineTo(s.bx, s.by); ctx.stroke();
       }
     }
@@ -345,6 +380,20 @@
       gr.addColorStop(0.35, hexA(a.cor || '#ff3b30', 0.35 * a.brilho));
       gr.addColorStop(1, hexA(a.cor || '#ff3b30', 0));
       ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    }
+    /* a chave/botao fechado: um contorno amarelo e "APERTADO" (o clique veio da folha ou do botao do NexoCode) */
+    for (const c of st.comps || []) {
+      if (c.folha !== si || !c.pinos.length) continue;
+      const inf = info(c.ref);
+      if (!inf || inf.tipo !== 'chave' || !inf.fechada || inf.interativo !== 'botao' && !inf.doNexoCode) continue;
+      let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+      for (const p of c.pinos) { x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y); x2 = Math.max(x2, p.x); y2 = Math.max(y2, p.y); }
+      const m = 120;
+      ctx.save();
+      ctx.shadowColor = '#facc15'; ctx.shadowBlur = 18; ctx.strokeStyle = '#facc15'; ctx.lineWidth = Math.max(3 * px, 8);
+      ctx.strokeRect(x1 - m, y1 - m, x2 - x1 + 2 * m, y2 - y1 + 2 * m);
+      ctx.restore();
+      inf._marca = { x: (x1 + x2) / 2, y: y2 + m };
     }
     /* os pontos da corrente */
     if (st.mostrar.pontos) {
@@ -375,17 +424,67 @@
     ctx.font = '600 11px ' + (getComputedStyle(document.body).getPropertyValue('--font') || 'system-ui');
     ctx.textBaseline = 'middle';
     if (st.mostrar.tensoes && cam.scale > 0.035) {
-      const feitas = new Set();
-      const sh = v.model().sheets[si];
-      const ancoras = [];
-      for (const l of [].concat(sh.netlabels || [], sh.powers || [])) ancoras.push({ net: l.net, x: l.x, y: l.y });
-      if (st.fluxos) for (const s of st.fluxos) ancoras.push({ net: s.net, x: (s.ax + s.bx) / 2, y: (s.ay + s.by) / 2, fio: true });
-      for (const a of ancoras) {
-        if (feitas.has(a.net) || !(a.net in st.res.v)) continue;
-        feitas.add(a.net);
+      /* OS BALOES DE TENSAO ORGANIZADOS (pedido do dono: "mais organizado, com uma linha ligando ate o pino"): um por net,
+         preso a um PINO da net (o do componente com menos pinos: fora do aperto do CI), posto ao redor dele no primeiro
+         lugar livre (nao encosta em outro balao nem cobre outro pino), com a linha de chamada do pino ate o balao. A
+         ordem e a largura sao fixas (a largura de "-00,00 mV"): o balao nao pula quando o valor muda. */
+      const porNet = new Map();
+      for (const c of st.comps || []) {
+        if (c.folha !== si) continue;
+        for (const p of c.pinos) {
+          if (!p.net || !(p.net in st.res.v)) continue;
+          const a = porNet.get(p.net);
+          if (!a || c.pinos.length < a.n) porNet.set(p.net, { net: p.net, x: p.x, y: p.y, n: c.pinos.length });
+        }
+      }
+      const pinosTela = [];
+      for (const c of st.comps || []) if (c.folha === si) for (const p of c.pinos) { const q = tela(p.x, p.y); if (q.x > -20 && q.y > -20 && q.x < W + 20 && q.y < H + 20) pinosTela.push(q); }
+      /* o corpo de cada componente e o nome dele (em cima): o balao nao cobre */
+      const corpos = [];
+      for (const c of st.comps || []) {
+        if (c.folha !== si || !c.pinos.length) continue;
+        let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+        for (const p of c.pinos) { const q = tela(p.x, p.y); x1 = Math.min(x1, q.x); x2 = Math.max(x2, q.x); y1 = Math.min(y1, q.y); y2 = Math.max(y2, q.y); }
+        if (x2 < -40 || y2 < -40 || x1 > W + 40 || y1 > H + 40) continue;
+        corpos.push({ x1: x1 + 6, x2: x2 - 6, y1: y1 - 30, y2: y2 + 14 });
+      }
+      const wFixo = ctx.measureText('-00,00 mV').width + 12, hP = 17;
+      const postos = [];
+      /* o "APERTADO" do botao fechado tambem ocupa lugar */
+      for (const c of st.comps || []) { const inf = info(c.ref); if (c.folha === si && inf && inf._marca && inf.tipo === 'chave' && inf.fechada) { const q = tela(inf._marca.x, inf._marca.y); postos.push({ x1: q.x - 40, x2: q.x + 100, y1: q.y - 24, y2: q.y - 4 }); } }
+      const bate = (r) => postos.some(o => r.x1 < o.x2 + 3 && r.x2 > o.x1 - 3 && r.y1 < o.y2 + 3 && r.y2 > o.y1 - 3)
+        || pinosTela.some(q => q.x > r.x1 - 4 && q.x < r.x2 + 4 && q.y > r.y1 - 4 && q.y < r.y2 + 4)
+        || corpos.some(o => o.x2 > o.x1 && r.x1 < o.x2 && r.x2 > o.x1 && r.y1 < o.y2 && r.y2 > o.y1);
+      /* os lugares em volta do pino: em cima/embaixo primeiro (os fios correm na horizontal), depois na diagonal, mais longe */
+      const lugares = [];
+      /* na diagonal primeiro: a linha de chamada fica a vista (reto em cima o balao a escondia) */
+      for (const d of [34, 52, 72, 96]) for (const [ax, ay] of [[0.9, -1], [-0.9, -1], [0.9, 1], [-0.9, 1], [0, -1.2], [0, 1.2], [1.8, 0], [-1.8, 0]]) lugares.push([ax * d, ay * d]);
+      const lista = [...porNet.values()].sort((a, b) => a.net < b.net ? -1 : a.net > b.net ? 1 : 0);
+      for (const a of lista) {
         const p = tela(a.x, a.y);
         if (p.x < -50 || p.y < -20 || p.x > W + 50 || p.y > H + 20) continue;
-        pilula(ctx, p.x + 8, p.y - 12, fmt(st.res.v[a.net], 'V'), corDaTensao(st.res.v[a.net], 1), (st.res.flutuantes || []).includes(a.net));
+        let r = null;
+        for (const [dx, dy] of lugares) {
+          const cx = p.x + dx, cy = p.y + dy;
+          const c = { x1: cx - wFixo / 2, x2: cx + wFixo / 2, y1: cy - hP / 2, y2: cy + hP / 2, cx, cy };
+          if (!bate(c)) { r = c; break; }
+        }
+        if (!r) continue;   // sem lugar livre perto: fica sem balao (o clique > Analisar mostra)
+        postos.push(r);
+        const v = vMostra(a.net), cor = corDaTensao(v, 1), flut = (st.res.flutuantes || []).includes(a.net);
+        /* a linha de chamada: do pino ate a borda do balao mais perto */
+        const bx = Math.max(r.x1, Math.min(p.x, r.x2)), by = p.y < r.y1 ? r.y1 : p.y > r.y2 ? r.y2 : r.cy;
+        ctx.strokeStyle = corDaTensao(v, 1); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(bx, by); ctx.stroke();
+        ctx.fillStyle = cor; ctx.beginPath(); ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2); ctx.fill();
+        const txt = fmt(v, 'V');
+        ctx.fillStyle = 'rgba(17,20,26,.92)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(r.x1, r.y1, wFixo, hP, 8); else ctx.rect(r.x1, r.y1, wFixo, hP);
+        ctx.fill();
+        ctx.strokeStyle = cor; ctx.lineWidth = 1.2; ctx.stroke();
+        ctx.fillStyle = flut ? '#9ca3af' : '#f3f4f6';
+        ctx.textAlign = 'center'; ctx.fillText(txt, r.cx, r.cy + 0.5); ctx.textAlign = 'left';
       }
     }
     if (st.mostrar.valores && cam.scale > 0.05) for (const c of st.comps || []) {
@@ -407,6 +506,12 @@
       ctx.beginPath(); ctx.moveTo(p.x + 8, p.y - 20); ctx.lineTo(p.x + 16, p.y - 6); ctx.lineTo(p.x, p.y - 6); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#111'; ctx.fillText('!', p.x + 6.5, p.y - 11);
     }
+    for (const c of st.comps || []) {
+      const inf = info(c.ref);
+      if (c.folha !== si || !inf || !inf._marca || inf.tipo !== 'chave' || !inf.fechada || inf.interativo !== 'botao' && !inf.doNexoCode) continue;
+      const p = tela(inf._marca.x, inf._marca.y);
+      pilula(ctx, p.x - 34, p.y - 14, inf.doNexoCode ? 'APERTADO (NexoCode)' : 'APERTADO', '#facc15', false);
+    }
     /* o pino sob o mouse */
     if (st.hover && st.hover.tipo === 'pino') {
       const p = tela(st.hover.x, st.hover.y);
@@ -415,6 +520,7 @@
     }
     ctx.restore();
   }
+  const vMostra = net => (st.vis && net in st.vis.v ? st.vis.v[net] : st.res.v[net]);
   function hexA(hex, a) {
     const h = String(hex).replace('#', '');
     const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
@@ -470,8 +576,7 @@
     const h = acha(mundoDe(e));
     const antes = st.hover && JSON.stringify([st.hover.tipo, st.hover.ref, st.hover.num, st.hover.net]);
     st.hover = h;
-    if (h && h.tipo === 'comp' && !st.fixo) painel.calculos(h.ref);
-    dica.mostra(h, e);
+    /* nada de balao ao passar o mouse (pedido do dono): so o destaque; o clique abre Analisar */
     if (antes !== (h && JSON.stringify([h.tipo, h.ref, h.num, h.net]))) { const v = VISTA(); if (v) v.redesenha(); }
     const inf = h && h.tipo === 'comp' ? info(h.ref) : null;
     const cv = VISTA() && VISTA().canvas();
@@ -491,7 +596,9 @@
         window.addEventListener('mouseup', solta, true);
         return;
       }
+      e.stopPropagation(); e.preventDefault();
       st.fixo = h.ref; painel.calculos(h.ref);
+      menu.abre(h, e, false);
       return;
     }
     if (h.tipo === 'pino' || h.tipo === 'fio') {
@@ -513,6 +620,7 @@
   function alternaChave(ref) { const inf = info(ref); defineChave(ref, !(inf && inf.fechada)); }
   function defineChave(ref, fechada) {
     const inf = info(ref); if (!inf || !inf.sw) return false;
+    if (!fechada) inf.doNexoCode = false;
     inf.fechada = !!fechada; inf.sw.fechada = !!fechada;
     if (inf.sw2) inf.sw2.fechada = !fechada;
     inf.rotulo = inf.rotulo.replace(/\((fechad[oa]|abert[oa])\)/, fechada ? '(fechado)' : '(aberto)');
@@ -633,7 +741,21 @@
 .sim-calc .ds{margin-top:8px; padding:7px 9px; border-radius:8px; background:rgba(59,130,246,.1)} .sim-calc .ds a{color:#93c5fd}
 .sim-menu{position:fixed; z-index:61; min-width:210px; padding:6px; border-radius:10px; background:var(--panel, #1c1f26); color:var(--fg, #e5e7eb);
   border:1px solid var(--border, #333); box-shadow:0 12px 32px rgba(0,0,0,.5); font:12px var(--font, system-ui)}
-.sim-menu .t{padding:4px 8px 6px; font-weight:700} .sim-menu .s{padding:2px 8px 4px; color:var(--fg-dim, #9ca3af); font-size:11px}
+.sim-menu .t{padding:4px 8px 6px; font-weight:700}
+.sim-menu .an{display:flex; gap:4px; align-items:center; padding:2px 6px 8px; border-bottom:1px solid var(--border, #333); margin-bottom:4px}
+.sim-menu .an b{font-size:11px; color:var(--fg-dim, #9ca3af); margin-right:4px}
+.sim-menu .an button{width:auto; flex:1; text-align:center; border:1px solid var(--border, #333); padding:5px 6px}
+.sim-an{position:fixed; z-index:58; width:360px; border-radius:12px; background:rgba(12,15,20,.96); color:#e5e7eb; border:1px solid rgba(250,204,21,.45);
+  box-shadow:0 14px 40px rgba(0,0,0,.55); font:12px var(--font, system-ui); overflow:hidden}
+.sim-an .hd{display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid rgba(255,255,255,.08); cursor:move; user-select:none}
+.sim-an .hd b{flex:1} .sim-an .hd button{height:22px; min-width:22px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.05); color:inherit; cursor:pointer}
+.sim-an .hd button.on{background:#f59e0b; color:#111}
+.sim-an .bd{padding:8px 10px; max-height:360px; overflow:auto}
+.sim-an .g{display:grid; grid-template-columns:1fr auto; gap:3px 10px} .sim-an .g .k{color:#9ca3af} .sim-an .g .v{font-weight:700; text-align:right; font-variant-numeric:tabular-nums}
+.sim-an .l{padding:4px 0; border-bottom:1px dashed rgba(255,255,255,.08)} .sim-an .lf{font:10.5px var(--mono, ui-monospace, monospace); color:#93c5fd}
+.sim-an .ds{margin-top:6px; padding:6px 8px; border-radius:7px; background:rgba(59,130,246,.12); color:#dbeafe}
+.sim-an canvas{display:block; width:100%; height:170px; border-radius:8px; background:#05070a}
+.sim-an .leg{display:flex; justify-content:space-between; color:#9ca3af; font:10.5px ui-monospace, monospace; margin-top:4px} .sim-menu .s{padding:2px 8px 4px; color:var(--fg-dim, #9ca3af); font-size:11px}
 .sim-menu button{display:block; width:100%; text-align:left; padding:6px 9px; border:0; border-radius:6px; background:transparent; color:inherit; cursor:pointer; font:inherit}
 .sim-menu button:hover, .sim-menu button.on{background:color-mix(in srgb, var(--hi, #f59e0b) 22%, transparent)}
 .sim-menu .lin{display:flex; gap:6px; padding:4px 8px} .sim-menu .lin input{flex:1; min-width:0; height:24px; border-radius:6px; border:1px solid var(--border, #333); background:var(--panel2, #23262e); color:inherit; padding:0 6px}
@@ -738,9 +860,29 @@
       fecha(); dica.esconde();
       el = $c('div', 'sim-menu');
       const net = h.net;
+      /* ANALISAR: a pessoa escolhe ver em lista (valores e contas) ou no osciloscopio (o sinal) */
+      const an = $c('div', 'an');
+      an.append($c('b', null, 'Analisar'));
+      const bl = $c('button', null, '📋 Lista'), bo = $c('button', null, '📈 Osciloscópio');
+      bl.title = 'Os valores e as contas numa janela'; bo.title = 'O sinal no tempo numa janela de osciloscópio';
+      bl.onclick = () => { analise.abre(h, 'lista', e); fecha(); };
+      bo.onclick = () => { analise.abre(h, 'osc', e); fecha(); };
+      an.append(bl, bo);
+      if (h.tipo === 'comp') {
+        const inf = info(h.ref), c = st.an.comps[h.ref];
+        el.append($c('div', 't', (c && c.titulo) || h.ref), an);
+        document.body.append(el);
+        el.style.left = Math.min(e.clientX + 6, window.innerWidth - 240) + 'px';
+        el.style.top = Math.min(e.clientY + 6, window.innerHeight - el.offsetHeight - 8) + 'px';
+        const fora0 = ev => { if (el && !el.contains(ev.target)) { fecha(); window.removeEventListener('mousedown', fora0, true); } };
+        setTimeout(() => window.addEventListener('mousedown', fora0, true), 0);
+        for (const ev of ['mousedown', 'wheel', 'contextmenu']) el.addEventListener(ev, x => x.stopPropagation());
+        void inf;
+        return;
+      }
       if (h.tipo === 'pino') {
         const p = st.an.pinos[h.ref + '-' + h.num] || {};
-        el.append($c('div', 't', p.texto || h.ref), $c('div', 's', (net || 'sem ligação') + ' · ' + fmt(p.v, 'V')));
+        el.append($c('div', 't', p.texto || h.ref), $c('div', 's', (net || 'sem ligação') + ' · ' + fmt(p.v, 'V')), an);
         const inf = info(h.ref);
         if (inf && /^(mcu|ci|desconhecido)$/.test(inf.tipo) && net) {
           const key = h.ref + '-' + h.num, atual = (st.cfg.gpio[key] || {}).modo || 'nada';
@@ -750,7 +892,7 @@
             el.append(b);
           }
         }
-      } else el.append($c('div', 't', 'Net ' + net), $c('div', 's', fmt(st.res.v[net], 'V')));
+      } else el.append($c('div', 't', 'Net ' + net), $c('div', 's', fmt(vMostra(net), 'V')), an);
       if (net && !(st.mt.terra || []).includes(net)) {
         const lin = $c('div', 'lin'), inp = $c('input'); inp.placeholder = 'tensão (V)'; inp.value = (st.cfg.fontes[net] && st.cfg.fontes[net].v) || '';
         const ok = $c('button', null, 'Fonte'); ok.style.width = 'auto';
@@ -777,6 +919,134 @@
       const i = el.querySelector('input'); if (i && (h.tipo === 'fio' || focaTensao)) i.focus();
     }
     return { abre, fecha, aberto: () => !!el };
+  })();
+
+  const analise = (() => {
+    const janelas = [];
+    let serie = 0;
+    function titulo(h) {
+      if (h.tipo === 'pino') { const p = st.an && st.an.pinos[h.ref + '-' + h.num]; return (p && p.texto) || (h.ref + ' pino ' + h.num); }
+      if (h.tipo === 'fio') return 'Net ' + h.net;
+      const c = st.an && st.an.comps[h.ref]; return (c && c.titulo) || h.ref;
+    }
+    /* as nets a medir no osciloscopio: a do pino/fio; no componente, as duas pontas (a diferenca e a tensao nele) */
+    function netsDe(h) {
+      if (h.net) return [h.net];
+      const inf = info(h.ref); if (!inf) return [];
+      return [...new Set(inf.pinos.map(p => p.net).filter(Boolean))].slice(0, 2);
+    }
+    function abre(h, modo, e) {
+      const j = { id: ++serie, h: Object.assign({}, h), modo, el: $c('div', 'sim-an') };
+      const hd = $c('div', 'hd'), b = $c('b', null, titulo(h));
+      const bl = $c('button', null, '📋'), bo = $c('button', null, '📈'), x = $c('button', null, '×');
+      bl.title = 'Lista'; bo.title = 'Osciloscópio'; x.title = 'Fechar';
+      bl.onclick = () => { j.modo = 'lista'; pinta(j); }; bo.onclick = () => { j.modo = 'osc'; pinta(j); };
+      x.onclick = () => { j.el.remove(); janelas.splice(janelas.indexOf(j), 1); };
+      hd.append(b, bl, bo, x);
+      j.bd = $c('div', 'bd'); j.btL = bl; j.btO = bo;
+      j.el.append(hd, j.bd);
+      for (const ev of ['mousedown', 'wheel', 'contextmenu', 'dblclick', 'keydown']) j.el.addEventListener(ev, z => z.stopPropagation(), { passive: ev === 'wheel' });
+      hd.addEventListener('mousedown', ev => {
+        if (ev.target.closest('button')) return;
+        const r = j.el.getBoundingClientRect(), ox = ev.clientX - r.left, oy = ev.clientY - r.top;
+        const mv = m => { j.el.style.left = Math.max(0, m.clientX - ox) + 'px'; j.el.style.top = Math.max(0, m.clientY - oy) + 'px'; };
+        const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+        window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+      });
+      document.body.append(j.el);
+      j.el.style.left = Math.min((e ? e.clientX : 200) + 14, window.innerWidth - 380) + 'px';
+      j.el.style.top = Math.min((e ? e.clientY : 120) + 10, window.innerHeight - 260) + 'px';
+      j.nets = netsDe(h); j.amostras = [];
+      janelas.push(j);
+      pinta(j);
+      return j;
+    }
+    /* a cada analise: a lista com os valores medios; o osciloscopio guarda o instante (o sinal de verdade) */
+    /* as nets que a vista PCB (o cartao do pad > Osciloscopio) pediu: o sinal de cada passo, lido pelo topo */
+    const assinadas = new Map();   // net -> [{t, v}]
+    try {
+      (window.top || window).__nexoSimSerie = {
+        assina(net) { if (net && !assinadas.has(net)) assinadas.set(net, []); return true; },
+        solta(net) { assinadas.delete(net); },
+        le(net) { return assinadas.get(net) || []; },
+      };
+    } catch (_e) { /* outra origem */ }
+    function amostra(r) {
+      if (!r) return;
+      for (const [n, A] of assinadas) {
+        const ult = A[A.length - 1];
+        if (ult && r.t === ult.t) continue;
+        A.push({ t: r.t, v: r.v[n] });
+        if (A.length > 1200) A.splice(0, A.length - 1200);
+      }
+      for (const j of janelas) {
+        if (!j.nets.length) continue;
+        const ult = j.amostras[j.amostras.length - 1];
+        if (ult && r.t === ult.t) continue;
+        j.amostras.push({ t: r.t, v: j.nets.map(n => r.v[n]) });
+        if (j.amostras.length > 1200) j.amostras.splice(0, j.amostras.length - 1200);
+      }
+    }
+    function atualiza() {
+      if (st.modo === 'dc') amostra(st.res);
+      for (const j of janelas) pinta(j);
+    }
+    function pinta(j) {
+      j.btL.classList.toggle('on', j.modo === 'lista'); j.btO.classList.toggle('on', j.modo === 'osc');
+      if (!st.an) return;
+      const h = j.h;
+      if (j.modo === 'lista') {
+        j.bd.textContent = '';
+        const g = $c('div', 'g');
+        const kv = (k, v) => g.append($c('span', 'k', k), $c('span', 'v', v));
+        if (h.tipo === 'pino') {
+          const p = st.an.pinos[h.ref + '-' + h.num] || {};
+          kv('Net', p.net || '—'); kv('Tensão (média)', fmt(p.v, 'V'));
+          if (Math.abs(p.i) > 1e-10) kv('Corrente', fmt(Math.abs(p.i), 'A') + (p.i > 0 ? ' entrando' : ' saindo'));
+          if (Math.abs(p.i * p.v) > 1e-7) kv('Potência', fmt(Math.abs(p.i * p.v), 'W'));
+          j.bd.append(g);
+          if (p.papel) j.bd.append($c('div', 'l', p.papel));
+          if (p.alerta) j.bd.append($c('div', 'l', '⚠ ' + p.alerta));
+          const ds = pinoDoDatasheet(h.ref, h.num);
+          if (ds) { const d = $c('div', 'ds'); d.append($c('b', null, (ds.nome || 'pino ' + h.num) + (ds.tipo ? ' · ' + ds.tipo : ''))); if (ds.funcao) d.append($c('div', null, ds.funcao)); if (ds.descricao) d.append($c('div', 'lf', ds.descricao)); j.bd.append(d); }
+        } else if (h.tipo === 'fio') {
+          kv('Tensão (média)', fmt(vMostra(h.net), 'V'));
+          const segs = (st.fluxos || []).filter(s => s.net === h.net);
+          if (segs.length) kv('Maior corrente num trecho', fmt(Math.max(...segs.map(s => Math.abs(s.i))), 'A'));
+          j.bd.append(g);
+        } else {
+          const c = st.an.comps[h.ref];
+          if (!c) { j.bd.append($c('div', 'l', 'fora da simulação')); return; }
+          for (const l of c.linhas) { const d = $c('div', 'l'); const lt = $c('div', 'g'); lt.append($c('span', 'k', l.t), $c('span', 'v', l.r)); d.append(lt); if (l.f) d.append($c('div', 'lf', l.f)); j.bd.append(d); }
+          for (const a of c.alertas) j.bd.append($c('div', 'l', '⚠ ' + a));
+        }
+        return;
+      }
+      /* osciloscopio */
+      let cv = j.bd.querySelector('canvas'), leg = j.bd.querySelector('.leg');
+      if (!cv) { j.bd.textContent = ''; cv = document.createElement('canvas'); leg = $c('div', 'leg'); j.bd.append(cv, leg); }
+      const dpr = window.devicePixelRatio || 1, W = cv.clientWidth || 340, H = cv.clientHeight || 170;
+      if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+      const c2 = cv.getContext('2d'); c2.setTransform(dpr, 0, 0, dpr, 0, 0); c2.clearRect(0, 0, W, H);
+      c2.strokeStyle = 'rgba(255,255,255,.07)';
+      for (let i = 1; i < 4; i++) { c2.beginPath(); c2.moveTo(0, H * i / 4); c2.lineTo(W, H * i / 4); c2.stroke(); }
+      for (let i = 1; i < 8; i++) { c2.beginPath(); c2.moveTo(W * i / 8, 0); c2.lineTo(W * i / 8, H); c2.stroke(); }
+      const A = j.amostras;
+      /* no componente de duas pontas, a tensao NELE (a diferenca); no pino/fio, a tensao da net */
+      const val = a => (j.nets.length === 2 && h.tipo === 'comp') ? a.v[0] - a.v[1] : a.v[0];
+      if (st.modo === 'dc' || A.length < 2) { c2.fillStyle = '#6b7280'; c2.font = '11px system-ui'; c2.fillText(st.modo === 'dc' ? 'o osciloscópio anda no Tempo real' : 'esperando o sinal…', 10, H / 2); leg.textContent = ''; return; }
+      let lo = Infinity, hi = -Infinity;
+      for (const a of A) { const x = val(a); if (isFinite(x)) { lo = Math.min(lo, x); hi = Math.max(hi, x); } }
+      if (!(hi > lo)) { hi = lo + 0.5; lo -= 0.5; }
+      const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+      const t0 = A[0].t, t1 = A[A.length - 1].t;
+      c2.strokeStyle = '#facc15'; c2.lineWidth = 1.7; c2.beginPath();
+      A.forEach((a, i) => { const X = (a.t - t0) / Math.max(t1 - t0, 1e-12) * W, Y = H - (val(a) - lo) / (hi - lo) * H; if (i) c2.lineTo(X, Y); else c2.moveTo(X, Y); });
+      c2.stroke();
+      const atual = val(A[A.length - 1]);
+      leg.innerHTML = '<span>' + fmt(lo, 'V') + ' … ' + fmt(hi, 'V') + '</span><span>agora ' + fmt(atual, 'V') + '</span><span>' + fmt(t1 - t0, 's') + '</span>';
+    }
+    return { abre, atualiza, amostra, lista: () => janelas };
   })();
 
   function osciloscopio(net, on) {
@@ -1035,7 +1305,7 @@
       if (!st.calc) return;
       refs.calc.textContent = '';
       const c = calcRef && st.an && st.an.comps[calcRef];
-      if (!c) { refs.calc.append($c('div', 'vazio', 'Passe o mouse num componente para ver as contas (clique fixa).')); return; }
+      if (!c) { refs.calc.append($c('div', 'vazio', 'Clique num componente para ver as contas (e em Analisar para abrir a lista ou o osciloscópio).')); return; }
       refs.calc.append($c('div', 'tit', c.titulo));
       if (!c.linhas.length) refs.calc.append($c('div', 'vazio', 'Sem contas para este componente.'));
       for (const l of c.linhas) {
@@ -1072,7 +1342,7 @@
       if (!tb || b || st.aba) return;
       b = document.createElement('button');
       b.id = 'btnSim';
-      b.title = 'Simular o circuito: tensão e corrente na folha, como no Falstad (mouse no pino mostra a tensão; clique na chave; roda no potenciômetro)';
+      b.title = 'Simular o circuito: tensão e corrente na folha, como no Falstad (clique num ponto › Analisar; clique na chave; roda no potenciômetro)';
       b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M2 12h3l2-6 4 12 3-9 2 3h6"/></svg><span class="lb">Simular</span>';
       b.addEventListener('click', () => { const t = topo(); if (t && !st.ligado) t.goTab('sim'); else liga(); });
       if (topo()) b.title = 'Abrir este esquema na aba Simulador: tensão e corrente na folha, como no Falstad';
@@ -1236,6 +1506,16 @@
     switch (acao) {
       case 'ligar': liga(true); if (a.modo) { st.modo = a.modo === 'dc' ? 'dc' : 'tempo'; } if (a.velocidade) st.velocidade = +a.velocidade; monta(); await espera(+a.esperar_ms || 300); return estado(false);
       case 'desligar': liga(false); return { ligado: false };
+      /* abre a janela de ANALISE (lista ou osciloscopio) de um pino {ref, num}, de uma net {net} ou de um componente {ref} */
+      case 'analisar': {
+        garante();
+        const h = a.net ? { tipo: 'fio', net: a.net } : a.num != null ? { tipo: 'pino', ref: a.ref, num: String(a.num), net: (st.an && st.an.pinos[a.ref + '-' + a.num] || {}).net } : { tipo: 'comp', ref: a.ref };
+        if (h.tipo !== 'fio' && !info(h.ref)) throw new Error('componente ' + a.ref + ' fora da simulação');
+        const j = analise.abre(h, a.modo === 'osc' || a.modo === 'osciloscopio' ? 'osc' : 'lista', null);
+        await espera(+a.esperar_ms || 400);
+        return { aberta: j.id, modo: j.modo, nets: j.nets, amostras: j.amostras.length, texto: j.bd.innerText.slice(0, 2000) };
+      }
+      case 'analisar_fechar': { const L = analise.lista(); const n = L.length; for (const j of L.slice()) j.el.remove(); L.length = 0; return { fechadas: n }; }
       case 'pausar': st.rodando = false; painel.atualiza(); return { rodando: false };
       case 'continuar': st.rodando = true; agenda(); return { rodando: true };
       case 'religar': garante(); religa(); await espera(+a.esperar_ms || 300); return estado(false);
@@ -1310,6 +1590,25 @@
         }
         if (remonta) monta();
         else if (aplicado.length && st.sim) { st.res = st.modo === 'dc' ? st.sim.dc() : st.sim.passo(1); analisa(true); }
+        /* ACIONAR (NexoCode 0.2.1: o botao ou o potenciometro mexido na tela do ESP32 simulado): {"27": true} aperta a chave
+           ligada a esse GPIO (fica APERTADO na folha), {"34": 0.7} poe o cursor do potenciometro ligado a ele */
+        const acionados = [];
+        for (const [g, val] of Object.entries(a.acionar || {})) {
+          const p = porGpio.get(+g); if (!p || !p.net) continue;
+          const nets = new Set([p.net]);
+          /* a chave pode estar atras de um resistor de serie (ate 1 kΩ): sobe um nivel */
+          for (const c of st.mt.comps.values()) if (c.tipo === 'resistor' && c.r <= 1000 && c.pinos.some(q => q.net === p.net)) for (const q of c.pinos) if (q.net) nets.add(q.net);
+          if (typeof val === 'boolean') {
+            const ch = [...st.mt.comps.values()].find(c => c.tipo === 'chave' && c.sw && c.pinos.some(q => nets.has(q.net)));
+            /* o false se repete a cada sincronismo completo (3 s): so solta o que o NexoCode apertou, nao a chave que a
+               pessoa fechou na folha */
+            if (ch && (val || ch.doNexoCode)) { defineChave(ch.ref, !!val); ch.doNexoCode = !!val; acionados.push({ gpio: +g, ref: ch.ref, fechada: !!val }); }
+          } else if (isFinite(+val)) {
+            const pt = [...st.mt.comps.values()].find(c => c.tipo === 'pot' && c.pinos.some(q => nets.has(q.net)));
+            if (pt) { definePot(pt.ref, +val); acionados.push({ gpio: +g, ref: pt.ref, posicao: +val }); }
+          }
+        }
+        if (acionados.length) { st.res = st.modo === 'dc' ? st.sim.dc() : st.sim.passo(1); analisa(true); }
         gravaCfgLeve();
         const vdd = mcu.alim && mcu.alim[0] && st.res ? st.res.v[mcu.alim[0].net] : 3.3;
         const pinos = {}, entradas = {};
@@ -1323,7 +1622,7 @@
         }
         st.ultimoNexoCode = Date.now();
         painel.atualiza();
-        return { mcu: mcu.ref, aplicado, sem_pino: semPino, pinos, entradas, t: st.res && st.res.t, modo: st.modo };
+        return { mcu: mcu.ref, aplicado, acionados, sem_pino: semPino, pinos, entradas, t: st.res && st.res.t, modo: st.modo };
       }
       case 'recolher': return recolher();
       case 'dados': await carregaDados(); painel.atualiza(true); return { componentes: Object.keys((st.dados && st.dados.componentes) || {}).length };

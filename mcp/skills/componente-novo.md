@@ -32,6 +32,8 @@ volta como peça do almoxarifado e **perde a tag** (`local_integrar`, que roda s
 5. **O footprint:** `local_opcoes {tipo: "footprints", busca}` (ou `fp_buscar`). Não achou: `fp_pacote` (o
    assistente: SOIC, QFN, SOT-23, barra de pinos...) ou `fp_salvar`, com as medidas do datasheet. Os números dos pads
    têm de ser os dos pinos do símbolo.
+   **O footprint tem o 3D de verdade** (o STEP do fabricante, da biblioteca ou modelado no NexoCAD): nunca um corpo
+   genérico (cubo/cilindro) nem sem 3D. O passo a passo está na skill `projeto-construir` (A regra do 3D).
 6. **Crie:** `local_criar {componente: {x_familia, x_montagem, x_encapsulamento, x_mpn, ...}, simbolo, footprint,
    datasheet}`. A pinagem (`x_pinagem`) sai sozinha dos pinos do símbolo. Valor com o sufixo colado e ponto decimal
    (`4.7K`, `100nF`, `40V`); nos semicondutores o valor é a tensão principal (Vce, Vds, Vz, Vrrm), e corrente e

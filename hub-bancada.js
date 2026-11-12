@@ -77,7 +77,8 @@
     st.mesaZ = -esp - 10;
     st.bb = caixaDaPlaca();
     const cx = (st.bb.x1 + st.bb.x2) / 2, cy = (st.bb.y1 + st.bb.y2) / 2;
-    const tam = Math.max(320, 4 * Math.max(st.bb.x2 - st.bb.x1, st.bb.y2 - st.bb.y1));
+    /* a mesa: grande (1,2 m no minimo, ou 12x a placa), para caber fonte, motor e o que mais for */
+    const tam = Math.max(1200, 12 * Math.max(st.bb.x2 - st.bb.x1, st.bb.y2 - st.bb.y1));
     const raiz = new T.Group(); raiz.name = 'bancada';
     /* a mesa: um tampo escuro com a grade de 10 mm */
     const tampo = new T.Mesh(new T.BoxGeometry(tam, tam, 6), new T.MeshStandardMaterial({ color: 0x23272e, roughness: 0.85, metalness: 0.05 }));
@@ -173,7 +174,10 @@
       const subida = Math.min(18, 6 + dist * 0.12);
       const meio = new T.Vector3((a.x + b.x) / 2, (a.y + b.y) / 2, Math.max(st.mesaZ + 1.2, Math.min(a.z, b.z) - dist * 0.12));
       const curva = new T.CatmullRomCurve3([a, a.clone().add(new T.Vector3(0, 0, subida)), meio, b.clone().add(new T.Vector3(0, 0, subida)), b]);
-      const tubo = new T.Mesh(new T.TubeGeometry(curva, 64, 0.65, 8, false), new T.MeshStandardMaterial({ color: corDoFio(f), roughness: 0.45 }));
+      const sel = st.sel && st.sel.tipo === 'fio' && st.sel.id === f.id;
+      const tubo = new T.Mesh(new T.TubeGeometry(curva, 64, sel ? 1.05 : 0.65, 8, false), new T.MeshStandardMaterial({ color: sel ? 0xfacc15 : corDoFio(f), roughness: 0.45, emissive: sel ? 0x6b4e00 : 0x000000 }));
+      tubo.userData.fio = f.id;
+      tubo.userData.pts = curva.getPoints(40);
       st.gFios.add(tubo);
     }
     v.pede();
@@ -204,6 +208,17 @@
       }
       rotulo(it, g, c);
     }
+    if (st.sel && st.barra && !st.arrasto) marcaBarra();
+  }
+  /* so reposiciona a barrinha (a camera girou) */
+  function marcaBarra() {
+    const v = V(); if (!v) return;
+    let w = null;
+    if (st.sel.tipo === 'item') { const g = st.objs.get(st.sel.id); if (!g) return; const box = new (v.T().Box3)().setFromObject(g); w = { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2, z: box.max.z + 6 }; }
+    else { const t = st.gFios && st.gFios.children.find(c => c.userData.fio === st.sel.id); const p = t && t.userData.pts[Math.floor(t.userData.pts.length / 2)]; if (p) w = { x: p.x, y: p.y, z: p.z + 4 }; }
+    if (!w) return;
+    const q = v.projeta(w.x, w.y, w.z);
+    st.barra.hidden = !!q.atras; st.barra.style.left = q.x + 'px'; st.barra.style.top = q.y + 'px';
   }
   function rotulo(it, g, c) {
     const v = V(), host = Hh().host3d(); if (!v || !host) return;
@@ -260,26 +275,127 @@
       salva(); desenhaFios();
       return true;
     }
+    /* SELECIONAR (pedido do dono: "clicar em cima de algo na mesa e deletar ou mover"): o clique no item o seleciona
+       (contorno amarelo e a barrinha Girar/Apagar em cima dele) e arrastar o move; o clique perto de um fio seleciona o
+       fio; Delete apaga o selecionado, R gira, Esc solta. Clique no vazio solta a selecao. */
     const h = itemEm(ev);
-    if (!h) return false;
+    if (!h) {
+      const fio = fioEm(ev);
+      if (fio) { seleciona({ tipo: 'fio', id: fio }); return true; }
+      if (st.sel) { seleciona(null); }
+      return false;
+    }
+    seleciona({ tipo: 'item', id: h.it.id });
     const v = V();
-    st.arrasto = { it: h.it, dx: h.it.pos[0] - h.p.x, dy: h.it.pos[1] - h.p.y };
+    st.arrasto = { it: h.it, dx: h.it.pos[0] - h.p.x, dy: h.it.pos[1] - h.p.y, moveu: false };
     const mv = e => {
       const p = v.noPlano(e, st.mesaZ); if (!p || !st.arrasto) return;
+      st.arrasto.moveu = true;
       st.arrasto.it.pos = [Math.round(p.x + st.arrasto.dx), Math.round(p.y + st.arrasto.dy)];
       const g = st.objs.get(st.arrasto.it.id); if (g) { g.position.set(st.arrasto.it.pos[0], st.arrasto.it.pos[1], st.mesaZ); g.updateMatrixWorld(true); }
-      desenhaFios();
+      desenhaFios(); marcaSelecao();
     };
-    const up = () => { window.removeEventListener('mousemove', mv, true); window.removeEventListener('mouseup', up, true); st.arrasto = null; salva(); };
+    const up = () => { window.removeEventListener('mousemove', mv, true); window.removeEventListener('mouseup', up, true); const m = st.arrasto && st.arrasto.moveu; st.arrasto = null; if (m) salva(); };
     window.addEventListener('mousemove', mv, true); window.addEventListener('mouseup', up, true);
     return true;
+  }
+  /* o fio sob o mouse: a distancia na tela ate a curva dele */
+  function fioEm(ev) {
+    const v = V(), host = Hh().host3d(); if (!v || !host || !st.gFios) return null;
+    const r = host.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
+    let melhor = null, dm = 9;
+    for (const t of st.gFios.children) {
+      const pts = t.userData.pts || [];
+      let ant = null;
+      for (const w of pts) {
+        const q = v.projeta(w.x, w.y, w.z);
+        if (!q.atras && ant) {
+          const L2 = (q.x - ant.x) ** 2 + (q.y - ant.y) ** 2;
+          const u = L2 ? Math.max(0, Math.min(1, ((mx - ant.x) * (q.x - ant.x) + (my - ant.y) * (q.y - ant.y)) / L2)) : 0;
+          const d = Math.hypot(ant.x + u * (q.x - ant.x) - mx, ant.y + u * (q.y - ant.y) - my);
+          if (d < dm) { dm = d; melhor = t.userData.fio; }
+        }
+        ant = q.atras ? null : q;
+      }
+    }
+    return melhor;
+  }
+  function seleciona(sel) {
+    const antes = st.sel;
+    st.sel = sel;
+    if ((antes && antes.tipo === 'fio') || (sel && sel.tipo === 'fio')) desenhaFios();
+    marcaSelecao();
+    if (sel && sel.tipo === 'item') { const it = estado().itens.find(i => i.id === sel.id); dica((it ? (it.ref || '') + ' ' + (it.bancada.rotulo || it.nome) : '') + ' selecionado: arraste para mover · R gira · Delete apaga · Esc solta'); }
+    else if (sel && sel.tipo === 'fio') { const f = estado().fios.find(x => x.id === sel.id); dica('Fio ' + (f ? nomeDe(f.a) + ' → ' + nomeDe(f.b) : '') + ' selecionado: Delete apaga · Esc solta'); }
+    else ferramenta(st.ferramenta);
+    pintaPainel();
+  }
+  /* o contorno amarelo do item selecionado e a barrinha de acoes em cima dele */
+  function marcaSelecao() {
+    const v = V(); if (!v || !st.raiz) return;
+    const T = v.T();
+    if (st.caixaSel) { st.raiz.remove(st.caixaSel); st.caixaSel = null; }
+    const host = Hh().host3d();
+    if (!st.barra && host) {
+      st.barra = $c('div', 'banc-acoes');
+      const gi = $c('button', null, '⟳ Girar'); gi.title = 'Girar 90° (R)'; gi.onclick = () => girarSel();
+      const ap = $c('button', 'perigo', '🗑 Apagar'); ap.title = 'Tirar da bancada (Delete)'; ap.onclick = () => apagarSel();
+      st.barra.append(gi, ap);
+      for (const e of ['mousedown', 'pointerdown', 'wheel', 'contextmenu', 'dblclick']) st.barra.addEventListener(e, x => x.stopPropagation(), { passive: e === 'wheel' });
+      host.append(st.barra);
+    }
+    if (st.barra) st.barra.hidden = true;
+    if (!st.sel) { v.pede(); return; }
+    if (st.sel.tipo === 'item') {
+      const g = st.objs.get(st.sel.id); if (!g) return;
+      const box = new T.Box3().setFromObject(g);
+      box.expandByScalar(1.5);
+      st.caixaSel = new T.Box3Helper(box, 0xfacc15);
+      st.raiz.add(st.caixaSel);
+      if (st.barra) {
+        const q = v.projeta((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, box.max.z + 6);
+        st.barra.hidden = !!q.atras;
+        st.barra.style.left = q.x + 'px'; st.barra.style.top = q.y + 'px';
+        st.barra.querySelector('button').hidden = false;
+      }
+    } else if (st.barra) {
+      /* o fio: a barrinha so com Apagar, no meio dele */
+      const t = st.gFios.children.find(c => c.userData.fio === st.sel.id);
+      const w = t && t.userData.pts[Math.floor(t.userData.pts.length / 2)];
+      if (w) {
+        const q = v.projeta(w.x, w.y, w.z + 4);
+        st.barra.hidden = !!q.atras; st.barra.style.left = q.x + 'px'; st.barra.style.top = q.y + 'px';
+        st.barra.querySelector('button').hidden = true;
+      }
+    }
+    v.pede();
+  }
+  function girarSel() {
+    if (!st.sel || st.sel.tipo !== 'item') return;
+    const it = estado().itens.find(i => i.id === st.sel.id); if (!it) return;
+    it.rot = ((it.rot || 0) + 90) % 360;
+    poeItem(it).then(() => { desenhaFios(); marcaSelecao(); });
+    salva();
+  }
+  function apagarSel() {
+    if (!st.sel) return;
+    if (st.sel.tipo === 'item') remover(st.sel.id);
+    else { const b = estado(); b.fios = b.fios.filter(f => f.id !== st.sel.id); salva(); }
+    st.sel = null; desenhaFios(); marcaSelecao(); ferramenta(st.ferramenta);
   }
   function nomeDe(pt) {
     if (pt.tipo === 'pad') return pt.ref + '·' + pt.pad;
     const it = estado().itens.find(x => x.id === pt.item);
     return (it ? it.ref || it.nome : '?') + ' ' + pt.terminal;
   }
-  window.addEventListener('keydown', e => { if (e.key === 'Escape' && st.fioIni) { st.fioIni = null; dica('Fio cancelado.'); } }, true);
+  window.addEventListener('keydown', e => {
+    if (!st.ativo) return;
+    const t = e.target; if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+    if (e.key === 'Escape') { if (st.fioIni) { st.fioIni = null; dica('Fio cancelado.'); } else if (st.sel) seleciona(null); return; }
+    if (!st.sel) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); e.stopImmediatePropagation(); apagarSel(); }
+    else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); e.stopImmediatePropagation(); girarSel(); }
+  }, true);
 
   /* ---------------------------------------------------------------- o painel */
   const CSS = `
@@ -298,6 +414,11 @@
 .banc .card small{display:block; color:#9ca3af}
 .banc .lin{display:flex; align-items:center; gap:6px; padding:3px 0} .banc .lin span{flex:1}
 .banc .vazio{color:#6b7280}
+.banc-acoes{position:absolute; z-index:7; transform:translate(-50%,-100%); display:flex; gap:4px; padding:4px; border-radius:9px; background:rgba(12,15,20,.94);
+  border:1px solid rgba(250,204,21,.6); box-shadow:0 8px 22px rgba(0,0,0,.45)}
+.banc-acoes[hidden]{display:none}
+.banc-acoes button{height:26px; padding:0 9px; border-radius:7px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.06); color:#e5e7eb; cursor:pointer; font:12px system-ui, sans-serif}
+.banc-acoes button.perigo{border-color:rgba(239,68,68,.6); color:#fecaca} .banc-acoes button:hover{background:rgba(255,255,255,.12)}
 .banc-rot{position:absolute; z-index:5; pointer-events:none; transform:translate(-50%,-100%); padding:3px 8px; border-radius:7px; white-space:nowrap;
   background:rgba(10,12,16,.85); border:1px solid rgba(245,158,11,.6); color:#fde68a; font:600 11px system-ui, sans-serif}
 .banc-rot small{display:block; font:500 10px ui-monospace, monospace; color:#e2e8f0}`;
@@ -309,8 +430,8 @@
     const hd = $c('div', 'hd'); hd.append($c('span', null, '🧪'), $c('b', null, 'Bancada'));
     const rec = $c('button', null, '⟳'); rec.title = 'Reler a biblioteca'; rec.onclick = () => biblioteca(true); hd.append(rec);
     const fer = $c('div', 'fer');
-    const bMover = $c('button', null, '✥ Mover'), bFio = $c('button', null, '〰 Fio');
-    bMover.title = 'Arraste os itens pela mesa'; bFio.title = 'Clique num pad da placa (ou num terminal) e depois no terminal do item';
+    const bMover = $c('button', null, '✥ Selecionar/mover'), bFio = $c('button', null, '〰 Fio');
+    bMover.title = 'Clique num item ou fio para selecionar (Delete apaga, R gira); arraste o item para mover'; bFio.title = 'Clique num pad da placa (ou num terminal) e depois no terminal do item';
     bMover.onclick = () => ferramenta('mover'); bFio.onclick = () => ferramenta('fio');
     fer.append(bMover, bFio);
     const di = $c('div', 'dica', '');
@@ -326,7 +447,7 @@
     st.ferramenta = k; st.fioIni = null;
     const u = painel(); if (!u) return;
     u.bMover.classList.toggle('on', k === 'mover'); u.bFio.classList.toggle('on', k === 'fio');
-    dica(k === 'fio' ? 'Clique num pad da placa ou num terminal (bolinha) e depois na outra ponta.' : 'Arraste os itens pela mesa. Shift + botão direito gira a vista.');
+    dica(k === 'fio' ? 'Clique num pad da placa ou num terminal (bolinha) e depois na outra ponta.' : 'Clique num item ou fio da mesa para selecionar; arraste para mover. Shift + botão direito gira a vista.');
   }
   function pintaPainel() {
     const u = st.ui; if (!u) return;
@@ -344,7 +465,10 @@
     u.sIt.textContent = ''; u.sIt.append($c('h4', null, 'Na bancada'));
     if (!b.itens.length) u.sIt.append($c('div', 'vazio', 'Nada ainda: ponha um item da biblioteca.'));
     for (const it of b.itens) {
-      const l = $c('div', 'lin'); l.append($c('span', null, (it.ref ? it.ref + ' · ' : '') + (it.bancada.rotulo || it.nome)));
+      const l = $c('div', 'lin'); const nm = $c('span', null, (it.ref ? it.ref + ' · ' : '') + (it.bancada.rotulo || it.nome));
+      nm.style.cursor = 'pointer'; nm.title = 'selecionar na mesa'; nm.onclick = () => seleciona({ tipo: 'item', id: it.id });
+      if (st.sel && st.sel.tipo === 'item' && st.sel.id === it.id) nm.style.color = '#facc15';
+      l.append(nm);
       const gi = $c('button', null, '⟳'); gi.title = 'Girar 90°'; gi.onclick = () => { it.rot = ((it.rot || 0) + 90) % 360; poeItem(it).then(desenhaFios); salva(); };
       const x = $c('button', null, '×'); x.title = 'Tirar da bancada (e os fios dele)'; x.onclick = () => remover(it.id);
       l.append(gi, x); u.sIt.append(l);
@@ -352,7 +476,10 @@
     u.sFi.textContent = ''; u.sFi.append($c('h4', null, 'Fios'));
     if (!b.fios.length) u.sFi.append($c('div', 'vazio', 'Nenhum fio. Use "Fio": clique no pad e no terminal.'));
     for (const f of b.fios) {
-      const l = $c('div', 'lin'); l.append($c('span', null, nomeDe(f.a) + ' → ' + nomeDe(f.b)));
+      const l = $c('div', 'lin'); const nf = $c('span', null, nomeDe(f.a) + ' → ' + nomeDe(f.b));
+      nf.style.cursor = 'pointer'; nf.onclick = () => seleciona({ tipo: 'fio', id: f.id });
+      if (st.sel && st.sel.tipo === 'fio' && st.sel.id === f.id) nf.style.color = '#facc15';
+      l.append(nf);
       const x = $c('button', null, '×'); x.onclick = () => { b.fios = b.fios.filter(q => q !== f); salva(); desenhaFios(); };
       l.append(x); u.sFi.append(l);
     }
@@ -374,6 +501,7 @@
     return it;
   }
   function remover(id) {
+    if (st.sel && st.sel.id === id) st.sel = null;
     const b = estado();
     b.itens = b.itens.filter(i => i.id !== id);
     b.fios = b.fios.filter(f => !(f.a.tipo === 'item' && f.a.item === id) && !(f.b.tipo === 'item' && f.b.item === id));
@@ -428,6 +556,7 @@
         return { fio: { de: nomeDe(f.a), para: nomeDe(f.b) } };
       }
       case 'bancada_remover': { const it = b.itens.find(i => i.ref === a.item || i.id === a.item); if (it) remover(it.id); else if (a.fio) { b.fios = b.fios.filter(f => f.id !== a.fio); salva(); desenhaFios(); } return mcp({ acao: 'bancada_estado' }); }
+      case 'bancada_mover': { const it = b.itens.find(i => i.ref === a.item || i.id === a.item); if (!it) throw new Error('item ' + a.item + ' não está na bancada'); if (Array.isArray(a.pos)) it.pos = a.pos.map(Math.round); if (a.rot != null) it.rot = ((+a.rot % 360) + 360) % 360; salva(); if (st.ativo) poeItem(it).then(desenhaFios); return { ref: it.ref, pos: it.pos, rot: it.rot }; }
       case 'bancada_limpar': for (const it of b.itens.slice()) remover(it.id); b.fios = []; salva(); return { limpa: true };
       case 'bancada_ativar': await ativa(a.ligado !== false); return { ativa: st.ativo };
     }

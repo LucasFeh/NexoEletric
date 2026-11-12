@@ -4,6 +4,42 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.102.1 — 2026-11-12
+
+**Simulador mais calmo e no clique: Analisar (lista ou osciloscópio), balões organizados, o botão do NexoCode na folha e a bancada editável.**
+Pedidos do dono: "as descrições ficam brilhando quando o ESP manda o sinal", "não quero balão de descrição de tudo, só
+no que eu clicar e apertar em Analisar; escolho lista ou uma tela com o sinal tipo osciloscópio", "quero ver o botão do
+NexoCode sendo clicado e isso gerando algo no simulador", "o balão da tensão mais organizado, com uma linha ligando até
+o pino", "na bancada clicar em algo na mesa e deletar ou mover; a mesa maior" e "usa o conector que a gente já tem, nada
+de cubo 3D".
+- **Sem pisca-pisca**: os valores na tela (balões, cores, contas, alertas) são a MÉDIA dos passos, como num multímetro.
+  O PWM do ESP32 não faz mais a tela piscar. O laço anda um passo por vez: o duty de 50 % aparecia 0 V porque medir de 4
+  em 4 passos caía sempre no mesmo estado.
+- **Analisar**: passar o mouse só destaca. O clique num pino, fio ou componente abre o menu com **Analisar**: 📋 Lista
+  (valores, contas e o pino no datasheet) ou 📈 Osciloscópio (o sinal de verdade, passo a passo; no componente, a
+  tensão nele). As janelas podem ser arrastadas e ficam abertas atualizando. Na PCB 2D e na 3D, o mouse no pad só
+  mostra o anel; o clique abre o cartão com Lista e Osciloscópio. MCP: `sim_controlar {acao:"analisar"}`.
+- **Balões de tensão organizados** (opção "Tensão nas nets", desligada por padrão):
+  - um balão por net, preso a um pino;
+  - posto num lugar livre, sem encostar em outro balão nem cobrir pino, corpo ou nome de componente;
+  - com a linha de chamada até o pino e largura fixa, para o balão não pular quando o valor muda.
+- **Balões das trilhas** (3D) começam escondidos, com o botão "balões" no painel. Os avisos do DRC ("fora do
+  almoxarifado" e o triângulo) saem da área de simulação.
+- **O botão do NexoCode na folha** (NexoCode 0.2.1): `gpio_lote` aceita `acionar`:
+  - `{"27": true}` aperta a chave ligada ao GPIO27, e na folha ela fica com o contorno amarelo e "APERTADO
+    (NexoCode)";
+  - `{"34": 0.7}` põe o cursor do potenciômetro.
+- **Bancada**:
+  - um clique seleciona um item (caixa amarela e a barra ⟳ Girar / 🗑 Apagar) ou um fio;
+  - arrastar move;
+  - Delete apaga, R gira e Esc solta;
+  - a mesa ficou maior.
+  - MCP: `sim_bancada {acao:"bancada_mover"}`.
+- **Skill da casa `projeto-construir`**: o processo inteiro de construir uma placa pela IA: esquema, PCB roteada com DRC,
+  simulação, firmware e bancada. Ela traz a regra do 3D: todo componente com o modelo 3D de verdade, seja da
+  biblioteca, o STEP do fabricante baixado ou modelado no NexoCAD; nunca um cubo genérico nem sem 3D. A
+  `componente-novo` aponta para ela.
+
 ## 1.102.0 — 2026-11-12
 
 **O Simulador vira uma área própria: esquema escuro, PCB 2D elétrica, pinos com datasheet, a Bancada e o ESP32 do NexoCode.**

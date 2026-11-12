@@ -35,10 +35,10 @@
   const grava = (k, v) => { try { localStorage.setItem(k, v); } catch (_e) { /* sem storage */ } };
   const MODOS = [['esquema', 'Esquema'], ['sim2d', 'PCB 2D'], ['sim3d', 'PCB 3D'], ['bancada', 'Bancada']];
   const DICA = {
-    esquema: 'o circuito simulando — mouse no pino: tensão, corrente, sinal e datasheet; clique na chave, roda no potenciômetro',
-    sim2d: 'a placa em 2D com o funcionamento elétrico — cobre pela tensão, a corrente andando; mouse no pad: tensão e datasheet',
-    sim3d: 'a placa em 3D com a corrente nas trilhas — clique na perna do CI para ler sobre ela',
-    bancada: 'a bancada: a placa e os itens da biblioteca ligados por fios, funcionando como de verdade',
+    esquema: 'o circuito simulando — clique num pino, fio ou componente › Analisar (lista ou osciloscópio); clique no botão, roda no potenciômetro',
+    sim2d: 'a placa em 2D com o funcionamento elétrico — cobre pela tensão, a corrente andando; clique no pad › lista ou osciloscópio',
+    sim3d: 'a placa em 3D com a corrente nas trilhas — clique na perna do CI › lista (datasheet) ou osciloscópio',
+    bancada: 'a bancada: a placa e os itens da biblioteca ligados por fios, funcionando como de verdade; clique num item ou fio para mover, girar ou apagar',
   };
 
   function pane(projeto) {

@@ -198,7 +198,9 @@
     const modoPg = (() => { try { return new URLSearchParams(location.search).get('modo') || ''; } catch (_e) { return ''; } })();
     const naAba = /^(sim2d|sim3d|bancada)$/.test(modoPg);
     const st = { ligado: naAba || (() => { try { return localStorage.getItem(PREF) !== '0'; } catch (_e) { return true; } })(), calc: true,
-                 dados: null, res: null, versao: 0, ui: null, rotulos: [], setas: null, fase: 0, montado: 0 };
+                 dados: null, res: null, versao: 0, ui: null, rotulos: [], setas: null, fase: 0, montado: 0,
+                 /* os baloes em cima das trilhas comecam ESCONDIDOS (pedido do dono: "nao quero balao de descricao de tudo") */
+                 baloes: (() => { try { return localStorage.getItem('nexoSim.baloes') === '1'; } catch (_e) { return false; } })() };
     let topo = window;
     try { topo = window.top && window.top.document ? window.top : window; } catch (_e) { topo = window; }
     function dadosDoTopo() { try { const d = topo.__nexoSim; return d && d.projeto === H.projeto() ? d : null; } catch (_e) { return null; } }
@@ -224,11 +226,12 @@
       if (!host) return null;
       if (!document.getElementById('simpcb-css')) { const s = document.createElement('style'); s.id = 'simpcb-css'; s.textContent = CSS; document.head.append(s); }
       const el = document.createElement('div'); el.className = 'simpcb';
-      el.innerHTML = '<div class="hd"><span>⚡</span><b>Corrente nas trilhas</b><button data-a="calc">contas</button><button data-a="on"></button></div>'
+      el.innerHTML = '<div class="hd"><span>⚡</span><b>Corrente nas trilhas</b><button data-a="bal" title="Mostrar os valores em cima das trilhas">balões</button><button data-a="calc">contas</button><button data-a="on"></button></div>'
         + '<div class="st"></div><div class="leg"></div><div class="legt"><span>0</span><span class="mx"></span></div><ol></ol>';
       for (const ev of ['mousedown', 'pointerdown', 'wheel', 'contextmenu', 'dblclick']) el.addEventListener(ev, e => e.stopPropagation(), { passive: ev === 'wheel' });
       el.querySelector('[data-a=on]').onclick = () => { st.ligado = !st.ligado; try { localStorage.setItem(PREF, st.ligado ? '1' : '0'); } catch (_e) { /* ok */ } monta(); };
       el.querySelector('[data-a=calc]').onclick = () => { st.calc = !st.calc; pinta(); };
+      el.querySelector('[data-a=bal]').onclick = () => { st.baloes = !st.baloes; try { localStorage.setItem('nexoSim.baloes', st.baloes ? '1' : '0'); } catch (_e) { /* ok */ } pinta(); };
       const camadaRot = document.createElement('div'); camadaRot.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:4;overflow:hidden';
       host.append(el, camadaRot);
       st.ui = { el, rot: camadaRot };
@@ -237,7 +240,8 @@
     function pinta() {
       const u = ui(); if (!u) return;
       u.el.hidden = !H.em3d();
-      u.rot.hidden = !H.em3d() || !st.ligado;
+      u.rot.hidden = !H.em3d() || !st.ligado || !st.baloes;
+      u.el.querySelector('[data-a=bal]').classList.toggle('on', st.baloes);
       const bOn = u.el.querySelector('[data-a=on]'); bOn.textContent = st.ligado ? 'ligado' : 'desligado'; bOn.classList.toggle('on', st.ligado);
       u.el.querySelector('[data-a=calc]').classList.toggle('on', st.calc);
       const s = u.el.querySelector('.st'), ol = u.el.querySelector('ol');
@@ -471,13 +475,38 @@
       return melhor;
     }
     let cartao = null;
+    let modoCartao = 'lista', cartaoPad = null, netSerie = null;
+    function serieApi() { try { return topo.__nexoSimSerie || null; } catch (_e) { return null; } }
+    function assinaSerie(net) { const S = serieApi(); if (!S || !net) return; if (netSerie && netSerie !== net) S.solta(netSerie); netSerie = net; S.assina(net); }
+    function soltaSerie() { const S = serieApi(); if (S && netSerie) S.solta(netSerie); netSerie = null; }
+    function desenhaOsc() {
+      if (!cartao || cartao.hidden || modoCartao !== 'osc' || !cartaoPad) return;
+      const cv = cartao.querySelector('canvas'), lg = cartao.querySelector('.lg'); if (!cv) return;
+      const S = serieApi(), A = S && netSerie ? S.le(netSerie) : [];
+      const dpr = window.devicePixelRatio || 1, W = cv.clientWidth || 300, Hh = cv.clientHeight || 140;
+      if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = Hh * dpr; }
+      const c2 = cv.getContext('2d'); c2.setTransform(dpr, 0, 0, dpr, 0, 0); c2.clearRect(0, 0, W, Hh);
+      c2.strokeStyle = 'rgba(255,255,255,.07)';
+      for (let i = 1; i < 4; i++) { c2.beginPath(); c2.moveTo(0, Hh * i / 4); c2.lineTo(W, Hh * i / 4); c2.stroke(); }
+      if (A.length < 2) { c2.fillStyle = '#6b7280'; c2.font = '11px system-ui'; c2.fillText(S ? 'esperando o sinal (Tempo real)…' : 'ligue a simulação do esquema', 10, Hh / 2); if (lg) lg.textContent = ''; return; }
+      let lo = Infinity, hi = -Infinity;
+      for (const a of A) if (isFinite(a.v)) { lo = Math.min(lo, a.v); hi = Math.max(hi, a.v); }
+      if (!(hi > lo)) { hi = lo + 0.5; lo -= 0.5; }
+      const pd = (hi - lo) * 0.12; lo -= pd; hi += pd;
+      const t0 = A[0].t, t1 = A[A.length - 1].t;
+      c2.strokeStyle = '#facc15'; c2.lineWidth = 1.6; c2.beginPath();
+      A.forEach((a, i) => { const X = (a.t - t0) / Math.max(t1 - t0, 1e-12) * W, Y = Hh - (a.v - lo) / (hi - lo) * Hh; if (i) c2.lineTo(X, Y); else c2.moveTo(X, Y); });
+      c2.stroke();
+      if (lg) lg.textContent = fmt(lo, 'V') + ' … ' + fmt(hi, 'V') + ' · agora ' + fmt(A[A.length - 1].v, 'V') + ' · ' + fmt(t1 - t0, 's');
+    }
+    try { topo.addEventListener('nexo-sim', () => { if (cartaoPad && modoCartao === 'lista' && !cartao.hidden) { const l = parseFloat(cartao.style.left) - 16, t = parseFloat(cartao.style.top) - 14; mostraCartao(cartaoPad, { clientX: l, clientY: t }, true); } else desenhaOsc(); }); } catch (_e) { /* ok */ }
     function mostraCartao(p, ev, fixo) {
       if (!cartao) {
         cartao = document.createElement('div'); cartao.className = 'simpcb-cartao';
         for (const e of ['mousedown', 'wheel', 'contextmenu']) cartao.addEventListener(e, x => x.stopPropagation());
         document.body.append(cartao);
       }
-      if (!p) { cartao.hidden = true; return; }
+      if (!p) { cartao.hidden = true; cartaoPad = null; soltaSerie(); return; }
       const pin = st.dados && st.dados.pinos ? st.dados.pinos[p.ref + '-' + p.nome] : null;
       const ds = pinoDoDatasheet(p.ref, p.nome);
       const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -493,7 +522,20 @@
       } else if (ds && ds.comp) h += '<div class="c">o datasheet de ' + esc(ds.comp.chave) + ' não descreve este pino</div>';
       else h += '<div class="c">sem dados de datasheet — use "Recolher informações" no Esquema do Simulador</div>';
       if (ds && ds.comp && ds.comp.datasheet_url && fixo) h += '<a href="' + esc(ds.comp.datasheet_url) + '" target="_blank">abrir o datasheet</a>';
+      /* ANALISAR: a lista (o que esta acima) ou o osciloscopio da net do pad (o sinal passo a passo, do esquema) */
+      if (fixo) {
+        h = '<div class="ab"><button data-m="lista"' + (modoCartao === 'lista' ? ' class="on"' : '') + '>📋 Lista</button><button data-m="osc"' + (modoCartao === 'osc' ? ' class="on"' : '') + '>📈 Osciloscópio</button><button data-m="x" title="Fechar">×</button></div>'
+          + (modoCartao === 'osc' ? '<div class="t">' + esc(p.ref) + ' · pino ' + esc(p.nome) + ' <span>' + esc(p.net || 'sem net') + '</span></div><canvas></canvas><div class="lg"></div>' : h);
+      }
       cartao.innerHTML = h;
+      cartaoPad = fixo ? p : null;
+      if (fixo) {
+        cartao.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
+          if (b.dataset.m === 'x') { soltaSerie(); cartao.hidden = true; cartaoPad = null; return; }
+          modoCartao = b.dataset.m; mostraCartao(p, { clientX: parseFloat(cartao.style.left) - 16, clientY: parseFloat(cartao.style.top) - 14 }, true);
+        });
+        if (modoCartao === 'osc') { assinaSerie(p.net); desenhaOsc(); }
+      }
       cartao.classList.toggle('fixo', !!fixo);
       cartao.hidden = false;
       cartao.style.left = Math.min(ev.clientX + 16, window.innerWidth - 330) + 'px';
@@ -506,7 +548,10 @@
 .simpcb-cartao.fixo{pointer-events:auto; border-color:#f59e0b} .simpcb-cartao .t{font-weight:700} .simpcb-cartao .t span{font-weight:500; color:#9ca3af}
 .simpcb-cartao .c{color:#9ca3af; margin-top:3px} .simpcb-cartao .g{display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin-top:5px} .simpcb-cartao .g b{text-align:right}
 .simpcb-cartao .ds{margin-top:6px; padding:6px 8px; border-radius:7px; background:rgba(59,130,246,.14); color:#dbeafe} .simpcb-cartao .ds .dd{color:#93c5fd; font-size:11px}
-.simpcb-cartao a{display:inline-block; margin-top:6px; color:#93c5fd}`;
+.simpcb-cartao a{display:inline-block; margin-top:6px; color:#93c5fd}
+.simpcb-cartao .ab{display:flex; gap:4px; margin:-2px 0 7px} .simpcb-cartao .ab button{flex:1; height:24px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.05); color:inherit; cursor:pointer; font:inherit}
+.simpcb-cartao .ab button.on{background:#f59e0b; color:#111; border-color:#f59e0b} .simpcb-cartao .ab button[data-m=x]{flex:0 0 26px}
+.simpcb-cartao canvas{display:block; width:300px; height:140px; margin-top:6px; border-radius:7px; background:#05070a} .simpcb-cartao .lg{margin-top:4px; color:#9ca3af; font:10.5px ui-monospace, monospace}`;
     { const sc = document.createElement('style'); sc.textContent = CSS2; document.head.append(sc); }
 
     if (naAba) { try { Object.defineProperty(window, '__hubMenus', { configurable: true, get: () => null, set: () => {} }); } catch (_e) { /* ok */ } }
@@ -531,7 +576,8 @@
           if (cartao && cartao.classList.contains('fixo') && !cartao.hidden) return;
           const p = padEm(e);
           const mudou = (p && p.ref + p.nome) !== (hoverPad && hoverPad.ref + hoverPad.nome);
-          hoverPad = p; mostraCartao(p, e, false);
+          /* so o anel no pad (pedido do dono: nada de balao ao passar o mouse); o clique abre o cartao (Analisar) */
+          hoverPad = p;
           if (mudou && !H.em3d()) H.redesenha();
         }, { passive: true });
         alvo.addEventListener('mouseleave', () => { hoverPad = null; if (cartao && !cartao.classList.contains('fixo')) cartao.hidden = true; }, { passive: true });
@@ -544,6 +590,7 @@
         const t = e.target;
         if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
         if (H.em3d() && /^[089]$/.test(e.key)) return;
+        if (modoAtual === 'bancada' && /^(Delete|Backspace|r|R|Escape)$/.test(e.key)) { e.preventDefault(); return; }   // a bancada trata (hub-bancada.js)
         if (e.key === 'Escape' && cartao) cartao.hidden = true;
         e.stopPropagation(); e.preventDefault();
       }, true);
@@ -551,7 +598,9 @@
       setTimeout(() => window.HubSimPcbModo(modoPg), 0);   // definido logo abaixo
     }
     /* o modo da area (a aba Simulador troca sem recarregar a pagina): sim2d = a placa em 2D; sim3d e bancada = no 3D */
+    let modoAtual = modoPg;
     window.HubSimPcbModo = function (m) {
+      modoAtual = m;
       let tentativas = 0;
       const vai = () => {
         if (!H.placa()) { if (++tentativas < 60) setTimeout(vai, 400); return; }
@@ -580,7 +629,7 @@
         if (/^bancada_/.test(a.acao || '')) { if (!window.HubBancada) throw new Error('a bancada não carregou nesta vista'); return window.HubBancada.mcp(a); }
         if (a.acao === 'pcb_modo') { window.HubSimPcbModo(a.modo); return { modo: a.modo }; }
         st.dados = dadosDoTopo();
-        if (a.acao === 'pcb_mostrar') { st.ligado = a.ligado !== false; try { localStorage.setItem(PREF, st.ligado ? '1' : '0'); } catch (_e) { /* ok */ } if (a.calculos != null) st.calc = !!a.calculos; monta(); return { ligado: st.ligado, em3d: H.em3d() }; }
+        if (a.acao === 'pcb_mostrar') { st.ligado = a.ligado !== false; try { localStorage.setItem(PREF, st.ligado ? '1' : '0'); } catch (_e) { /* ok */ } if (a.calculos != null) st.calc = !!a.calculos; if (a.baloes != null) st.baloes = !!a.baloes; monta(); return { ligado: st.ligado, baloes: st.baloes, em3d: H.em3d() }; }
         if (!st.dados) throw new Error('não há simulação deste projeto: ligue o Simular no Esquema (sim_controlar {acao:"ligar"})');
         const r = correntes(H.placa(), st.dados.pinos, { cobre_um: a.cobre_um });
         const top = r.segs.slice().sort((x, y) => Math.abs(y.i) - Math.abs(x.i)).slice(0, +a.limite || 40);

@@ -5648,7 +5648,8 @@ function desenhaErcNaTela(ctx, cam){
   const sh = model.sheets[sheetIdx];
   if (!sh) return;
   const px = 1 / cam.scale;
-  if (ercMarcas){
+  /* a area de simulacao (aba Simulador) nao mostra os avisos do DRC (o vermelho "fora do almoxarifado", o triangulo) */
+  if (ercMarcas && !window.__simVisual){
     const feitos = new Set();
     for (const v of ERC_RES.violacoes){
       if (v.sheet !== sh.name) continue;

@@ -337,6 +337,21 @@ caso('ganchos nas vistas, <script> nas cascas, ação "simulador" nos dois hubs'
   for (const k of ['sim_conectores', 'sim_testar', 'sim_datasheet_pendentes', 'sim_datasheet_gravar', 'sim_datasheet_ler', 'sim_bancada']) assert.ok(require('../mcp/ferramentas/simulador.js').ferramentas.some(t => t.nome === k), k);
 });
 
+caso('1.102.1: média na tela, Analisar (lista/osciloscópio), acionar do NexoCode, bancada com seleção, skill do 3D', () => {
+  const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
+  const sim = ler('hub-simulador.js'), pcb = ler('hub-simulador-pcb.js'), banc = ler('hub-bancada.js');
+  assert.ok(/function resParaMostrar\(\)/.test(sim) && /acumula\(st\.res\)/.test(sim) && /const k = 1;/.test(sim), 'a média dos passos (o PWM não pisca) e um passo de cada vez');
+  assert.ok(/case 'analisar':/.test(sim) && /'📈 Osciloscópio'/.test(sim) && !/dica\.mostra\(h, e\)/.test(sim), 'Analisar no clique, sem balão no mouse');
+  assert.ok(/tensoes: false/.test(sim) && /if \(!j\.v2\) st\.mostrar\.tensoes = false/.test(sim), 'as pílulas de tensão começam desligadas');
+  assert.ok(/a\.acionar/.test(sim) && /APERTADO \(NexoCode\)/.test(sim), 'gpio_lote acionar: o botão do NexoCode aperta a chave');
+  assert.ok(/__nexoSimSerie/.test(sim) && /__nexoSimSerie/.test(pcb) && /data-m="osc"/.test(pcb) && /localStorage\.getItem\('nexoSim\.baloes'\) === '1'/.test(pcb), 'PCB: cartão no clique com osciloscópio; balões das trilhas escondidos');
+  assert.ok(/bancada_mover/.test(banc) && /function apagarSel/.test(banc) && /function girarSel/.test(banc), 'a bancada: selecionar, mover, girar e apagar');
+  const sk = require('../mcp/lib/skills.js').ler('projeto-construir');
+  assert.ok(sk && /cubo/.test(sk.corpo) && /nexo_editar_modelo/.test(sk.corpo) && /fp_3d_importar/.test(sk.corpo), 'a skill projeto-construir com a regra do 3D');
+  const ctrl = require('../mcp/ferramentas/simulador.js').ferramentas.find(t => t.nome === 'sim_controlar');
+  assert.ok(ctrl.entrada.properties.acao.enum.includes('analisar'), 'sim_controlar analisar');
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();
