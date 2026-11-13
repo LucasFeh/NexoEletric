@@ -654,6 +654,77 @@ caso('1.113.0 (lote 1 da lib Almox): resistor, rede, capacitor, LED, diodo e tra
   assert.ok(/if \(a\.queima\) \{ st\.cfg\.queimados\[ref\] = a\.queima;/.test(sim) && /campos: inf\.campos \|\| null/.test(sim), 'o Simulador queima pela análise e publica os campos');
 });
 
+caso('1.114.0 (lote 2 da lib Almox): MOSFET/IGBT, potenciômetro, termistor, fusível e indutor; e as correções do lote 1', () => {
+  const roda = (comps, cfg) => { const mt = C.monta(comps, cfg || {}); const s = M.cria(mt.elementos, { terra: mt.terra }); return { a: C.analisa(mt, s.dc()).comps, mt }; };
+  const um = (c, cfg) => C.monta([c], cfg || {}).comps.get(c.ref);
+  /* MOSFET: canal, limites do nome/família, a queima */
+  const mos = (nome, sym) => um({ ref: 'Q1', comment: nome, sym, pinos: [pin(1, 'G', 'G'), pin(2, 'D', 'D'), pin(3, 'S', 'S')] });
+  const z34 = mos('Canal N 55V 26A 942-IRFZ34NPBF', 'MOSFET [PTH]');
+  assert.ok(z34.tipo === 'mosfet' && z34.m.pol === 1 && z34.vdss === 55 && z34.idmax === 26 && z34.pd === 68 && z34.rdson === 0.04, 'IRFZ34N');
+  assert.ok(mos('Canal P 20V 3.5A 3L AO3419', 'MOSFET [SMD]').m.pol === -1 && mos('Canal P 20V 3.5A 3L AO3419', 'MOSFET [SMD]').vgsmax === 12, 'AO3419 canal P, Vgs 12 V');
+  const g150 = mos('Canal N 150V 144W 33A IRFR4615TRLPBF', 'MOSFET [SMD]'); assert.ok(g150.vdss === 150 && g150.pd === 144 && g150.idmax === 33, 'os limites do nome');
+  const ig = um({ ref: 'Q2', comment: 'Canal N 600V 166W 40A IKP20N60TXKSA1', sym: 'IGBT [PTH]', pinos: [pin(1, 'G', 'G'), pin(2, 'C', 'C'), pin(3, 'E', 'E')] });
+  assert.ok(ig.tipo === 'igbt' && ig.vdss === 600 && ig.idmax === 40, 'o IGBT não vira BJT PNP');
+  const chave = (rd, vg, prm) => roda([{ ref: 'Q1', comment: 'IRFZ34N', sym: 'MOSFET [PTH]', pinos: [pin(1, 'G', '+' + vg + 'V'), pin(2, 'D', 'D'), pin(3, 'S', 'GND')] },
+    { ref: 'R1', valor: rd, pinos: [pin(1, '1', '+12V'), pin(2, '2', 'D')] }], { params: prm || {} }).a.Q1;
+  const ok = chave('10', 10);
+  assert.ok(!ok.queima && Math.abs(ok.corrente) > 1, 'o IRFZ34N chaveando 1,2 A: ' + ok.corrente);
+  assert.ok(/corrente de/.test(chave('10', 10, { Q1: { idmax: 0.5 } }).queima || ''), 'Id máx editado (0,5 A) queima');
+  assert.ok(/gate/.test(chave('10', 24).queima || ''), '24 V no gate rompe o óxido');
+  const igq = roda([{ ref: 'Q2', comment: 'IKP20N60T 600V 40A', sym: 'IGBT [PTH]', pinos: [pin(1, 'G', '+15V'), pin(2, 'C', 'C'), pin(3, 'E', 'GND')] },
+    { ref: 'R1', valor: '10', pinos: [pin(1, '1', '+24V'), pin(2, '2', 'C')] }]).a.Q2;
+  assert.ok(igq.estado === 'conduzindo' && Math.abs(igq.corrente) > 1.5 && Math.abs(igq.corrente) < 2.4, 'o IGBT conduz com Vce(sat): ' + igq.corrente);
+  /* potenciômetro: o 1TURN, a potência, a queima do trecho pequeno, a posição pelo campo */
+  const pot = (nome) => um({ ref: 'RV1', comment: nome, sym: 'POTENCIOMETRO [PTH]', pinos: [pin(1, '', 'A'), pin(2, '', 'B'), pin(3, 'W', 'W')] });
+  assert.strictEqual(pot('1TURN 10K 350VAC 1W').r, 10e3, 'o "1TURN" não é o valor');
+  assert.strictEqual(pot('100R (3296W)').potencia, 0.5, 'o "3296W" não é potência');
+  assert.strictEqual(pot('10K 2W 10% 100ppm 3852A-282-103AL').potencia, 2);
+  const pq = roda([{ ref: 'RV1', comment: '1K 1/2W', sym: 'POTENCIOMETRO [PTH]', pinos: [pin(1, '', 'X'), pin(2, '', '+12V'), pin(3, 'W', 'GND')] }], { pots: { RV1: 0.02 } }).a.RV1;
+  assert.ok(/trecho/.test(pq.queima || ''), 'o cursor quase na ponta com 12 V: o trecho pequeno queima: ' + pq.queima);
+  /* termistor: o PTC rearmável vira fusível; o NTC com a temperatura; o PTC de partida limita */
+  const ter = nome => um({ ref: 'RT1', comment: nome, sym: 'TERMISTOR [PTH]', pinos: [pin(1, '', 'A'), pin(2, '', 'B')] });
+  const lvr = ter('1.9R 240 VAC/VDC 2W 900mA 650-LVR040K'); assert.ok(lvr.tipo === 'fusivel' && lvr.rearmavel && lvr.ihold === 0.4, 'LVR040K: rearmável, Ihold 0,4 A (o 900 mA do nome é o disparo)');
+  const ntc = ter('100K 594-NTCLE100E3104HB0'); assert.ok(ntc.tipo === 'ntc' && ntc.r === 100e3, 'NTC 100K');
+  const ntc80 = um({ ref: 'RT1', comment: '10K', sym: 'TERMISTOR [PTH]', pinos: [pin(1, '', 'A'), pin(2, '', 'B')] }, { params: { RT1: { temp: 80 } } });
+  perto(ntc80.r, 10e3 * Math.exp(3950 * (1 / 353.15 - 1 / 298.15)), 1e-6, 'NTC a 80 °C (β 3950)');
+  assert.strictEqual(ter('60R NTC-60-4000k').beta, 4000, 'o β do nome');
+  const ptcV = v => roda([{ ref: 'RT1', comment: '25R 1A B59980C120A70', sym: 'TERMISTOR [PTH]', pinos: [pin(1, '', '+' + v + 'V'), pin(2, '', 'GND')] }]).a.RT1;
+  perto(Math.abs(ptcV(5).corrente), 0.2, 0.01, 'o PTC de partida frio é ôhmico (5 V / 25 Ω)');
+  assert.ok(Math.abs(ptcV(230).corrente) < 0.05, 'com 230 V em cima ele dispara: só a corrente residual (sem ele: 9,2 A): ' + ptcV(230).corrente);
+  /* fusível: abre acima da nominal; o retardado aguenta até 1,5×; o rearmável dispara */
+  const fus = (nome, r, prm) => roda([{ ref: 'F1', comment: nome, sym: 'FUSIVEL [PTH]', pinos: [pin(1, '', '+12V'), pin(2, '', 'X')] }, { ref: 'R1', valor: r, pinos: [pin(1, '1', 'X'), pin(2, '2', 'GND')] }], { params: prm || {} }).a.F1;
+  assert.ok(!fus('1A 250V (5x20mm)', '20').queima, '0,6 A num de 1 A: inteiro');
+  assert.ok(/fusível aberto/.test(fus('1A 250V (5x20mm)', '10').queima || ''), '1,2 A num de 1 A rápido: abre');
+  assert.ok(!fus('1A 250V (5x20mm)', '10', { F1: { retardo: 1 } }).queima, 'retardado aguenta 1,2 A');
+  const pptc = C.monta([{ ref: 'F1', comment: 'Rearmável (PPTC) 60V 0.3A', sym: 'FUSIVEL PTC', pinos: [pin(1, '', '+12V'), pin(2, '', 'X')] }, { ref: 'R1', valor: '10', pinos: [pin(1, '1', 'X'), pin(2, '2', 'GND')] }], {});
+  const sp = M.cria(pptc.elementos, { terra: pptc.terra }); sp.dc(); sp.passo(20);
+  const ap = C.analisa(pptc, sp.passo(1)).comps.F1;
+  assert.ok(ap.disparado && Math.abs(ap.corrente) < 0.3, 'o PPTC de 0,3 A com 1,2 A dispara e limita: ' + ap.corrente);
+  /* indutor: o 0,6A não é a indutância; o "Resistencia Baixa" não vira resistor; o choke "Ferrite 2.2mH" é indutor */
+  const ind = (nome) => um({ ref: 'L1', comment: nome, sym: 'INDUTOR [PTH]', pinos: [pin(1, '', 'A'), pin(2, '', 'B')] });
+  perto(ind('0,6A 11mH').l, 11e-3, 1e-12, '0,6A 11mH'); assert.strictEqual(ind('0,6A 11mH').inom, 0.6);
+  assert.ok(ind('100uH (Resistencia Baixa)').tipo === 'indutor', 'Resistencia Baixa');
+  assert.ok(ind('Ferrite 2.2mH 290mA RFB0810-222L').tipo === 'indutor' && ind('Ferrite 600ohms 2A 100mOhms').tipo === 'ferrite', 'choke x ferrite');
+  const lq = roda([{ ref: 'L1', comment: '100uH 0.5A', sym: 'INDUTOR [PTH]', pinos: [pin(1, '', '+5V'), pin(2, '', 'X')] }, { ref: 'R1', valor: '5', pinos: [pin(1, '1', 'X'), pin(2, '2', 'GND')] }]).a.L1;
+  assert.ok(/aquece/.test(lq.queima || ''), '1 A num indutor de 0,5 A queima: ' + lq.queima);
+  /* correções do lote 1 */
+  const c1 = um({ ref: 'C1', comment: '10uF 16V', sym: 'CAPACITOR ELETROLITICO [PTH]', pinos: [pin(1, '+', 'A'), pin(2, '-', 'GND')] }, { valores: { C1: '1000uF' } });
+  assert.ok(c1.c === 1e-3 && c1.vmax === 16, 'o valor trocado mantém a tensão do nome');
+  assert.ok(C.fmt(6.3, 'V') === '6,3 V' && C.fmt(2200, 'Ω') === '2,2 kΩ' && C.fmt(1.5, 'A') === '1,5 A', 'sem zeros à direita: ' + C.fmt(6.3, 'V'));
+  assert.strictEqual(um({ ref: 'C1', comment: '470uF 63 Ø10 5mm', sym: 'CAPACITOR ELETROLITICO [PTH]', pinos: [pin(1, '+', 'A'), pin(2, '-', 'GND')] }).vmax, 63, 'o 63 solto é a tensão');
+  const sc = roda([{ ref: 'C2', comment: '1F 5V', sym: 'SUPERCAPACITOR [PTH]', pinos: [pin(1, '+', 'GND'), pin(2, '-', '+8V')] }]).a.C2;
+  assert.ok(/polaridade invertida/.test(sc.queima || ''), 'o supercap ao contrário: o motivo é a polaridade: ' + sc.queima);
+  const qn = roda([{ ref: 'Q1', comment: 'BC547', sym: 'TRANSISTOR', pinos: [pin(1, 'B', 'B'), pin(2, 'C', 'C'), pin(3, 'E', 'GND')] },
+    { ref: 'R1', valor: '33k', pinos: [pin(1, '1', '+5V'), pin(2, '2', 'B')] }, { ref: 'R2', valor: '10', pinos: [pin(1, '1', '+5V'), pin(2, '2', 'C')] }], { params: { Q1: { bf: 830 } } }).a.Q1;
+  assert.ok(!qn.queima && qn.alertas.some(a => /ACIMA da nominal/.test(a)), 'Ic entre 1× e 1,5×: alerta "acima da nominal": ' + qn.corrente + ' ' + qn.alertas.join(' | '));
+  assert.ok(um({ ref: 'D1', comment: 'Proteção TVS 300V 1.5kW', sym: 'DIODO RETIFICADOR [PTH]', pinos: [pin(1, 'A', 'A'), pin(2, 'K', 'K')] }).bv === 300, 'o TVS do nome: o Vbr');
+  const q = n => um({ ref: 'Q1', comment: n, sym: 'TRANSISTOR', pinos: [pin(1, 'B', 'B'), pin(2, 'C', 'C'), pin(3, 'E', 'E')] });
+  assert.ok(q('BC546').vceo === 65 && q('BC548').vceo === 30 && q('BD678').vceo === 60 && q('100V 5A').pd === 20, 'BC546 65 V, BC548 30 V, BD678 60 V, o genérico de 5 A com Pd 20 W');
+  assert.ok(!um({ ref: 'D1', comment: '5.1V 0.5W', sym: 'DIODO ZENER [PTH]', pinos: [pin(1, 'A', 'A'), pin(2, 'K', 'K')] }).campos.some(x => x.k === 'ifmax'), 'o zener sem o campo If');
+  assert.ok(um({ ref: 'LD1', comment: 'Fototransistor 165mW 35V 15mA SFH309', sym: 'LED [PTH]', pinos: [pin(1, 'A', 'A'), pin(2, 'K', 'K')] }).tipo === 'ignorado', 'o fototransistor não é LED');
+  perto(um({ ref: 'LD1', comment: 'Sensor Emissores infravermelhos Infrared 890nm 2V 20mA OP233', sym: 'LED [PTH]', pinos: [pin(1, 'A', 'A'), pin(2, 'K', 'K')] }).vf, 1.2, 1e-9, 'o IR com "2V" no nome (é o máximo)');
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();

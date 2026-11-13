@@ -4,6 +4,33 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.114.0
+
+Simulador — lote 2 da lib Almox e as correções do lote 1 (testado ao vivo no SIM-TIPOS pela outra sessão).
+
+- MOSFET: o canal (P pelo nome/família), os limites da família (IRFZ34N, IRF9Z34N, IRFP460, IRFR4615, IPD047N03,
+  FQA9N90, SPA11N60C3, FDD3N40, FQD17P06, AO3419, ZVN4424, AM20P06, SQJ431, IPF067N20, FDH038AN08, IRLML6402…) ou do
+  nome ("55V 26A", "150V 144W 33A"). Campos Vth, Rds(on) (mudam o modelo), Id máx, Vdss, Pd e Vgs máx. Queima: Id >
+  1,5×, P > 1,5× a Pd, Vds > 1,1× a Vdss e Vgs acima do máximo (rompe o gate).
+- IGBT: modelo próprio (gate de MOSFET, saída com a junção PN do coletor: Vce(sat)), pinos G/C/E — antes virava BJT PNP.
+- Potenciômetro: o "1TURN" e o "3296W" do nome não são mais valor/potência; campos posição do cursor (%) e potência; o
+  trecho de fração f aguenta f·P e queima acima de 2× (o cursor na ponta com corrente alta).
+- Termistor: a categoria mistura três coisas — o PTC rearmável (LVR, MF-R/RX, 600R150, 60R090, TR600, 0ZRE, LP60)
+  virou fusível rearmável (Ihold do código: o nome traz a corrente de disparo); o PTC de partida (B5998x) limita a
+  corrente; o NTC tem R25, β (do nome: "4000k") e a TEMPERATURA editável (R = R25·e^(β(1/T − 1/298,15))).
+- Fusível: corrente nominal do nome/código e rápido/retardo (campo); o comum ABRE acima de In (rápido) ou 1,5× (retardo)
+  e fica aberto até "Trocar"; o rearmável dispara acima de 2× (vira resistência alta) e rearma sozinho quando o defeito
+  sai.
+- Indutor: a indutância do token em H (o "0,6A 11mH" dava 600 mH), a corrente nominal e a DCR do nome (campos);
+  satura acima da nominal (alerta) e queima acima de 1,5×. "100uH (Resistencia Baixa)" não vira mais resistor; a
+  "Ferrite 2.2mH" é choke (indutor); a ferrite de verdade usa a DCR em mΩ do nome.
+- Correções do lote 1: trocar o valor do capacitor mantém a tensão do nome; de 1× ao limite da queima aparece o alerta
+  "ACIMA da nominal" em todos os limites; o polarizado ao contrário queima como "polaridade invertida"; os números sem
+  zeros à direita (6,3 V e não 6,300 V); "470uF 63" lê 63 V; o TVS do nome é o Vbr e o "<n>A" dele não é If; BC546
+  65 V / BC548 30 V, BD678 60 V / BD680 80 V; o genérico de corrente alta com Pd de encapsulamento de potência; o zener
+  sem o campo If (Izm = Pz/Vz); o fototransistor e o display de 7 segmentos da categoria LED ficam de fora; o IR pelo
+  comprimento de onda (890 nm) com Vf 1,2 V.
+
 ## 1.113.0
 
 Simulador — lote 1 da lib Almox (pedido do dono: conferir cada TIPO de componente: funcionamento, a QUEIMA com o

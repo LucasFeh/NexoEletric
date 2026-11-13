@@ -165,8 +165,11 @@
   }
   /** parametros do modelo (o LED: vf, imax) */
   function defineParam(ref, k, v) {
+    /* 1.114.0: a posicao do cursor e a do potenciometro (a roda do mouse); a temperatura e o retardo aceitam 0 e negativo */
+    if (k === 'pos') { if (v != null && isFinite(+v)) definePot(ref, Math.min(100, Math.max(0, +v)) / 100); return; }
     const p = st.cfg.params[ref] || (st.cfg.params[ref] = {});
-    if (v == null || !isFinite(+v) || +v <= 0) delete p[k]; else p[k] = +v;
+    const aceitaZero = k === 'temp' || k === 'retardo';
+    if (v == null || !isFinite(+v) || (+v <= 0 && !aceitaZero)) delete p[k]; else p[k] = +v;
     if (!Object.keys(p).length) delete st.cfg.params[ref];
     gravaCfg(); st.sujo = true; agenda();
   }
@@ -782,6 +785,7 @@
     const inf = info(ref); if (!inf) return false;
     pos = Math.max(0, Math.min(1, pos));
     inf.pos = pos; st.cfg.pots[ref] = pos; gravaCfg();
+    { const cp = (inf.campos || []).find(x => x.k === 'pos'); if (cp) cp.v = Math.round(pos * 1000) / 10; }
     if (inf.r1 && inf.r2) { inf.r1.r = Math.max(1, inf.r * (1 - pos)); inf.r2.r = Math.max(1, inf.r * pos); inf.rotulo = inf.rotulo.replace(/\(\d+ %\)/, '(' + Math.round(pos * 100) + ' %)'); }
     else { st.sujo = true; }
     if (!st.sujo) { st.res = st.modo === 'dc' ? st.sim.dc() : st.sim.passo(1); analisa(true); }

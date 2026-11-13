@@ -44,7 +44,8 @@
     const s = String(txt == null ? '' : txt).replace(/,/g, '.').trim();
     const out = { v: NaN, potencia: NaN, tensao: NaN, corrente: NaN };
     if (!s || s.charAt(0) === '=') return out;
-    const pot = /(\d+)\s*\/\s*(\d+)\s*W\b/i.exec(s) || /(\d+(?:\.\d+)?)\s*(m?)W\b/i.exec(s);
+    /* 1.114.0: o numero solto (o "3296W" do trimpot e codigo, nao 3296 W) */
+    const pot = /(\d+)\s*\/\s*(\d+)\s*W\b/i.exec(s) || /(?:^|[\s/_-])(\d{1,3}(?:\.\d+)?)\s*(m?)W\b/i.exec(s);
     if (pot) out.potencia = pot[2] && /^\d+$/.test(pot[2]) && pot[0].includes('/') ? +pot[1] / +pot[2] : +pot[1] * (pot[2] === 'm' ? 1e-3 : 1);
     /* 1.113.0 (lote 1 da lib Almox): a tensao em kV ("3KV", "1.2kV") */
     const kv = /(?:^|[\s/_(-])(\d+(?:\.\d+)?)\s*KV(?:DC|AC)?\b/i.exec(s);
@@ -86,7 +87,10 @@
     if (u === 'V' && a >= 1e3) p = [1, ''];           // tensao em kV nao aparece aqui
     const n = v / p[0];
     const c = casas != null ? casas : Math.abs(n) >= 100 ? 1 : Math.abs(n) >= 10 ? 2 : 3;
-    return n.toFixed(c).replace('.', ',').replace(/,?0+$/, m => m.includes(',') ? '' : m) + ' ' + p[1] + u;
+    /* 1.114.0: tira os zeros a direita das casas ("6,300 V" lia como milhar: 6,3 V) */
+    let t = n.toFixed(c);
+    if (t.includes('.')) t = t.replace(/0+$/, '').replace(/\.$/, '');
+    return t.replace('.', ',') + ' ' + p[1] + u;
   }
 
   /* ================================================================== nets: terra e alimentacao */
@@ -122,7 +126,7 @@
   const CORES_LED = [
     [/ULTRA ?VERDE|ULTRA ?GREEN|\bUGC\b|SM\d+UGC|INGAN|PURE ?GREEN|TRUE ?GREEN|VERDE PURO/, 3.0, '#22e06a'],
     /* 1.113.0: o infravermelho antes do vermelho ("INFRAVERMELHO") e o RED inteiro (o "REDONDO" do amarelo virava vermelho) */
-    [/\bIR\b|INFRA/, 1.2, '#b0306a'], [/\bUV\b|ULTRAVIOLET/, 3.3, '#bf5af2'],
+    [/\bIR\b|INFRA|\b(?:8[5-9]\d|9[0-6]\d)\s*NM\b/, 1.2, '#b0306a'], [/\bUV\b|ULTRAVIOLET/, 3.3, '#bf5af2'],
     [/VERMELH|\bRED\b|\bVM\b/, 1.9, '#ff3b30'], [/LARANJA|ORANGE/, 2.0, '#ff9500'], [/AMAREL|YELLOW|\bAM\b/, 2.0, '#ffd60a'],
     [/VERDE|GREEN|\bVD\b/, 2.1, '#34c759'], [/AZUL|BLUE/, 3.0, '#0a84ff'], [/BRANC|WHITE|\bBR\b/, 3.0, '#f5f5f7'],
     [/ROSA|PINK/, 3.0, '#ff2d92'],
@@ -136,7 +140,8 @@
   ];
   /* os limites do transistor (o que queima): Ic max (A), Vceo (V), Pd (W) — o nome da peca ("160V 600mA", "100V 2W 3A") manda */
   const BJT_LIM = [
-    [/BC54[6-9]|BC55[6-9]|BC23[78]/, { ic: 0.1, vceo: 45, pd: 0.5 }], [/BC84[6-9]/, { ic: 0.1, vceo: 65, pd: 0.25 }], [/BD23[3-9]|BD240/, { ic: 2, vceo: 80, pd: 25 }], [/BC8[45][78]|BC850|BC860/, { ic: 0.1, vceo: 45, pd: 0.25 }],
+    [/BC546|BC556/, { ic: 0.1, vceo: 65, pd: 0.5 }], [/BC548|BC549|BC558|BC559/, { ic: 0.1, vceo: 30, pd: 0.5 }], [/BC547|BC557|BC23[78]/, { ic: 0.1, vceo: 45, pd: 0.5 }],
+    [/BD6(?:7[56])/, { ic: 4, vceo: 45, pd: 40 }], [/BD6(?:7[78])/, { ic: 4, vceo: 60, pd: 40 }], [/BD6(?:79|80)/, { ic: 4, vceo: 80, pd: 40 }], [/BD6(?:8[12])/, { ic: 4, vceo: 100, pd: 40 }], [/BC84[6-9]/, { ic: 0.1, vceo: 65, pd: 0.25 }], [/BD23[3-9]|BD240/, { ic: 2, vceo: 80, pd: 25 }], [/BC8[45][78]|BC850|BC860/, { ic: 0.1, vceo: 45, pd: 0.25 }],
     [/BC3[23][78]/, { ic: 0.8, vceo: 45, pd: 0.625 }], [/BC8[01][78]/, { ic: 0.5, vceo: 45, pd: 0.31 }],
     [/MMBT2222|MMBT2907/, { ic: 0.6, vceo: 40, pd: 0.35 }], [/2N2222|PN2222/, { ic: 0.6, vceo: 40, pd: 0.5 }], [/2N2907|PN2907/, { ic: 0.6, vceo: 60, pd: 0.4 }],
     [/MMBT390[46]/, { ic: 0.2, vceo: 40, pd: 0.35 }], [/2N390[46]/, { ic: 0.2, vceo: 40, pd: 0.625 }], [/2N440[13]/, { ic: 0.6, vceo: 40, pd: 0.625 }],
@@ -161,6 +166,21 @@
     [/AO340[1-9]|AO3415|SI230[1-9]|IRLML6402|IRLML2244|DMP|FDN3[03][0-9]P|BSS84/, { pol: -1, vth: 0.9, k: 15, nome: 'MOSFET P' }],
     [/IRF9|IRF4905|IRF5305|FQP27P|SPP|STP\d+P/, { pol: -1, vth: 3.0, k: 12, nome: 'MOSFET P' }],
   ];
+  /* 1.114.0 (lote 2): os MOSFETs da lib Almox — Vdss, Id max, Pd, Vth, Rds(on) e o canal */
+  const FET_LIM = [
+    [/IRFZ34/, { pol: 1, vdss: 55, id: 29, pd: 68, vth: 3, rds: 0.04 }], [/IRF9Z34/, { pol: -1, vdss: 55, id: 19, pd: 68, vth: 3, rds: 0.1 }],
+    [/IRFP460/, { pol: 1, vdss: 500, id: 20, pd: 280, vth: 3, rds: 0.27 }], [/IRFR4615/, { pol: 1, vdss: 150, id: 33, pd: 144, vth: 4, rds: 0.039 }],
+    [/IPD047N03/, { pol: 1, vdss: 30, id: 90, pd: 79, vth: 1.6, rds: 0.0047 }], [/FQA9N90/, { pol: 1, vdss: 900, id: 9, pd: 280, vth: 4, rds: 1.3 }],
+    [/11N60C3|SPA11N60/, { pol: 1, vdss: 650, id: 11, pd: 33, vth: 3, rds: 0.38 }], [/FDD3N40/, { pol: 1, vdss: 400, id: 2, pd: 30, vth: 3, rds: 3.4 }],
+    [/FQD17P06/, { pol: -1, vdss: 60, id: 12, pd: 38, vth: 3, rds: 0.12 }], [/AO3419/, { pol: -1, vdss: 20, id: 3.5, pd: 1.4, vth: 0.8, rds: 0.06, vgs: 12 }],
+    [/ZVN4424/, { pol: 1, vdss: 240, id: 0.26, pd: 0.7, vth: 1.8, rds: 5 }], [/AM20P06/, { pol: -1, vdss: 60, id: 20, pd: 50, vth: 2, rds: 0.05 }],
+    [/SQJ431/, { pol: -1, vdss: 200, id: 7, pd: 48, vth: 3, rds: 0.6 }], [/IPF067N20/, { pol: 1, vdss: 200, id: 100, pd: 300, vth: 3, rds: 0.0067 }],
+    [/FDH038AN08/, { pol: 1, vdss: 75, id: 80, pd: 310, vth: 3, rds: 0.0038 }], [/IRLML6402/, { pol: -1, vdss: 20, id: 3.7, pd: 1.3, vth: 0.8, rds: 0.065, vgs: 12 }],
+    [/IRLML2502|IRLML6344|AO340[02]|SI2302/, { pol: 1, vdss: 20, id: 4, pd: 1.25, vth: 0.9, rds: 0.045, vgs: 12 }], [/2N7002|BSS138/, { pol: 1, vdss: 60, id: 0.3, pd: 0.35, vth: 1.6, rds: 3 }],
+    [/IRF540/, { pol: 1, vdss: 100, id: 33, pd: 130, vth: 3, rds: 0.044 }], [/IRF3205/, { pol: 1, vdss: 55, id: 110, pd: 200, vth: 3, rds: 0.008 }], [/IRLZ44/, { pol: 1, vdss: 55, id: 47, pd: 110, vth: 1.5, rds: 0.022, vgs: 10 }],
+  ];
+  /* o IGBT (gate de MOSFET, saida com Vce(sat)) */
+  const IGBT_RE = /IGBT|\b[IFGH]K[PWQ]\d+N\d+|\bIRG[BP4]\w*|\bFGA\d|\bFGH\d|\bHGTG|\bSTGW|\bIHW\d/;
   /* reguladores lineares: vout fixo ou ADJ (vref entre OUT e ADJ); pinos por nome, senao pela ordem do encapsulamento */
   function reguladorLinear(t) {
     let m = /(?:L|LM|MC|UA|KA|L)?78(?:M|L|S|T)?(\d{2})/.exec(t);
@@ -349,6 +369,11 @@
       const txt = norm([c.comment, c.sym, c.valor, c.footprint].filter(Boolean).join(' '));
       const desc = norm([c.comment, c.sym].filter(Boolean).join(' '));
       const val = leValor(valorTxt || c.comment);
+      /* 1.114.0: o valor trocado na simulacao ("1000uF") nao apaga a tensao, a potencia e a corrente que a peca tem no nome */
+      if (cfg.valores && cfg.valores[ref] != null) {
+        const vo = leValor(String(c.valor || '') || c.comment);
+        for (const k of ['tensao', 'potencia', 'corrente']) if (!(val[k] > 0) && vo[k] > 0) val[k] = vo[k];
+      }
       const info = { ref, pre, comp: c, tipo: 'desconhecido', rotulo: '', modelo: '', valor: val, elementos: [], pinos: c.pinos, avisos: [], interativo: null, valorTxt };
       comps.set(ref, info);
       if (c.dnp || desligados.has(ref)) { info.tipo = 'fora'; info.rotulo = c.dnp ? 'não montado (DNP)' : 'desligado na simulação'; continue; }
@@ -376,7 +401,7 @@
         continue;
       }
       /* --- resistor / potenciometro / NTC / LDR */
-      if ((/^(R|RN|RES)$/.test(pre) || /^RES\b|RESIST/.test(desc)) && c.pinos.length === 2 && !/^(RV|VR)$/.test(pre)) {
+      if ((/^(R|RN|RES)$/.test(pre) || /^RES\b|RESIST/.test(desc)) && c.pinos.length === 2 && !/^(RV|VR)$/.test(pre) && !/INDUT|INDUCTOR|CHOKE|TERMIST|FUSIV/.test(norm(c.sym || '')) && !/^(L|F|FU|RT|NTC|PTC|TH)$/.test(pre)) {
         let r = val.v;
         if (!(r >= 0)) { r = 10e3; info.avisos.push('sem valor: simulando com 10 kΩ (mude o Value ou em Valores da simulação)'); }
         if (r === 0) r = 1e-3;
@@ -396,8 +421,13 @@
         continue;
       }
       if (/^(RV|VR|POT|TRIM|P|RP)$/.test(pre) && c.pinos.length >= 3 || /POTENCIOM|TRIMPOT|TRIMMER/.test(desc)) {
-        let r = val.v; if (!(r > 0)) { r = 10e3; info.avisos.push('sem valor: simulando com 10 kΩ'); }
+        /* 1.114.0 (lote 2): o "1TURN"/"10TURN" do nome nao e o valor; a potencia do nome ("2W", "1/4W") e a queima por trecho */
+        const valP = valorTxt ? val : leValor(String(c.comment || '').replace(/\b\d+\s*-?\s*TURNS?\b|\b\d+\s*VOLTAS?\b/ig, ' '));
+        let r = valP.v; if (!(r > 0)) { r = 10e3; info.avisos.push('sem valor: simulando com 10 kΩ'); }
+        const prmP = (cfg.params && cfg.params[ref]) || {};
+        info.potencia = isFinite(+prmP.potencia) && +prmP.potencia > 0 ? +prmP.potencia : valP.potencia > 0 ? valP.potencia : /3296|3006|3852|3266|3386|TRIM/.test(txt) ? 0.5 : 0.25;
         const pos = cfg.pots && cfg.pots[ref] != null ? Math.min(1, Math.max(0, +cfg.pots[ref])) : 0.5;
+        info.campos = [{ k: 'pos', rot: 'Posição do cursor (%)', un: '%', v: Math.round(pos * 1000) / 10, dica: '0 a 100' }, { k: 'potencia', rot: 'Potência (W)', un: 'W', v: info.potencia, dica: '1/4, 0,5, 2' }];
         /* o cursor: o pino chamado W/WIPER/CURSOR (no simbolo da casa e o 3), senao o 2; as pontas sao os outros dois */
         const w = achaPino(info, [/^(W|WIPER|CURSOR|S|SL|C)$/i], null) || achaPino(info, [], 2);
         const resto = c.pinos.filter(p => p !== w);
@@ -408,9 +438,33 @@
         info.r2 = resistor(info, w, b, Math.max(1, r * pos), 'trecho cursor–ponta');
         continue;
       }
-      if ((/^(NTC|PTC|TH|RT)$/.test(pre) && !/0ZC|MF-|RXEF|FUSE|POLYSW|PPTC/.test(txt) || /NTC|TERMIST/.test(desc)) && c.pinos.length === 2) {
-        let r = val.v; if (!(r > 0)) r = 10e3;
-        info.tipo = 'resistor'; info.rotulo = 'Termistor ' + fmt(r, 'Ω') + ' a 25 °C'; info.r = r; resistor(info, p1, p2, r, 'NTC');
+      /* 1.114.0 (lote 2): a categoria TERMISTOR mistura tres coisas — o PTC rearmavel (polyfuse: vai para o fusivel abaixo),
+         o PTC de partida/protecao (a resistencia sobe com a corrente) e o NTC de verdade (R25, β e a TEMPERATURA editavel) */
+      const ptcRearm = /LVR\d{3}|MF-?R?[XS]?\d{3}|\b\d{2,3}R\d{3}(?![0-9])|TR600|BK250|0Z[CR][A-Z]|POLYSW|PPTC|RXEF|POLYFUSE|REARM|RESETT|2920L|SMD\d{3}P?|\bLP\d{5}\b/.test(txt) && !/INDUT|INDUCTOR|CHOKE|BOBINA/.test(txt);
+      if ((/^(NTC|PTC|TH|RT)$/.test(pre) && !ptcRearm && !/FUSE/.test(txt) || /NTC|TERMIST/.test(desc) && !ptcRearm) && c.pinos.length === 2) {
+        const prmT = (cfg.params && cfg.params[ref]) || {};
+        const ptc = (/PTC|POSISTOR|B5998|B5997/.test(txt) || /^PTC$/.test(pre)) && !/NTC/.test(txt);
+        let r = val.v; if (!(r > 0)) r = ptc ? 25 : 10e3;
+        if (ptc) {
+          /* PTC de partida/protecao: R = R25·(1 + (|V|/Vk)^6), Vk = R25·In — a corrente para perto da nominal */
+          const inom = isFinite(+prmT.inom) && +prmT.inom > 0 ? +prmT.inom : val.corrente > 0 ? val.corrente : 0.1;
+          info.tipo = 'ptc'; info.r = r; info.inom = inom; info.rotulo = 'PTC ' + fmt(r, 'Ω') + ' (corrente nominal ' + fmt(inom, 'A') + ')';
+          info.campos = [{ k: 'inom', rot: 'Corrente nominal (A)', un: 'A', v: inom, dica: '1' }];
+          const vk = r * inom;
+          const f = v => { const vd = v[0] - v[1], x = Math.abs(vd) / vk; const i = vd / (r * (1 + Math.pow(Math.min(x, 50), 6))); return [i, -i]; };
+          info.el = poe(info, { tipo: 'NL', nos: [nomeTerm(info, p1), nomeTerm(info, p2)], f, papel: 'PTC' }, [pk(info, p1), pk(info, p2)]);
+          continue;
+        }
+        /* NTC: R = R25·exp(β(1/T − 1/298,15)); o "4000k"/"B3950" do nome e o β */
+        const bNome = /\bB\s*=?\s*(\d{4})\b|\b(3[0-9]\d{2}|4[0-9]\d{2})\s*K\b/.exec(norm(c.comment || ''));
+        const beta = isFinite(+prmT.beta) && +prmT.beta > 0 ? +prmT.beta : bNome ? +(bNome[1] || bNome[2]) : 3950;
+        const temp = isFinite(+prmT.temp) ? +prmT.temp : 25;
+        const rt = r * Math.exp(beta * (1 / (temp + 273.15) - 1 / 298.15));
+        info.tipo = 'ntc'; info.r = rt; info.r25 = r; info.beta = beta; info.temp = temp;
+        info.potencia = isFinite(+prmT.potencia) && +prmT.potencia > 0 ? +prmT.potencia : val.potencia > 0 ? val.potencia : /SG\d|NTC-?\d|LIMIT|PARTIDA|INRUSH/.test(txt) ? 3 : 0.25;
+        info.rotulo = 'Termistor NTC ' + fmt(r, 'Ω') + ' a 25 °C (β ' + beta + ') a ' + temp + ' °C = ' + fmt(rt, 'Ω');
+        info.campos = [{ k: 'temp', rot: 'Temperatura (°C)', un: '%', v: temp, dica: '25, 80, -10' }, { k: 'beta', rot: 'β (K)', un: '', v: beta, dica: '3950' }, { k: 'potencia', rot: 'Potência (W)', un: 'W', v: info.potencia, dica: '0,25' }];
+        resistor(info, p1, p2, rt, 'NTC');
         continue;
       }
       if ((/^LDR$/.test(pre) || /\bLDR\b|FOTORRES/.test(desc)) && c.pinos.length === 2) {
@@ -421,16 +475,55 @@
         continue;
       }
       /* --- fusivel / PTC rearmavel / ferrite */
-      if ((/^(F|FU|PTC|PF)$/.test(pre) || /FUSE|FUSIV|0ZC[A-Z]|MF-?[MRS]|POLYSW|PPTC|RXEF|SMD\d{3}P/.test(txt)) && c.pinos.length === 2) {
-        info.tipo = 'fusivel';
-        let ih = val.corrente;
-        const z = /0ZC[A-Z](\d{4})/.exec(txt); if (z) ih = +z[1] / 100;
-        const mf = /MF-?[MRS]\w*?(\d{3})/.exec(txt); if (!ih && mf) ih = +mf[1] / 100;
-        info.ihold = ih; info.rotulo = 'Fusível' + (ih ? ' ' + fmt(ih, 'A') : '');
-        resistor(info, p1, p2, 0.05, 'fusível');
+      if ((/^(F|FU|PTC|PF)$/.test(pre) || /FUSE|FUSIV|0ZC[A-Z]|MF-?[MRS]|POLYSW|PPTC|RXEF|SMD\d{3}P/.test(txt) || ptcRearm) && c.pinos.length === 2) {
+        /* 1.114.0 (lote 2): a corrente nominal (o nome ou o codigo) e o tipo: o fusivel de vidro/ceramico ABRE (queima: fica
+           aberto ate trocar) acima de In (rapido) ou 1,5x (retardo); o PTC rearmavel (polyfuse) dispara acima de 2x a
+           corrente de manutencao — vira resistencia alta — e REARMA quando o defeito sai (a potencia nele cai) */
+        const prmF = (cfg.params && cfg.params[ref]) || {};
+        const rearm = ptcRearm || /PTC|PPTC|POLY|0ZC|MF-|2920L|SMD\d{3}/.test(txt) || /^PTC$/.test(pre);
+        /* o codigo da peca manda (o nome do PTC costuma trazer a corrente de DISPARO: LVR040K "900mA" tem Ihold 0,4 A) */
+        let ih = NaN, m;
+        if ((m = /0Z[CR][A-Z](\d{4})/.exec(txt))) ih = +m[1] / 100;
+        else if ((m = /MF-?[MRS]?X?(\d{3})/.exec(txt))) ih = +m[1] / 100;
+        else if ((m = /LVR(\d{3})/.exec(txt))) ih = +m[1] / 100;
+        else if ((m = /\b\d{2,3}R(\d{3})(?![0-9])|TR600-(\d{3})|2920L(\d{3})|SMD(\d{3})|\bLP\d{2}(\d{3})\b/.exec(txt))) ih = +(m[1] || m[2] || m[3] || m[4] || m[5]) / 100;
+        if (!(ih > 0)) ih = grandezaDoNome(c.comment, 'A');
+        if (!(ih > 0) && val.corrente > 0) ih = val.corrente;
+        if (isFinite(+prmF.inom) && +prmF.inom > 0) ih = +prmF.inom;
+        if (!(ih > 0)) { ih = 1; info.avisos.push('corrente do fusível não conhecida: simulando com 1 A (mude no campo)'); }
+        const lento = isFinite(+prmF.retardo) ? +prmF.retardo > 0 : /RETARD|SLOW|LENTO|TIME ?LAG|\bT\d|\(T\)|\bT\b/.test(txt);
+        info.tipo = 'fusivel'; info.ihold = ih; info.inom = ih; info.rearmavel = rearm; info.lento = lento;
+        info.rotulo = (rearm ? 'Fusível rearmável (PTC) ' : 'Fusível ' + (lento ? 'retardado ' : 'rápido ')) + fmt(ih, 'A');
+        info.campos = rearm ? [{ k: 'inom', rot: 'Corrente de manutenção (A)', un: 'A', v: ih, dica: '1,1' }]
+          : [{ k: 'inom', rot: 'Corrente nominal (A)', un: 'A', v: ih, dica: '0,5, 5' }, { k: 'retardo', rot: 'Retardo (0 rápido, 1 lento)', un: '', v: lento ? 1 : 0, dica: '0 ou 1' }];
+        if (!rearm) { resistor(info, p1, p2, 0.05, 'fusível'); continue; }
+        /* o rearmavel: Ron em serie com [chave fechada ∥ Rdisparo]; dispara acima de 2x Ihold, rearma com a potencia baixa */
+        const meio = nInt(ref, 'ptc');
+        const ron = poe(info, { tipo: 'R', nos: [nomeTerm(info, p1), meio], r: 0.05, papel: 'PTC (frio)' }, [pk(info, p1), null]);
+        const rtr = Math.max(20, 12 / ih);
+        poe(info, { tipo: 'R', nos: [meio, nomeTerm(info, p2)], r: rtr, papel: 'PTC disparado' }, [null, pk(info, p2)]);
+        const sw = poe(info, { tipo: 'SW', nos: [meio, nomeTerm(info, p2)], fechada: true, papel: 'PTC' }, [null, null]);
+        info.disparado = false; info.rtr = rtr;
+        ron.reinicia = () => { info.disparado = false; sw.fechada = true; };
+        ron.atualiza = v => {
+          const i = Math.abs(v[0] - v[1]) / 0.05;
+          if (!info.disparado && i > 2 * ih) { info.disparado = true; sw.fechada = false; return true; }
+          if (info.disparado && i * i * rtr < 0.05) { info.disparado = false; sw.fechada = true; return true; }
+          return false;
+        };
         continue;
       }
-      if ((/^FB$/.test(pre) || /FERRITE|BLM\d|MPZ\d/.test(txt)) && c.pinos.length === 2) { info.tipo = 'resistor'; info.rotulo = 'Ferrite'; info.r = 0.1; resistor(info, p1, p2, 0.1, 'ferrite'); continue; }
+      /* a ferrite de verdade (o nome em Ω: "600 Ohms 2A", MPZ2012); a "Ferrite 2.2mH" e um choke (indutor, abaixo) */
+      if ((/^FB$/.test(pre) || /FERRITE|BLM\d|MPZ\d/.test(txt)) && c.pinos.length === 2 && val.un !== 'H') {
+        const prmB = (cfg.params && cfg.params[ref]) || {};
+        const inomB = isFinite(+prmB.inom) && +prmB.inom > 0 ? +prmB.inom : grandezaDoNome(c.comment, 'A') > 0 ? grandezaDoNome(c.comment, 'A') : 1;
+        /* a DCR e o valor em mΩ do nome ("40ohms 1.5A 50mOhms": 40 Ω e a impedancia em alta frequencia) */
+        const dcrB = /(\d+(?:[.,]\d+)?)\s*m(?:Ω|Ohms?)/.exec(String(c.comment || ''));
+        const rB = dcrB ? +dcrB[1].replace(',', '.') / 1000 : 0.1;
+        info.tipo = 'ferrite'; info.rotulo = 'Ferrite' + (c.comment ? ' (' + c.comment + ')' : ''); info.r = rB; info.inom = inomB;
+        info.campos = [{ k: 'inom', rot: 'Corrente nominal (A)', un: 'A', v: inomB, dica: '1,5' }];
+        resistor(info, p1, p2, rB, 'ferrite'); continue;
+      }
       /* --- capacitor */
       if ((/^(C|CE|CAP)$/.test(pre) || /^CAP\b|CAPACIT/.test(desc)) && c.pinos.length === 2) {
         /* 1.113.0 (lote 1): o supercapacitor (valor em F, 2,7/5,5 V), a tensao nominal editavel e a polaridade pela categoria
@@ -444,7 +537,8 @@
         }
         if (!(cv > 0)) { cv = superc ? 1 : 100e-9; info.avisos.push('sem valor: simulando com ' + fmt(cv, 'F')); }
         const prmC = (cfg.params && cfg.params[ref]) || {};
-        const vNom = isFinite(+prmC.vmax) && +prmC.vmax > 0 ? +prmC.vmax : val.tensao > 0 ? val.tensao : superc ? 2.7 : NaN;
+        const vSolta = /(\d+(?:[.,]\d+)?)\s*[uµμnpm]F\s+(\d{1,3}(?:[.,]\d)?)(?=\s|$)(?!\s*(?:MM|%))/i.exec(String(c.comment || ''));
+        const vNom = isFinite(+prmC.vmax) && +prmC.vmax > 0 ? +prmC.vmax : val.tensao > 0 ? val.tensao : vSolta ? +vSolta[2].replace(',', '.') : superc ? 2.7 : null;
         info.tipo = 'capacitor'; info.c = cv; info.vmax = vNom; info.supercap = superc;
         const tipoC = superc ? 'Supercapacitor' : /TANT/.test(txt) ? 'Capacitor de tântalo' : /ELETROL|ELECTROL/.test(txt) ? 'Capacitor eletrolítico' : /POLIES|POLYEST|MKT|MKP/.test(txt) ? 'Capacitor de poliéster' : /SEGURANC|SAFETY|\bX[12]\b|\bY[12]\b/.test(txt) ? 'Capacitor de segurança' : 'Capacitor';
         info.rotulo = tipoC + ' ' + fmt(cv, 'F') + (vNom ? ' / ' + fmt(vNom, 'V') : '');
@@ -457,10 +551,21 @@
         continue;
       }
       /* --- indutor */
-      if ((/^L$/.test(pre) || /^IND\b|INDUTOR|INDUCTOR/.test(desc)) && c.pinos.length === 2) {
-        let lv = val.v; if (!(lv > 0)) { lv = 10e-6; info.avisos.push('sem valor: simulando com 10 µH'); }
-        info.tipo = 'indutor'; info.l = lv; info.rotulo = 'Indutor ' + fmt(lv, 'H');
-        poe(info, { tipo: 'L', nos: [nomeTerm(info, p1), nomeTerm(info, p2)], l: lv, papel: 'L' }, [pk(info, p1), pk(info, p2)]);
+      if ((/^L$/.test(pre) || /^IND\b|INDUTOR|INDUCTOR|CHOKE/.test(desc) || /FERRITE/.test(txt) && val.un === 'H') && c.pinos.length === 2) {
+        /* 1.114.0 (lote 2): o valor em H (o "0,6A" do nome nao e a indutancia), a corrente nominal do nome e a DCR */
+        const hTok = (val.toks || []).find(x => x.un === 'H');
+        let lv = valorTxt ? val.v : hTok ? hTok.v : val.v; if (!(lv > 0)) { lv = 10e-6; info.avisos.push('sem valor: simulando com 10 µH'); }
+        const prmL = (cfg.params && cfg.params[ref]) || {};
+        const iNome = grandezaDoNome(c.comment, 'A');
+        let rNome = grandezaDoNome(c.comment, 'Ω');
+        if (!(rNome > 0)) { const r320 = /(?:^|\s)(\d+(?:[.,]\d+)?)R(?![0-9A-Z])/i.exec(String(c.comment || '')); if (r320) rNome = +r320[1].replace(',', '.'); }
+        info.inom = isFinite(+prmL.inom) && +prmL.inom > 0 ? +prmL.inom : iNome > 0 ? iNome : 1;
+        info.dcr = isFinite(+prmL.dcr) && +prmL.dcr > 0 ? +prmL.dcr : rNome > 0 && rNome < 1e4 ? rNome : 0.05;
+        info.tipo = 'indutor'; info.l = lv; info.rotulo = 'Indutor ' + fmt(lv, 'H') + ' (' + fmt(info.inom, 'A') + ', DCR ' + fmt(info.dcr, 'Ω') + ')';
+        info.campos = [{ k: 'inom', rot: 'Corrente nominal (A)', un: 'A', v: info.inom, dica: '1,25' }, { k: 'dcr', rot: 'Resistência DCR (Ω)', un: 'Ω', v: info.dcr, dica: '0,05' }];
+        const meio = nInt(ref, 'dcr');
+        poe(info, { tipo: 'R', nos: [nomeTerm(info, p1), meio], r: info.dcr, papel: 'DCR' }, [pk(info, p1), null]);
+        info.el = poe(info, { tipo: 'L', nos: [meio, nomeTerm(info, p2)], l: lv, papel: 'L' }, [null, pk(info, p2)]);
         continue;
       }
       /* --- ponte retificadora */
@@ -480,9 +585,14 @@
         /* 1.109.0: a tensao de ativacao (Vf) e a corrente maxima editaveis na simulacao (cfg.params[ref] = {vf, imax});
            1.113.0: o nome da peca manda quando traz ("Amarelo Redondo 3V 200mA") */
         const prm = (cfg.params && cfg.params[ref]) || {};
-        const vfNome = val.tensao >= 1 && val.tensao <= 4.5 ? val.tensao : null, iNome = val.corrente >= 1e-3 && val.corrente <= 3 ? val.corrente : null;
+        /* o IR: o "2V" do nome e o Vf maximo (o tipico e 1,2-1,5 V) */
+        const ehIR = cor[1] < 1.5;
+        const vfNome = val.tensao >= 1 && val.tensao <= 4.5 && !(ehIR && val.tensao > 1.6) ? val.tensao : null, iNome = val.corrente >= 1e-3 && val.corrente <= 3 ? val.corrente : null;
         const vf = isFinite(+prm.vf) && +prm.vf > 0 ? +prm.vf : vfNome || cor[1], n = 2;
         info.imax = isFinite(+prm.imax) && +prm.imax > 0 ? +prm.imax : iNome || 0.02;   // a corrente nominal de um LED de indicacao
+        /* 1.114.0: o fototransistor e o display de 7 segmentos que estao na categoria LED: nao simulados aqui (lote 6) */
+        if (/FOTOTRANS|PHOTOTRANS|FOTODIOD|PHOTODIOD/.test(txt)) { info.tipo = 'ignorado'; info.rotulo = 'Fototransistor/fotodiodo (sensor: não simulado ainda)'; continue; }
+        if (/7 ?SEG|SETE SEG|DISPLAY/.test(txt)) { info.tipo = 'ignorado'; info.rotulo = 'Display de LEDs (não simulado ainda)'; continue; }
         /* o LED enderecavel (WS2812, SK6812, APA102) tem um CI dentro: nao e simulado aqui */
         if (/WS28\d\d|SK68\d\d|APA10\d|ENDERE[CÇ]AVEL|ADDRESSABLE|NEOPIXEL/.test(txt)) { info.tipo = 'ignorado'; info.rotulo = 'LED endereçável (CI interno: não simulado)'; continue; }
         /* LED RGB / bicolor (3-4 pinos): o comum (pino chamado COM/A/K, senao o 2) e um LED por cor */
@@ -544,7 +654,7 @@
           else if ((m = /\bSM(\d{2})C/.exec(txt))) { vr = +m[1]; bid = true; }
           else if ((m = /-T(\d{1,2})S?C\b/.exec(txt))) { vr = +m[1]; bid = /C\b/.test(m[0]); }
           else if ((m = /\bSM(\d{2})T/.exec(txt))) { vr = +m[1]; bid = true; }
-          else if (val.tensao > 0) vr = val.tensao;
+          else if (val.tensao > 0) vr = val.tensao / 1.11;   // 1.114.0: a tensao do nome e o Vbr (como no 1.5KE300A)
           if (/BIDIR|\bCA\b|BI-?DIR/.test(txt)) bid = true;
           if (!vr) { vr = 5; info.avisos.push('tensão do TVS não conhecida: simulando com 5 V (mude no campo Vbr)'); }
           bv = vr * 1.11;
@@ -557,13 +667,14 @@
         if (!bv) sub = mod.nome === 'Schottky' ? 'Schottky' : mod.nome === 'sinal' ? 'sinal' : 'retificador';
         /* os limites: o nome da peca ("6A 800V", "1.2kV 8A") manda; senao a familia */
         const lim = limitesDiodo(txt);
-        info.ifmax = isFinite(+prmD.ifmax) && +prmD.ifmax > 0 ? +prmD.ifmax : val.corrente > 0 ? val.corrente : lim.ifmax || (sub === 'sinal' ? 0.3 : 1);
+        info.ifmax = isFinite(+prmD.ifmax) && +prmD.ifmax > 0 ? +prmD.ifmax : val.corrente > 0 && sub !== 'TVS' ? val.corrente : lim.ifmax || (sub === 'sinal' ? 0.3 : 1);
         info.vrrm = isFinite(+prmD.vrrm) && +prmD.vrrm > 0 ? +prmD.vrrm : !bv && val.tensao >= 10 ? val.tensao : lim.vrrm || (sub === 'Schottky' ? 40 : 100);
         if (isFinite(+prmD.pz) && +prmD.pz > 0) info.pz = +prmD.pz;
         if (!lim.ifmax && !(val.corrente > 0) && !bv) info.avisos.push('limites do diodo não conhecidos: If máx ' + fmt(info.ifmax, 'A') + ', VRRM ' + fmt(info.vrrm, 'V') + ' (mude nos campos)');
         info.tipo = 'diodo'; info.sub = sub; info.bv = bv; info.bidir = bid;
         info.rotulo = (bv ? nome : 'Diodo ' + (sub === 'retificador' && mod.nome === 'genérico' ? 'genérico' : sub)) + (c.comment ? ' (' + c.comment + ')' : '');
-        info.campos = sub === 'zener' ? [{ k: 'vz', rot: 'Tensão zener Vz (V)', un: 'V', v: bv, dica: '5,1' }, { k: 'pz', rot: 'Potência (W)', un: 'W', v: info.pz, dica: '0,5' }, { k: 'ifmax', rot: 'If máx (A)', un: 'A', v: info.ifmax, dica: '200m' }]
+        if (sub === 'zener' && bv) info.ifmax = isFinite(+prmD.ifmax) && +prmD.ifmax > 0 ? +prmD.ifmax : info.pz / bv;   // Izm = Pz/Vz
+        info.campos = sub === 'zener' ? [{ k: 'vz', rot: 'Tensão zener Vz (V)', un: 'V', v: bv, dica: '5,1' }, { k: 'pz', rot: 'Potência (W)', un: 'W', v: info.pz, dica: '0,5' }]
           : sub === 'TVS' ? [{ k: 'vz', rot: 'Tensão de ruptura Vbr (V)', un: 'V', v: bv, dica: '6,7' }, { k: 'ifmax', rot: 'If máx (A)', un: 'A', v: info.ifmax, dica: '1' }]
           : [{ k: 'ifmax', rot: 'Corrente máxima If (A)', un: 'A', v: info.ifmax, dica: '1' }, { k: 'vrrm', rot: 'Tensão reversa VRRM (V)', un: 'V', v: info.vrrm, dica: '1000' }];
         info.d = diodo(info, a, k, Object.assign({}, mod, { bv, bidir: bid }), nome);
@@ -572,14 +683,39 @@
       /* --- transistor bipolar */
       const bjt = BJTS.find(([re]) => re.test(desc));
       const fet = FETS.find(([re]) => re.test(desc));
-      if ((/^(Q|T|TR|VT)$/.test(pre) || bjt || fet) && c.pinos.length >= 3 && !(/^(T|TR)$/.test(pre) && /TRAFO|TRANSF/.test(txt))) {
+      const igbt = IGBT_RE.test(txt) && c.pinos.length >= 3;
+      if ((/^(Q|T|TR|VT)$/.test(pre) || bjt || fet || igbt) && c.pinos.length >= 3 && !(/^(T|TR)$/.test(pre) && /TRAFO|TRANSF/.test(txt))) {
         const temG = achaPino(info, [/^G(ATE)?$/i], null), temB = achaPino(info, [/^B(ASE)?$/i], null);
         const ehFet = fet && !temB || (!bjt && temG) || /MOSFET|NMOS|PMOS|\bFET\b/.test(txt);
-        if (ehFet) {
-          const m = fet ? fet[1] : { pol: /PMOS|P-?CH|CANAL P/.test(txt) ? -1 : 1, vth: 2, k: 5, nome: 'MOSFET genérico' };
-          const sot = /SOT-?23|SOT-?323|SC-?70/.test(norm(c.footprint));
-          const g = achaPino(info, [/^G(ATE)?$/i], sot ? 1 : 1), d = achaPino(info, [/^D(RAIN)?$/i], sot ? 3 : 2), s = achaPino(info, [/^S(OURCE)?$/i], sot ? 2 : 3);
-          info.tipo = 'mosfet'; info.rotulo = m.nome + (c.comment ? ' ' + c.comment : ''); info.m = m;
+        if (ehFet || igbt) {
+          /* 1.114.0 (lote 2): os limites (Vdss, Id max, Pd, Vgs max) e a Rds(on) da familia ou do nome ("55V 26A", "150V 144W
+             33A"); o canal P pelo nome; Vth e Rds(on) editaveis (mudam o modelo: K = 1/(Rds·(Vgs_ref − Vth))). O IGBT: o
+             mesmo gate, com o diodo da juncao PN em serie no coletor (Vce(sat) ≈ 1,5-2 V) */
+          const lim = Object.assign({}, (FET_LIM.find(([re]) => re.test(desc)) || [null, {}])[1]);
+          const canalP = /PMOS|P-?CH|CANAL P|P-CHANNEL|CANAL-P/.test(txt);
+          const m = Object.assign({}, fet ? fet[1] : { pol: canalP ? -1 : 1, vth: igbt ? 5.5 : 2, k: 5, nome: igbt ? 'IGBT' : 'MOSFET genérico' });
+          if (lim.pol) m.pol = lim.pol;
+          if (canalP) m.pol = -1;
+          if (igbt) { m.pol = 1; m.nome = 'IGBT'; }
+          else m.nome = (m.pol < 0 ? 'MOSFET canal P' : 'MOSFET canal N') + (fet || lim.vdss ? '' : ' genérico');
+          const prmM = (cfg.params && cfg.params[ref]) || {};
+          const cmM = c.comment || '';
+          const fpM = norm(c.footprint), peq = /SOT|SC-?70|SOIC|SO-?8|TSOP/.test(fpM);
+          m.vth = isFinite(+prmM.vth) && +prmM.vth > 0 ? +prmM.vth : lim.vth || m.vth;
+          info.vdss = isFinite(+prmM.vdss) && +prmM.vdss > 0 ? +prmM.vdss : grandezaDoNome(cmM, 'V') > 0 ? grandezaDoNome(cmM, 'V') : lim.vdss || (peq ? 30 : 60);
+          info.idmax = isFinite(+prmM.idmax) && +prmM.idmax > 0 ? +prmM.idmax : grandezaDoNome(cmM, 'A') > 0 ? grandezaDoNome(cmM, 'A') : lim.id || (peq ? 3 : 10);
+          info.pd = isFinite(+prmM.pd) && +prmM.pd > 0 ? +prmM.pd : grandezaDoNome(cmM, 'W') > 0 ? grandezaDoNome(cmM, 'W') : lim.pd || (peq ? 1.25 : 40);
+          info.vgsmax = isFinite(+prmM.vgsmax) && +prmM.vgsmax > 0 ? +prmM.vgsmax : lim.vgs || 20;
+          const vgsRef = m.vth < 1.5 ? 4.5 : 10;
+          const rNomeM = grandezaDoNome(cmM, 'Ω');
+          info.rdson = isFinite(+prmM.rdson) && +prmM.rdson > 0 ? +prmM.rdson : rNomeM > 0 && rNomeM < 50 ? rNomeM : lim.rds || (fet ? 1 / (m.k * Math.max(0.5, vgsRef - m.vth)) : Math.max(0.005, 0.5 / info.idmax));
+          m.k = 1 / (info.rdson * Math.max(0.5, vgsRef - m.vth));
+          info.campos = [{ k: 'vth', rot: 'Vth (V)', un: 'V', v: m.vth, dica: '2, 4' }, { k: 'rdson', rot: igbt ? 'R de condução (Ω)' : 'Rds(on) (Ω)', un: 'Ω', v: info.rdson, dica: '0,04' },
+            { k: 'idmax', rot: igbt ? 'Ic máx (A)' : 'Id máx (A)', un: 'A', v: info.idmax, dica: '20' }, { k: 'vdss', rot: igbt ? 'Vces (V)' : 'Vdss (V)', un: 'V', v: info.vdss, dica: '60' },
+            { k: 'pd', rot: 'Potência Pd (W)', un: 'W', v: info.pd, dica: '50' }, { k: 'vgsmax', rot: 'Vgs máx (V)', un: 'V', v: info.vgsmax, dica: '20' }];
+          const sot = /SOT-?23|SOT-?323|SC-?70/.test(fpM);
+          const g = achaPino(info, [/^G(ATE)?$/i], 1), d = achaPino(info, igbt ? [/^C(OL\w*)?$/i, /^D(RAIN)?$/i] : [/^D(RAIN)?$/i], sot ? 3 : 2), s = achaPino(info, igbt ? [/^E(MIT\w*)?$/i, /^S(OURCE)?$/i] : [/^S(OURCE)?$/i], sot ? 2 : 3);
+          info.tipo = igbt ? 'igbt' : 'mosfet'; info.rotulo = m.nome + (c.comment ? ' ' + c.comment : ''); info.m = m;
           const pol = m.pol, vth = m.vth, K = m.k;
           const f = (v) => {
             let vd = v[0], vg = v[1], vs = v[2];
@@ -594,8 +730,17 @@
             const ib = 1e-11 * (lexp(vbd / (1.6 * VT)) - 1) * pol;
             return [id - ib, 0, -id + ib];
           };
+          if (igbt) {
+            /* o coletor entra por uma juncao PN (o Vce(sat)) ate o "dreno" interno */
+            const meio = nInt(ref, 'igbt');
+            diodo(info, d, null, { is: 1e-10, n: 1.5, rs: 0.01 }, 'junção do coletor');
+            const ult = elementos[elementos.length - 1]; ult.nos[1] = meio;
+            info.q = poe(info, { tipo: 'NL', nos: [meio, nomeTerm(info, g), nomeTerm(info, s)], f, dc: [[0, 2]], papel: 'IGBT' }, [null, pk(info, g), pk(info, s)]);
+            info.junc = ult;
+            continue;
+          }
           info.q = poe(info, { tipo: 'NL', nos: [nomeTerm(info, d), nomeTerm(info, g), nomeTerm(info, s)], f, dc: [[0, 2]], papel: 'MOSFET', junc: [[2, 0, 1.6 * VT, 1e-11, pol]] }, [pk(info, d), pk(info, g), pk(info, s)]);
-          if (!fet) info.avisos.push('MOSFET sem modelo conhecido: Vth 2 V');
+          if (!fet && !FET_LIM.some(([re]) => re.test(desc))) info.avisos.push('MOSFET sem modelo conhecido: Vth ' + fmt(m.vth, 'V') + ', os limites do nome');
           if (!(achaPino(info, [/^G(ATE)?$/i], null))) info.avisos.push('pinos sem nome G/D/S: usei a ordem do encapsulamento');
           continue;
         }
@@ -614,6 +759,8 @@
         if (vNome) limQ.vceo = +vNome[1];
         if (aNome) limQ.ic = +aNome[1] * (aNome[2] ? 1e-3 : 1);
         if (wNome) limQ.pd = +wNome[1] * (wNome[2] ? 1e-3 : 1);
+        /* 1.114.0: o generico de corrente alta ("100V 5A") e de encapsulamento de potencia: Pd de TO-220/TO-126 */
+        else if (!BJT_LIM.some(([re]) => re.test(desc)) && limQ.ic >= 1) limQ.pd = /SOT|SC-?70|TO-?92/.test(norm(c.footprint)) ? 1 : 20;
         info.icmax = isFinite(+prmQ.icmax) && +prmQ.icmax > 0 ? +prmQ.icmax : limQ.ic;
         info.vceo = isFinite(+prmQ.vceo) && +prmQ.vceo > 0 ? +prmQ.vceo : limQ.vceo;
         info.pd = isFinite(+prmQ.pd) && +prmQ.pd > 0 ? +prmQ.pd : limQ.pd;
@@ -1123,6 +1270,16 @@
     const u = (h % 10007) / 10006;
     return (u < 0.5 ? -1 : 1) * (0.5 + Math.abs(u - 0.5));
   }
+  /* 1.114.0: o numero solto com a unidade no nome ("55V 26A", "150V 144W", "1.25A", "900mA", "40mΩ") — nao pega o fim de
+     um codigo (o "1N751A", o "BC546A") */
+  function grandezaDoNome(t, un) {
+    const s = String(t || '').replace(/,/g, '.');
+    const re = un === 'Ω' ? /(?:^|[\s/_(-])(\d+(?:\.\d+)?)\s*([mkKM]?)(?:Ω|OHMS?)\b/i : new RegExp('(?:^|[\\s/_(-])(\\d+(?:\\.\\d+)?)\\s*([mkK]?)' + un + '(?![A-Z0-9])', 'i');
+    const m = re.exec(s);
+    if (!m) return NaN;
+    const p = m[2] === 'm' ? 1e-3 : /^[kK]$/.test(m[2]) ? 1e3 : m[2] === 'M' ? (un === 'Ω' ? 1e6 : 1e-3) : 1;
+    return +m[1] * p;
+  }
   /* If max e VRRM pela familia do diodo (1N400x, 1N540x, UF/FR, 1N58xx, SSxx, M1-M7, S1A-S1M, 1N4148) */
   function limitesDiodo(t) {
     let m;
@@ -1153,6 +1310,16 @@
     return null;
   }
 
+  /* a queima do MOSFET/IGBT (1.114.0) */
+  function mosQueima(out, info, id, vds, vgs, p, queima, lim) {
+    out.linhas.push({ t: 'Limites', f: 'Id máx ' + fmt(info.idmax, 'A') + ' · Pd ' + fmt(info.pd, 'W') + ' · Vdss ' + fmt(info.vdss, 'V') + ' · Vgs máx ' + fmt(info.vgsmax, 'V'), r: '' });
+    if (Math.abs(p) > info.pd * 0.8 && Math.abs(p) <= info.pd) out.alertas.push('dissipação ' + fmt(Math.abs(p), 'W') + ' perto da Pd (' + fmt(info.pd, 'W') + ')');
+    lim(id, info.idmax, 1.5, 'corrente', 'A', 'corrente de ' + fmt(Math.abs(id), 'A') + ' (máx ' + fmt(info.idmax, 'A') + '; queima acima de 1,5×)');
+    lim(p, info.pd, 1.5, 'dissipação', 'W', 'dissipou ' + fmt(Math.abs(p), 'W') + ' (Pd ' + fmt(info.pd, 'W') + '; queima acima de 1,5×)');
+    lim(vds, info.vdss, 1.1, 'tensão ' + (info.tipo === 'igbt' ? 'Vce' : 'Vds'), 'V', 'tensão de ' + fmt(Math.abs(vds), 'V') + ' entre ' + (info.tipo === 'igbt' ? 'coletor e emissor' : 'dreno e source') + ' (máx ' + fmt(info.vdss, 'V') + ')');
+    if (Math.abs(vgs) > info.vgsmax) queima('tensão de gate de ' + fmt(Math.abs(vgs), 'V') + ' (máx ±' + fmt(info.vgsmax, 'V') + ': rompe o óxido do gate)');
+    out.corrente = id; out.idmax = info.idmax; out.pd = info.pd; out.vdss = info.vdss;
+  }
   /* ================================================================== leitura do resultado: pinos, calculos e alertas */
   function analisa(mt, res) {
     const v = n => (n == null ? NaN : res.v[n] != null ? res.v[n] : NaN);
@@ -1176,6 +1343,13 @@
       const out = { titulo: info.ref + ' — ' + (info.rotulo || info.tipo), linhas: [], alertas: info.avisos.slice(), p: 0, tipo: info.tipo, campos: info.campos || null };
       /* 1.113.0: QUEIMA — cada tipo diz aqui se passou do limite (o Simulador queima o componente: abre, vermelho com fumaca) */
       const queima = mot => { if (!out.queima) out.queima = mot; };
+      /* 1.114.0: acima da nominal ALERTA; acima do fator, QUEIMA (o mesmo para todos os limites) */
+      const lim = (x, max, fq, nome, un, motivo) => {
+        if (!(max > 0) || !isFinite(x)) return;
+        const a = Math.abs(x);
+        if (a > max * fq) queima(motivo);
+        else if (a > max) out.alertas.push(nome + ' de ' + fmt(a, un) + ' ACIMA da nominal (' + fmt(max, un) + '; queima acima de ' + (fq === 1 ? 'dela' : String(fq).replace('.', ',') + '×') + ')');
+      };
       comps[info.ref] = out;
       let p = 0;
       for (const el of info.elementos) { const r = elRes.get(el); if (r) p += r.p; }
@@ -1228,7 +1402,38 @@
             out.linhas.push(L('Trecho cursor–ponta', 'R2 = R·posição = ' + fmt(info.r2.r, 'Ω'), fmt(Math.abs(rb.i[0]), 'A')));
             const v1 = ra.v[0], vw = ra.v[1], v3 = rb.v[1];
             out.linhas.push(L('Divisor de tensão', 'Vcursor = V3 + (V1 − V3)·R2/(R1+R2) = ' + fmt(v3, 'V') + ' + ' + fmt(v1 - v3, 'V') + '·' + fmt(info.r2.r, 'Ω') + '/' + fmt(info.r1.r + info.r2.r, 'Ω'), fmt(vw, 'V')));
+            /* 1.114.0 (lote 2): a potencia nominal vale para a pista inteira — um trecho de fracao f aguenta f·P; o trecho pequeno
+               com corrente alta queima (acima de 2x) */
+            if (info.potencia && info.r) {
+              out.corrente = Math.max(Math.abs(ra.i[0]), Math.abs(rb.i[0]));
+              for (const [el, rr, nome] of [[info.r1, ra, 'ponta–cursor'], [info.r2, rb, 'cursor–ponta']]) {
+                const lim = info.potencia * Math.max(0.02, el.r / info.r), pr = Math.abs(rr.p);
+                if (pr > lim * 2) queima('o trecho ' + nome + ' (' + fmt(el.r, 'Ω') + ') dissipou ' + fmt(pr, 'W') + ' (aguenta ' + fmt(lim, 'W') + ' de ' + fmt(info.potencia, 'W') + ' da pista; queima acima de 2×)');
+              }
+            }
           }
+          break;
+        }
+        case 'ntc': {
+          const { a, b, va, vb, ia } = doisPinos(), vr = va - vb;
+          out.linhas.push(L('Resistência a ' + info.temp + ' °C', 'R = R25·e^(β(1/T − 1/298,15)) = ' + fmt(info.r25, 'Ω') + '·e^(' + info.beta + '·(1/' + (info.temp + 273.15).toFixed(2).replace('.', ',') + ' − 1/298,15))', fmt(info.r, 'Ω')));
+          out.linhas.push(L('Corrente', 'I = V/R', fmt(Math.abs(ia), 'A')));
+          out.corrente = ia; out.de = ia >= 0 ? a : b;
+          if (info.potencia && vr * vr / info.r > info.potencia * 2) queima('dissipou ' + fmt(vr * vr / info.r, 'W') + ' (a nominal é ' + fmt(info.potencia, 'W') + '; queima acima de 2×)');
+          break;
+        }
+        case 'ptc': {
+          const { a, b, va, vb, ia } = doisPinos(), vr = va - vb;
+          out.linhas.push(L('Resistência agora', 'R = R25·(1 + (V/Vk)⁶): sobe quando a corrente passa da nominal', fmt(Math.abs(ia) > 1e-12 ? Math.abs(vr / ia) : info.r, 'Ω')));
+          out.linhas.push(L('Corrente', 'limita perto da nominal (' + fmt(info.inom, 'A') + ')', fmt(Math.abs(ia), 'A')));
+          out.corrente = ia; out.de = ia >= 0 ? a : b;
+          break;
+        }
+        case 'ferrite': {
+          const { a, ia } = doisPinos();
+          out.linhas.push(L('Corrente', 'I (nominal ' + fmt(info.inom, 'A') + ')', fmt(Math.abs(ia), 'A')));
+          out.corrente = ia; out.de = a;
+          lim(ia, info.inom, 1.5, 'corrente', 'A', 'corrente de ' + fmt(Math.abs(ia), 'A') + ' (nominal ' + fmt(info.inom, 'A') + '; queima acima de 1,5×)');
           break;
         }
         case 'capacitor': {
@@ -1238,10 +1443,10 @@
           out.linhas.push(L('Energia', 'E = ½·C·V²', fmt(0.5 * info.c * vc * vc, 'J')));
           if (res.modo !== 'dc') out.linhas.push(L('Corrente', 'I = C·dV/dt', fmt(ia, 'A')));
           else out.linhas.push(L('Corrente (DC)', 'em regime o capacitor não conduz', '0 A'));
-          if (info.vmax && Math.abs(vc) > info.vmax * 0.8) out.alertas.push('tensão ' + fmt(Math.abs(vc), 'V') + (Math.abs(vc) > info.vmax ? ' ACIMA' : ' perto') + ' da nominal (' + info.vmax + ' V)');
+          if (info.vmax && Math.abs(vc) > info.vmax * 0.8 && Math.abs(vc) <= info.vmax) out.alertas.push('tensão ' + fmt(Math.abs(vc), 'V') + ' perto da nominal (' + fmt(info.vmax, 'V') + ')');
           if (info.polarizado && vc < -0.3) out.alertas.push('capacitor polarizado com tensão invertida (' + fmt(vc, 'V') + ')');
-          if (info.vmax && Math.abs(vc) > info.vmax * 1.2) queima('tensão de ' + fmt(Math.abs(vc), 'V') + ' (a nominal é ' + fmt(info.vmax, 'V') + '; queima acima de 1,2×)');
           if (info.polarizado && vc < -1) queima('polaridade invertida: ' + fmt(vc, 'V') + ' no + (o polarizado queima com mais de 1 V ao contrário)');
+          lim(vc, info.vmax, 1.2, 'tensão', 'V', 'tensão de ' + fmt(Math.abs(vc), 'V') + ' (a nominal é ' + fmt(info.vmax, 'V') + '; queima acima de 1,2×)');
           out.vmax = info.vmax; out.polarizado = !!info.polarizado;
           out.corrente = ia; out.de = ia >= 0 ? a : b;
           break;
@@ -1252,12 +1457,29 @@
           out.linhas.push(L('Energia', 'E = ½·L·I²', fmt(0.5 * info.l * ia * ia, 'J')));
           out.linhas.push(L('Queda', 'V = ' + fmt(va, 'V') + ' − ' + fmt(vb, 'V'), fmt(va - vb, 'V')));
           out.corrente = ia; out.de = ia >= 0 ? a : b;
+          /* 1.114.0 (lote 2): acima da nominal satura (alerta); acima de 1,5x aquece e queima */
+          if (info.inom) {
+            out.linhas.push(L('Corrente nominal', 'Isat/Irms · DCR ' + fmt(info.dcr, 'Ω'), fmt(info.inom, 'A')));
+            if (Math.abs(ia) > info.inom) out.alertas.push('corrente ' + fmt(Math.abs(ia), 'A') + ' acima da nominal (' + fmt(info.inom, 'A') + '): o núcleo satura');
+            if (Math.abs(ia) > info.inom * 1.5) queima('corrente de ' + fmt(Math.abs(ia), 'A') + ' (nominal ' + fmt(info.inom, 'A') + '; aquece e queima acima de 1,5×)');
+          }
           break;
         }
         case 'fusivel': {
           const { a, ia } = doisPinos();
           out.linhas.push(L('Corrente', 'I', fmt(Math.abs(ia), 'A')));
-          if (info.ihold) { out.linhas.push(L('Corrente de manutenção', 'Ihold', fmt(info.ihold, 'A'))); if (Math.abs(ia) > info.ihold) out.alertas.push('corrente ' + fmt(Math.abs(ia), 'A') + ' acima da de manutenção (' + fmt(info.ihold, 'A') + '): o fusível abre'); }
+          /* 1.114.0 (lote 2): o fusivel comum ABRE (fica aberto: "Trocar" poe um novo) acima de In (rapido) ou 1,5x (retardo);
+             o rearmavel (PTC) dispara acima de 2x Ihold e rearma sozinho quando o defeito sai */
+          if (info.rearmavel) {
+            out.linhas.push(L('Corrente de manutenção', 'Ihold (dispara acima de 2×)', fmt(info.ihold, 'A')));
+            out.linhas.push(L('Estado', info.disparado ? 'disparado: virou resistência alta (' + fmt(info.rtr, 'Ω') + '); rearma quando o defeito sai' : 'frio: conduz', info.disparado ? 'DISPARADO' : 'normal'));
+            if (info.disparado) out.alertas.push('fusível rearmável DISPARADO (rearma sozinho quando a corrente cair)');
+            out.disparado = !!info.disparado;
+          } else {
+            const fator = info.lento ? 1.5 : 1;
+            out.linhas.push(L('Corrente nominal', (info.lento ? 'retardado: abre acima de 1,5×' : 'rápido: abre acima da nominal'), fmt(info.inom, 'A')));
+            if (Math.abs(ia) > info.inom * fator) queima('fusível aberto: ' + fmt(Math.abs(ia), 'A') + ' (nominal ' + fmt(info.inom, 'A') + (info.lento ? ', retardado: abre acima de 1,5×' : ', rápido') + ')');
+          }
           out.corrente = ia; out.de = a;
           break;
         }
@@ -1305,6 +1527,7 @@
             out.linhas.push(L('Estado', i < 1e-4 ? 'apagado: a tensão não chega ao Vf (' + fmt(info.vf, 'V') + ')' : 'aceso', i < 1e-4 ? 'apagado' : 'aceso'));
             if (vtot < -5) out.alertas.push('LED com tensão reversa de ' + fmt(-vtot, 'V') + ' (máx. ≈ 5 V)');
             if (i > out.imax * 1.5) queima('corrente de ' + fmt(i, 'A') + ' (a nominal é ' + fmt(out.imax, 'A') + '; queima acima de ' + fmt(out.imax * 1.5, 'A') + ')');
+            else if (i > out.imax) out.alertas.push('corrente de ' + fmt(i, 'A') + ' ACIMA da nominal (' + fmt(out.imax, 'A') + '; queima acima de 1,5×)');
             if (vtot < -6) queima('tensão reversa de ' + fmt(-vtot, 'V') + ' (o LED aguenta ≈ 5 V ao contrário)');
           } else {
             if (info.bv && vtot < -info.bv * 0.9) out.linhas.push(L('Em ruptura', 'zener/TVS conduzindo ao contrário: Vz ≈ ' + fmt(info.bv, 'V'), fmt(-i, 'A')));
@@ -1312,9 +1535,9 @@
                conduzem ao contrario de proposito: nao queimam por isso), o zener dissipando acima da potencia */
             out.ifmax = info.ifmax; out.vrrm = info.vrrm; out.sub = info.sub;
             if (info.ifmax) out.linhas.push(L('Limites', info.sub === 'zener' ? 'Vz ' + fmt(info.bv, 'V') + ' · ' + fmt(info.pz, 'W') : 'If máx ' + fmt(info.ifmax, 'A') + (info.bv ? '' : ' · VRRM ' + fmt(info.vrrm, 'V')), info.sub || ''));
-            if (i > info.ifmax * 1.5) queima('corrente direta de ' + fmt(i, 'A') + ' (If máx ' + fmt(info.ifmax, 'A') + '; queima acima de 1,5×)');
-            if (!info.bv && info.vrrm && -vtot > info.vrrm * 1.1) queima('tensão reversa de ' + fmt(-vtot, 'V') + ' (VRRM ' + fmt(info.vrrm, 'V') + ')');
-            if (info.sub === 'zener' && info.pz && Math.abs(p) > info.pz * 1.5) queima('o zener dissipou ' + fmt(Math.abs(p), 'W') + ' (a nominal é ' + fmt(info.pz, 'W') + '; queima acima de 1,5×)');
+            lim(i > 0 ? i : 0, info.ifmax, 1.5, 'corrente direta', 'A', 'corrente direta de ' + fmt(i, 'A') + ' (If máx ' + fmt(info.ifmax, 'A') + '; queima acima de 1,5×)');
+            if (!info.bv) lim(-vtot > 0 ? -vtot : 0, info.vrrm, 1.1, 'tensão reversa', 'V', 'tensão reversa de ' + fmt(-vtot, 'V') + ' (VRRM ' + fmt(info.vrrm, 'V') + ')');
+            if (info.sub === 'zener') lim(p, info.pz, 1.5, 'potência no zener', 'W', 'o zener dissipou ' + fmt(Math.abs(p), 'W') + ' (a nominal é ' + fmt(info.pz, 'W') + '; queima acima de 1,5×)');
           }
           out.corrente = i;
           break;
@@ -1332,10 +1555,10 @@
           out.linhas.push(L('Potência', 'P = Vce·Ic + Vbe·Ib', fmt(p, 'W')));
           /* 1.113.0: os limites (o que queima): Ic acima da maxima, Vce·Ic acima da Pd, Vce acima da Vceo */
           out.linhas.push(L('Limites', 'Ic máx ' + fmt(info.icmax, 'A') + ' · Pd ' + fmt(info.pd, 'W') + ' · Vceo ' + fmt(info.vceo, 'V'), ''));
-          if (Math.abs(p) > info.pd * 0.8) out.alertas.push('dissipação ' + fmt(Math.abs(p), 'W') + (Math.abs(p) > info.pd ? ' ACIMA' : ' perto') + ' da Pd (' + fmt(info.pd, 'W') + ')');
-          if (Math.abs(ic) > info.icmax * 1.5) queima('corrente de coletor de ' + fmt(Math.abs(ic), 'A') + ' (Ic máx ' + fmt(info.icmax, 'A') + '; queima acima de 1,5×)');
-          if (Math.abs(p) > info.pd * 1.5) queima('dissipou ' + fmt(Math.abs(p), 'W') + ' (Pd ' + fmt(info.pd, 'W') + '; queima acima de 1,5×)');
-          if (pol * (vc - ve) > info.vceo * 1.1) queima('Vce de ' + fmt(Math.abs(vc - ve), 'V') + ' (Vceo ' + fmt(info.vceo, 'V') + ')');
+          if (Math.abs(p) > info.pd * 0.8 && Math.abs(p) <= info.pd) out.alertas.push('dissipação ' + fmt(Math.abs(p), 'W') + ' perto da Pd (' + fmt(info.pd, 'W') + ')');
+          lim(ic, info.icmax, 1.5, 'corrente de coletor', 'A', 'corrente de coletor de ' + fmt(Math.abs(ic), 'A') + ' (Ic máx ' + fmt(info.icmax, 'A') + '; queima acima de 1,5×)');
+          lim(p, info.pd, 1.5, 'dissipação', 'W', 'dissipou ' + fmt(Math.abs(p), 'W') + ' (Pd ' + fmt(info.pd, 'W') + '; queima acima de 1,5×)');
+          lim(pol * (vc - ve) > 0 ? vc - ve : 0, info.vceo, 1.1, 'Vce', 'V', 'Vce de ' + fmt(Math.abs(vc - ve), 'V') + ' (Vceo ' + fmt(info.vceo, 'V') + ')');
           out.corrente = ic; out.icmax = info.icmax; out.pd = info.pd; out.vceo = info.vceo; out.bf = info.m.bf;
           out.estado = est;
           break;
@@ -1351,6 +1574,20 @@
           if (est === 'conduzindo' && Math.abs(id) > 1e-4) out.linhas.push(L('Rds(on) efetiva', 'R = Vds / Id', fmt(Math.abs((vd - vs) / id), 'Ω')));
           out.linhas.push(L('Potência', 'P = Vds·Id', fmt(p, 'W')));
           out.estado = est;
+          /* 1.114.0 (lote 2): os limites e a queima — Id acima de 1,5x, P acima de 1,5x a Pd, Vds acima da Vdss, Vgs acima do
+             maximo (rompe o oxido do gate) */
+          mosQueima(out, info, id, vd - vs, vg - vs, p, queima, lim);
+          break;
+        }
+        case 'igbt': {
+          const r = elRes.get(info.q), rj = info.junc && elRes.get(info.junc); if (!r) break;
+          const vce = pv(info.pinos.find(q => /^C/i.test(q.name || '')) || info.pinos[1]) - r.v[2], vge = r.v[1] - r.v[2], ic = r.i[0];
+          out.linhas.push(L('Gate–emissor', 'Vge', fmt(vge, 'V')));
+          out.linhas.push(L('Coletor–emissor', 'Vce = Vjunção + Vcanal' + (rj ? ' = ' + fmt(rj.v[0] - rj.v[1], 'V') + ' + ' + fmt(r.v[0] - r.v[2], 'V') : ''), fmt(vce, 'V')));
+          out.linhas.push(L('Corrente de coletor', 'Ic', fmt(ic, 'A')));
+          out.linhas.push(L('Estado', 'Vth ≈ ' + fmt(info.m.vth, 'V'), vge < info.m.vth ? 'cortado' : 'conduzindo'));
+          out.estado = vge < info.m.vth ? 'cortado' : 'conduzindo';
+          mosQueima(out, info, ic, vce, vge, p, queima, lim);
           break;
         }
         case 'chave': {
