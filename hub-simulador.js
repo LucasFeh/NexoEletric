@@ -154,7 +154,12 @@
     const dados = st.ligado && st.an ? { projeto: v && v.projeto ? v.projeto() : '', t: st.res.t, modo: st.res.modo, versao: Date.now(),
       pinos: Object.fromEntries(Object.entries(st.an.pinos).map(([k, p]) => [k, { v: p.v, i: p.i, net: p.net }])),
       nets: Object.fromEntries(Object.entries(st.an.nets).filter(([n]) => !n.includes('#')).map(([n, x]) => [n, x.v])),
-      comps: Object.fromEntries(Object.entries(st.an.comps).map(([r, c]) => [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor, rpm: c.rpm, corrente: c.corrente }])) } : null;
+      comps: Object.fromEntries(Object.entries(st.an.comps).map(([r, c]) => [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor, rpm: c.rpm, corrente: c.corrente }])),
+      /* 1.105.0: os microcontroladores e a conexao com o NexoCode (o clique no MCU na PCB 2D/3D mostra o balao) */
+      mcus: Object.fromEntries((st.comps || []).filter(c => { const inf = info(c.ref); return inf && inf.tipo === 'mcu'; }).map(c => {
+        const n = ncLigado(c.ref), inf = info(c.ref);
+        return [c.ref, { titulo: (st.an.comps[c.ref] && st.an.comps[c.ref].titulo) || (inf && inf.rotulo) || c.ref, conectado: !!n, rodando: !!(n && n.rodando), ha_ms: n ? Date.now() - n.em : null }];
+      })) } : null;
     try { topo.__nexoSim = dados; topo.dispatchEvent(new CustomEvent('nexo-sim', { detail: dados })); } catch (_e) { /* outra origem */ }
   }
 

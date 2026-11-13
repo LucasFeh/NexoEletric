@@ -703,8 +703,60 @@
         pintaBalaoTrilha(b);
       }
     }
+    /* O MICROCONTROLADOR E O NEXOCODE (1.105.0, pedido do dono: "na visão 3D, se eu clico em cima do microcontrolador e
+       ele tá desconectado, sobe um balãozinho mostrando que ele tá desconectado"): o clique no corpo do MCU (a caixa dos
+       pads dele, na tela) abre o balao com a linha ate ele — desconectado (nenhum codigo do NexoCode ligado) ou
+       conectado (firmware rodando/parado). O estado vem do Esquema (__nexoSim.mcus) e o balao acompanha */
+    function mcuEm(ev) {
+      const d = dadosDoTopo(), mcus = d && d.mcus, pl = H.placa();
+      if (!mcus || !pl) return null;
+      for (const c of pl.components || []) {
+        if (!mcus[c.ref] || !(c.pads || []).length) continue;
+        let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+        for (const p of c.pads) { x1 = Math.min(x1, p.x); x2 = Math.max(x2, p.x); y1 = Math.min(y1, p.y); y2 = Math.max(y2, p.y); }
+        x1 -= 1; y1 -= 1; x2 += 1; y2 += 1;
+        const bottom = /bottom/i.test(c.layer || '');
+        const q = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]].map(([x, y]) => telaDe({ ax: x, ay: y, bottom }));
+        if (q.some(p => !p || p.atras)) continue;
+        /* o ponto dentro do quadrilatero projetado (a soma dos sinais dos produtos vetoriais) */
+        let pos = 0, neg = 0;
+        for (let i = 0; i < 4; i++) {
+          const a = q[i], b = q[(i + 1) % 4], cr = (b.x - a.x) * (ev.clientY - a.y) - (b.y - a.y) * (ev.clientX - a.x);
+          if (cr > 0) pos++; else if (cr < 0) neg++;
+        }
+        if (!(pos && neg)) return { ref: c.ref, ax: (x1 + x2) / 2, ay: (y1 + y2) / 2, bottom, caixa: { x1: x1 + 1, y1: y1 + 1, x2: x2 - 1, y2: y2 - 1 } };
+      }
+      return null;
+    }
+    function pintaBalaoMcu(b) {
+      const d = dadosDoTopo(), m = d && d.mcus && d.mcus[b.mcu];
+      const con = !!(m && m.conectado), est = !d ? 'sem' : con ? (m.rodando ? 'rod' : 'par') : 'desc';
+      if (b.sig === est) return;
+      b.sig = est;
+      const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const proj = (() => { try { return new URLSearchParams(location.search).get('p') || ''; } catch (_e) { return ''; } })();
+      b.el.classList.toggle('desc', est !== 'rod' && est !== 'par'); b.el.classList.toggle('con', con);
+      b.el.innerHTML = '<div class="hd"><b>' + esc(b.mcu) + '</b><span>' + esc((m && m.titulo) || 'microcontrolador') + '</span><button data-x title="Fechar">×</button></div>'
+        + (est === 'sem' ? '<div class="st">a simulação do esquema está desligada</div>'
+          : con ? '<div class="st">● Conectado ao NexoCode</div><div class="f">firmware ' + (est === 'rod' ? 'rodando' : 'parado') + '</div>'
+          : '<div class="st">✕ Desconectado</div><div class="f">nenhum código do NexoCode está ligado a este microcontrolador — abra o firmware do projeto no NexoCode (Documents/NexoCode/' + esc(proj) + '): ele conecta sozinho e o MCU fica verde</div>');
+      b.el.querySelector('[data-x]').onclick = () => fechaBalao(b);
+    }
+    function alternaBalaoMcu(hit) {
+      const ja = baloes.find(b => b.mcu === hit.ref);
+      if (ja) { fechaBalao(ja); return; }
+      camadaBaloes();
+      const el = document.createElement('div'); el.className = 'simpcb-balao simpcb-mcu';
+      for (const x of ['mousedown', 'wheel', 'contextmenu', 'dblclick']) el.addEventListener(x, z => z.stopPropagation());
+      camadaB.append(el);
+      const b = { el, mcu: hit.ref, ax: hit.ax, ay: hit.ay, bottom: hit.bottom, dx: 30, dy: -26 };
+      baloes.push(b);
+      pintaBalaoMcu(b);
+      rodaBaloes();
+    }
+    try { topo.addEventListener('nexo-sim', () => { for (const b of baloes) if (b.mcu) pintaBalaoMcu(b); }); } catch (_e) { /* ok */ }
     /* o que os testes e a IA usam daqui */
-    window.HubSimPcbBaloes = { lista: () => baloes.map(b => ({ chave: b.chave || null, cartao: !!b.cartao, i: b.s ? b.s.i : null })), trilhaEm, alternaBalaoTrilha };
+    window.HubSimPcbBaloes = { lista: () => baloes.map(b => ({ chave: b.chave || null, cartao: !!b.cartao, mcu: b.mcu || null, estado: b.sig || null, i: b.s ? b.s.i : null })), trilhaEm, alternaBalaoTrilha, mcuEm, alternaBalaoMcu };
     /* o que a bancada (hub-bancada.js) usa daqui */
     window.HubSimPcbInt = { padEm, padsDaPlaca, H, dados: () => st.dados, mostraCartao };
     const CSS2 = `.simpcb-cartao{position:fixed; z-index:70; min-width:220px; max-width:320px; padding:9px 11px; border-radius:10px; pointer-events:none;
@@ -718,6 +770,9 @@
 .simpcb-balao .hd{display:flex; align-items:center; gap:7px} .simpcb-balao .hd b{color:#facc15} .simpcb-balao .hd span{flex:1; color:#9ca3af}
 .simpcb-balao button{height:20px; padding:0 6px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.05); color:inherit; cursor:pointer; font:11px system-ui}
 .simpcb-balao button.on{background:#f59e0b; color:#111; border-color:#f59e0b}
+.simpcb-mcu.desc{border-color:#9ca3af} .simpcb-mcu.desc .hd b{color:#d1d5db} .simpcb-mcu.desc .st{color:#fca5a5; font-weight:700; margin-top:4px}
+.simpcb-mcu.con{border-color:#22c55e} .simpcb-mcu.con .hd b{color:#4ade80} .simpcb-mcu.con .st{color:#4ade80; font-weight:700; margin-top:4px}
+.simpcb-balao.simpcb-mcu .f{max-width:300px; white-space:normal; font:11px system-ui, sans-serif; color:#cbd5e1}
 .simpcb-balao .f{margin-top:5px; color:#93c5fd; font:10.5px ui-monospace, monospace; line-height:1.45}
 .simpcb-cartao .ab{display:flex; gap:4px; margin:-2px 0 7px} .simpcb-cartao .ab button{flex:1; height:24px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.05); color:inherit; cursor:pointer; font:inherit}
 .simpcb-cartao .ab button.on{background:#f59e0b; color:#111; border-color:#f59e0b} .simpcb-cartao .ab button[data-m=x]{flex:0 0 26px}
@@ -740,6 +795,11 @@
           if (window.HubBancada && window.HubBancada.consome && window.HubBancada.consome(e)) { e.stopPropagation(); e.preventDefault(); return; }
           const p = padEm(e);
           e.stopPropagation(); e.preventDefault();
+          /* o corpo do MCU ganha do pad de DENTRO dele (o pad termico/GND embaixo do modulo ESP32); os pinos da borda
+             continuam abrindo o cartao do pad */
+          const mc = mcuEm(e);
+          const padDeDentro = p && mc && p.ref === mc.ref && Math.min(p.x - mc.caixa.x1, mc.caixa.x2 - p.x, p.y - mc.caixa.y1, mc.caixa.y2 - p.y) > 1.5;
+          if (mc && (!p || padDeDentro)) { alternaBalaoMcu(mc); return; }
           if (p) { mostraCartao(p, e, true); return; }
           const sg = trilhaEm(e);
           if (sg) { alternaBalaoTrilha(sg); return; }

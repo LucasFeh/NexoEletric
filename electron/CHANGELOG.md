@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.105.0
+
+O balão do microcontrolador na placa (o dono: "na visão 3D, se eu clico em cima do microcontrolador e ele tá desconectado,
+sobe um balãozinho mostrando que ele tá desconectado").
+
+- No Simulador, PCB 3D (a bancada) e 2D: o clique no corpo do microcontrolador abre um balão com a linha até ele.
+  Desconectado: "✕ Desconectado — nenhum código do NexoCode está ligado a este microcontrolador", com o caminho do
+  firmware do projeto (Documents/NexoCode/<projeto>; o NexoCode 0.5.0 conecta sozinho). Conectado: "● Conectado ao
+  NexoCode" e se o firmware está rodando ou parado. O balão acompanha a conexão (o batimento do NexoCode) sozinho;
+  o × fecha, e clicar de novo no MCU também.
+- O pad de dentro do módulo (o GND térmico embaixo do ESP32) conta como o corpo; os pinos da borda continuam abrindo o
+  cartão do pad (lista e osciloscópio).
+- O Esquema publica para a placa os microcontroladores e a conexão (`__nexoSim.mcus`).
+
 ## 1.104.1
 
 O microcontrolador mostra se tem código do NexoCode ligado (o dono: "no modo simulação, se não tiver um código do
