@@ -4,6 +4,28 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.117.0
+
+Simulador — lote 5 da lib Almox e as correções do lote 4 (testado ao vivo no SIM-TIPOS pela outra sessão).
+
+- Varistor (MOV/MLV, os 88 da lib — viravam CI ou "zener"): bidirecional, I = 1 mA·(V/V1mA)^30; a VAC/VDC do nome
+  ("130VAC/170VDC", "250VCA", "S20K150") e o V1mA do código (201KD14, 10D561K); energia e corrente de pico do nome.
+  Acima de 1,1× a VDC contínua ele aquece e falha em CURTO (depois abre) — a queima diz isso; alerta acima da nominal.
+- Tiristores: SCR (BT151, VS-16TTS12: eram "Transistor NPN"), TRIAC (BT138, BTA/BTB), DIAC (dispara em Vbo e cai para
+  ~5 V) e PUT (2N6027/28). Todos TRAVAM — ligam pelo gatilho e só soltam com a corrente abaixo da de manutenção; o
+  painel mostra "TRAVADO". Campos Igt, Ih, VDRM, IT(RMS) (do nome e do código), Vbo do DIAC; queima acima de 1,5× o
+  pico e de 1,1× VDRM bloqueando. Pinagem sem nome: SCR 1 K, 2 A, 3 G; TRIAC 1 MT1, 2 MT2, 3 G; PUT 1 A, 2 G, 3 K.
+- Cristal: a frequência e a capacitância de carga do nome (informação; no DC é aberto). O oscilador ativo de 4 pinos
+  (1 EN, 2 GND, 3 OUT, 4 VCC) consome e põe na saída a média da onda quadrada (Vcc/2).
+- Transformador (P1, P2, S1, S2): no modo Tempo o secundário = primário × Vs/Vp (com a resistência dos enrolamentos e a
+  corrente refletida); no DC não transfere e avisa (o primário é um enrolamento). Relação do nome ("110/220V/24V",
+  "200/30V"), o de pulso 1:1; campos Vp, Vs, VA; queima do secundário acima de 1,5× VA/Vs.
+- Conector: corrente máxima por pino (do nome, ou do passo/família: 1,25–2 mm 1,5 A, 2,54 mm 3 A, borne 12 A, USB
+  1,5 A, USB-C 3 A, jack 2 A); o pino que é a entrada de uma fonte "derrete" acima de 1,5×. O clip de bateria 9 V é
+  conector com a fonte suposta (era bateria); o VBUS do USB é fonte suposta de 5 V.
+- Correções do lote 4: toda a família MOC30/31/32 com 100 mA na saída; o "78008AP" diz 7808; o canal do amplificador
+  com as entradas soltas aparece como "canal sem uso" e fica fora dos alertas.
+
 ## 1.116.0
 
 Simulador — lote 4 da lib Almox e as correções do lote 3 (testado ao vivo no SIM-TIPOS pela outra sessão).

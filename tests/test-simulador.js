@@ -868,6 +868,54 @@ caso('1.116.0 (lote 4 da lib Almox): opto, amplificador/comparador, 555/556, dri
   assert.ok(um({ ref: 'U1', comment: 'E2415S-1WR3', sym: 'CONVERSOR DC/DC [PINAGEM A DEFINIR]', pinos: [P(1, '', 'GND'), P(2, '', 'a'), P(3, '', 'GND'), P(4, '', 'd')] }).campos.find(x => x.k === 'vinmax').v === 26.4, 'o campo sem ruído (26,4)');
 });
 
+caso('1.117.0 (lote 5 da lib Almox): varistor, tiristor/TRIAC/DIAC/PUT, cristal/oscilador, transformador, conector; e as correções do lote 4', () => {
+  const roda = (comps, cfg) => { const mt = C.monta(comps, cfg || {}); const s = M.cria(mt.elementos, { terra: mt.terra }); const r = s.dc(); return { a: C.analisa(mt, r).comps, mt, s, r }; };
+  const um = (c, cfg) => C.monta([c], cfg || {}).comps.get(c.ref);
+  const P = (n, nm, net) => pin(n, nm || '', net);
+  /* varistor: quase nada na tensão de trabalho; acima da VDC ele falha em curto */
+  const mov = v => roda([{ ref: 'RV1', comment: '(MOV) Ø10mm S10K130', sym: 'VARISTOR', pinos: [P(1, '', 'V'), P(2, '', 'GND')] }, { ref: 'R1', valor: '10', pinos: [P(1, '1', '+' + v + 'V'), P(2, '2', 'V')] }]);
+  const m12 = mov(12); assert.ok(m12.mt.comps.get('RV1').tipo === 'varistor' && Math.abs(m12.a.RV1.corrente) < 1e-6, 'S10K130 em 12 V: só fuga');
+  assert.ok(/CURTO/.test(mov(260).a.RV1.queima || ''), '260 V contínuos no de 130 VAC/166 VDC: falha em curto');
+  assert.ok(um({ ref: 'RV2', comment: '(MOV) Ø10mm 350VCA 560V 10D561K', sym: 'VARISTOR', pinos: [P(1, '', 'a'), P(2, '', 'GND')] }).vac === 350, 'o "350VCA"');
+  /* SCR: o gatilho liga; sem gatilho bloqueia */
+  const scr = gate => roda([{ ref: 'Q1', comment: 'Unidirecional 500V 12A 771-BT151-500C127', sym: 'TIRISTOR [PTH]', pinos: [P(1, 'A', 'AN'), P(2, 'K', 'GND'), P(3, 'G', 'GT')] },
+    { ref: 'R1', valor: '100', pinos: [P(1, '1', '+12V'), P(2, '2', 'AN')] }, { ref: 'R2', valor: '1k', pinos: [P(1, '1', gate), P(2, '2', 'GT')] }]);
+  const sOn = scr('+5V'), sOff = scr('GND');
+  assert.ok(sOn.mt.comps.get('Q1').on && Math.abs(sOn.a.R1.corrente) > 0.09, 'BT151 com 4 mA no gatilho: TRAVADO, ~110 mA: ' + sOn.a.R1.corrente);
+  assert.ok(!sOff.mt.comps.get('Q1').on && Math.abs(sOff.a.R1.corrente) < 1e-6, 'sem gatilho: bloqueado');
+  assert.ok(/TRAVADO/.test(sOn.a.Q1.estado), 'o painel diz TRAVADO');
+  /* TRIAC nos dois sentidos; DIAC dispara em Vbo; PUT */
+  const tri = roda([{ ref: 'Q2', comment: 'Triac NPN 600V 0.5W 12A BT138-600E', sym: 'TRANSISTOR [PTH]', pinos: [P(1, '', 'GND'), P(2, '', 'M2'), P(3, '', 'GT')] },
+    { ref: 'R1', valor: '100', pinos: [P(1, '1', '-12V'), P(2, '2', 'M2')] }, { ref: 'R2', valor: '100', pinos: [P(1, '1', '-5V'), P(2, '2', 'GT')] }]);
+  assert.ok(tri.mt.comps.get('Q2').sub === 'triac' && Math.abs(tri.a.R1.corrente) > 0.09, 'BT138 (era "Transistor NPN") conduz com MT2 e o gatilho negativos: ' + tri.a.R1.corrente);
+  const diac = v => roda([{ ref: 'D1', comment: '28~36V 2A', sym: 'DIAC [PTH]', pinos: [P(1, '', 'X'), P(2, '', 'GND')] }, { ref: 'R1', valor: '1k', pinos: [P(1, '1', '+' + v + 'V'), P(2, '2', 'X')] }]).a.R1.corrente;
+  assert.ok(Math.abs(diac(20)) < 1e-6 && Math.abs(diac(40)) > 0.02, 'DIAC: 20 V bloqueia, 40 V dispara (cai para ~5 V)');
+  const put = roda([{ ref: 'Q3', comment: '40V - 2N6028', sym: 'TRANSISTOR', pinos: [P(1, '', 'AN'), P(2, '', '+5V'), P(3, '', 'GND')] }, { ref: 'R1', valor: '1k', pinos: [P(1, '1', '+12V'), P(2, '2', 'AN')] }]);
+  assert.ok(put.mt.comps.get('Q3').on, 'PUT: A (12 V) acima de G + 0,7 V dispara');
+  /* oscilador ativo: a saída na média; o cristal guarda a frequência */
+  const osc = roda([{ ref: 'Y1', comment: 'Oscilador 2MHz 100ppm 50pF 520-TCH200-X', sym: 'CRISTAL [PTH]', pinos: [P(1, '', '+5V'), P(2, '', 'GND'), P(3, '', 'CLK'), P(4, '', '+5V')] }, { ref: 'R1', valor: '10k', pinos: [P(1, '1', 'CLK'), P(2, '2', 'GND')] }]);
+  perto(osc.r.v.CLK, 2.5, 0.1, 'oscilador: Vcc/2');
+  assert.strictEqual(um({ ref: 'Y2', comment: '10MHz 18pF 20 PPM', sym: 'CRISTAL [PTH]', pinos: [P(1, '', 'a'), P(2, '', 'b')] }).freq, 10e6);
+  /* transformador: no tempo, 220 V de pico → 24 V de pico no secundário; no DC não transfere */
+  const trafoMt = C.monta([{ ref: 'T1', comment: '110/220V/24V Bivolt', sym: 'TRANSFORMADOR [PINAGEM A DEFINIR]', pinos: [P(1, 'P1', 'L'), P(2, 'P2', 'GND'), P(3, 'S1', 'SEC'), P(4, 'S2', 'GND')] },
+    { ref: 'R1', valor: '1k', pinos: [P(1, '1', 'SEC'), P(2, '2', 'GND')] }], { fontes: { L: { v: 0, onda: { forma: 'seno', v: 220, f: 50 } } } });
+  const st = M.cria(trafoMt.elementos, { terra: trafoMt.terra, dt: 1e-4 }); st.dc();
+  let vmx = 0; for (let k = 0; k < 200; k++) { const r = st.passo(1); vmx = Math.max(vmx, Math.abs(r.v.SEC || 0)); }
+  perto(vmx, 24, 1.5, 'transformador 220/24: o pico no secundário');
+  const tdc = roda([{ ref: 'T1', comment: '200/30V', sym: 'TRANSFORMADOR [PINAGEM A DEFINIR]', pinos: [P(1, 'P1', '+12V'), P(2, 'P2', 'GND'), P(3, 'S1', 'SEC'), P(4, 'S2', 'GND')] }, { ref: 'R1', valor: '1k', pinos: [P(1, '1', 'SEC'), P(2, '2', 'GND')] }]);
+  assert.ok(Math.abs(tdc.r.v.SEC) < 0.01 && tdc.a.T1.alertas.some(a => /só funciona com AC/.test(a)), 'no DC: secundário 0 V e o alerta');
+  /* conector: o pino derrete; o clip de bateria é fonte suposta */
+  const con = roda([{ ref: 'J1', comment: 'KK 2 vias 2.54mm', sym: 'CONECTOR KK', pinos: [P(1, '', '+12V'), P(2, '', 'GND')] }, { ref: 'R1', valor: '1', pinos: [P(1, '1', '+12V'), P(2, '2', 'GND')] }]);
+  assert.ok(/derreteu/.test(con.a.J1.queima || ''), '12 A num pino de 3 A derrete');
+  const clip = C.monta([{ ref: 'J2', comment: 'Clip para Bateria 9v', sym: 'CONECTOR ACESSORIO DE PAINEL', pinos: [P(1, '+', 'VB'), P(2, '-', 'GND')] }, { ref: 'R1', valor: '1k', pinos: [P(1, '1', 'VB'), P(2, '2', 'GND')] }], {});
+  assert.ok(clip.comps.get('J2').tipo === 'conector' && /Clip de bateria 9 V/.test(clip.comps.get('J2').rotulo) && clip.fontes.some(f => f.net === 'VB' && f.v === 9), 'o clip: conector com a fonte suposta de 9 V');
+  /* correções do lote 4 */
+  assert.strictEqual(um({ ref: 'U1', comment: 'MOC3043', sym: 'OPTOACOPLADOR [6P]', pinos: [P(1, 'A', 'a'), P(2, 'K', 'GND'), P(3, 'C', 'c'), P(4, 'E', 'GND')] }).icmax, 0.1, 'MOC3043: 100 mA');
+  assert.ok(/7808/.test(um({ ref: 'U1', comment: '78008AP', sym: 'REGULADOR [3P]', pinos: [P(1, '', 'a'), P(2, '', 'GND'), P(3, '', 'c')] }).rotulo), 'o rótulo diz 7808');
+  const a358 = roda([{ ref: 'U9', comment: 'LM358N', sym: 'AMPLIFICADOR [8P]', pinos: [1, 2, 3, 4, 5, 6, 7, 8].map(k => P(k, '', { 1: 'OUT', 2: 'OUT', 3: 'IN', 4: 'GND', 8: '+5V' }[k] || 'SOLTO' + k)) }, { ref: 'R1', valor: '1k', pinos: [P(1, '1', '+5V'), P(2, '2', 'IN')] }]).a.U9;
+  assert.ok(a358.linhas.some(l => /canal sem uso/.test(l.r)), 'o canal B com as entradas soltas: "canal sem uso"');
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();
