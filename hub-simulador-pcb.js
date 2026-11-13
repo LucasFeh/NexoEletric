@@ -925,12 +925,13 @@
       c2.stroke();
       if (lg) lg.textContent = fmt(lo, 'V') + ' … ' + fmt(hi, 'V') + ' · agora ' + fmt(A[A.length - 1].v, 'V') + ' · ' + fmt(t1 - t0, 's');
     }
-    try { topo.addEventListener('nexo-sim', () => { if (cartaoPad && modoCartao === 'lista' && !cartao.hidden) { const l = parseFloat(cartao.style.left) - 16, t = parseFloat(cartao.style.top) - 14; mostraCartao(cartaoPad, { clientX: l, clientY: t }, true); } else desenhaOsc(); }); } catch (_e) { /* ok */ }
+    try { topo.addEventListener('nexo-sim', () => { if (cartaoPad && modoCartao === 'lista' && !cartao.hidden && !sobMouse(cartao)) { const l = parseFloat(cartao.style.left) - 16, t = parseFloat(cartao.style.top) - 14; mostraCartao(cartaoPad, { clientX: l, clientY: t }, true); } else desenhaOsc(); }); } catch (_e) { /* ok */ }
     function mostraCartao(p, ev, fixo) {
       if (!cartao) {
         cartao = document.createElement('div'); cartao.className = 'simpcb-cartao';
         for (const e of ['mousedown', 'wheel', 'contextmenu']) cartao.addEventListener(e, x => x.stopPropagation());
         document.body.append(cartao);
+        fechaNoApertar(cartao, () => { soltaSerie(); cartao.hidden = true; cartaoPad = null; soltaAnel(); });
       }
       if (!p) { cartao.hidden = true; cartaoPad = null; soltaSerie(); soltaAnel(); return; }
       const pin = st.dados && st.dados.pinos ? st.dados.pinos[p.ref + '-' + p.nome] : null;
@@ -991,6 +992,14 @@
        aparecem se abrir; por padrao invisiveis". Cada balao fica preso ao ponto clicado por uma linha (2D e 3D: segue a
        camera), mostra a corrente e a net; "contas" abre R, dV, P e dT. Clicar de novo na trilha (ou no x) fecha. */
     const baloes = [];
+    /* 1.111.3 (o dono: "eu clico no X pra fechar o balão e ele não fecha"): o balao era REFEITO a cada quadro da
+       simulacao (os valores mudam o tempo todo) e o × apertado era trocado por outro antes do clique terminar — o clique
+       se perdia (e o mesmo com aplicar, contas e trocar). Agora: com o mouse em cima, o balao nao se refaz (atualiza ao
+       sair), e o × fecha ja no apertar do botao */
+    const sobMouse = el => { try { return !!el && el.matches(':hover'); } catch (_e) { return false; } };
+    function fechaNoApertar(el, fecha) {
+      el.addEventListener('pointerdown', e => { const x = e.target.closest && e.target.closest('[data-x], [data-b="x"], [data-m="x"]'); if (x && e.button === 0) { e.preventDefault(); e.stopPropagation(); fecha(); } });
+    }
     let camadaB = null, svgB = null, rafB = 0;
     function camadaBaloes() {
       if (camadaB) return camadaB;
@@ -1101,6 +1110,7 @@
       const el = document.createElement('div'); el.className = 'simpcb-balao';
       for (const x of ['mousedown', 'wheel', 'contextmenu', 'dblclick']) el.addEventListener(x, z => z.stopPropagation());
       camadaB.append(el);
+      fechaNoApertar(el, () => fechaBalao(b));
       const b = { el, s: hit.s, chave: k, ax: hit.ax, ay: hit.ay, bottom: /bottom/i.test(hit.s.layer), dx: 26 + (baloes.length % 3) * 8, dy: -22, contas: false };
       baloes.push(b);
       pintaBalaoTrilha(b);
@@ -1112,7 +1122,7 @@
         if (!b.chave) continue;
         const s = st.res && st.res.segs.find(x => chaveSeg(x) === b.chave);
         b.s = s || Object.assign({}, b.s, { i: 0, dv: 0, p: 0, dT: 0 });
-        pintaBalaoTrilha(b);
+        if (!sobMouse(b.el)) pintaBalaoTrilha(b);
       }
     }
     /* O MICROCONTROLADOR E O NEXOCODE (1.105.0, pedido do dono: "na visão 3D, se eu clico em cima do microcontrolador e
@@ -1181,6 +1191,7 @@
       const el = document.createElement('div'); el.className = 'simpcb-balao simpcb-mcu';
       for (const x of ['mousedown', 'wheel', 'contextmenu', 'dblclick']) el.addEventListener(x, z => z.stopPropagation());
       camadaB.append(el);
+      fechaNoApertar(el, () => fechaBalao(b));
       const b = { el, mcu: hit.ref, ax: hit.ax, ay: hit.ay, bottom: hit.bottom, dx: 30, dy: -26 };
       baloes.push(b);
       pintaBalaoMcu(b);
@@ -1222,13 +1233,14 @@
       const el = document.createElement('div'); el.className = 'simpcb-balao simpcb-comp';
       for (const x of ['mousedown', 'wheel', 'contextmenu', 'dblclick', 'keydown']) el.addEventListener(x, z => z.stopPropagation());
       camadaB.append(el);
+      fechaNoApertar(el, () => fechaBalao(b));
       const b = { el, comp: cp.ref, ax: cp.ax, ay: cp.ay, bottom: cp.bottom, dx: 30, dy: -26 };
       baloes.push(b);
       pintaBalaoComp(b);
       montaSetas();
       rodaBaloes();
     }
-    try { topo.addEventListener('nexo-sim', () => { for (const b of baloes) { if (b.mcu) pintaBalaoMcu(b); else if (b.comp) pintaBalaoComp(b); } }); } catch (_e) { /* ok */ }
+    try { topo.addEventListener('nexo-sim', () => { for (const b of baloes) { if (sobMouse(b.el)) continue; if (b.mcu) pintaBalaoMcu(b); else if (b.comp) pintaBalaoComp(b); } }); } catch (_e) { /* ok */ }
     /* o que os testes e a IA usam daqui */
     window.HubSimPcbBaloes = { lista: () => baloes.map(b => ({ chave: b.chave || null, cartao: !!b.cartao, mcu: b.mcu || null, comp: b.comp || null, estado: b.sig || null, i: b.s ? b.s.i : null })), trilhaEm, alternaBalaoTrilha, mcuEm, alternaBalaoMcu, alvoEm, alternaBalaoComp, mira: () => chaveAlvo(hoverAlvo),
       setas: () => [...setasMcu].map(([ref, a]) => ({ ref, conectado: a.con, bottom: a.bottom })) };

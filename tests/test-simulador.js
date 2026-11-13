@@ -577,6 +577,13 @@ caso('1.111.2: o cabo da bancada desvia (sai pelo topo do borne, passa por cima 
   assert.ok(/queimou e abriu o circuito/.test(pcb), 'a trilha sem corrente diz que o componente queimou e abriu');
 });
 
+caso('1.111.3: o × fecha o balão mesmo com a simulação rodando (o balão não se refaz com o mouse em cima)', () => {
+  const pcb = fs.readFileSync(path.join(RAIZ, 'hub-simulador-pcb.js'), 'utf8');
+  assert.ok(/const sobMouse = el =>/.test(pcb) && /if \(!sobMouse\(b\.el\)\) pintaBalaoTrilha\(b\);/.test(pcb) && /if \(sobMouse\(b\.el\)\) continue; if \(b\.mcu\)/.test(pcb) && /!cartao\.hidden && !sobMouse\(cartao\)/.test(pcb), 'com o mouse em cima o balão não se refaz');
+  assert.strictEqual((pcb.match(/fechaNoApertar\(el, \(\) => fechaBalao\(b\)\);/g) || []).length, 3, 'o × fecha no apertar: trilha, MCU e componente');
+  assert.ok(/fechaNoApertar\(cartao, /.test(pcb), 'e no cartão do pino');
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();

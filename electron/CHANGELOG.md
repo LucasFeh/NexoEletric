@@ -4,6 +4,14 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.111.3
+
+O × do balão fecha (o dono: "eu clico no X pra fechar o balão e ele não fecha"): com a simulação rodando o balão era
+refeito a cada quadro (os valores mudam o tempo todo) e o × apertado era trocado por outro antes de o clique terminar —
+o clique se perdia (o mesmo acontecia com "aplicar", "contas" e "Trocar"). Agora, com o mouse em cima, o balão não se
+refaz (atualiza quando o mouse sai), e o × fecha já ao apertar o botão — no balão do componente, da trilha, do
+microcontrolador e no cartão do pino.
+
 ## 1.111.2
 
 - O cabo da bancada não atravessa mais a placa nem outros objetos (o dono: "o cabo também não é pra passar por dentro
