@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.117.1
+
+Varistor: a VAC editada leva junto o V1mA (antes o V1mA ficava o do nome e ele nunca conduzia). Transformador: o aviso
+"no DC não transfere" só aparece no modo DC (saía também no Tempo).
+
 ## 1.117.0
 
 Simulador — lote 5 da lib Almox e as correções do lote 4 (testado ao vivo no SIM-TIPOS pela outra sessão).

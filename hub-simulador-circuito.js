@@ -439,7 +439,8 @@
         if (!(vac > 0)) { vac = 275; info.avisos.push('tensão do varistor não lida do nome: 275 VAC (mude no campo)'); }
         if (!(vdc > 0)) vdc = Math.round(vac * 1.28);
         if (!(v1 > 0)) v1 = Math.round(vac * 1.55);
-        if (isFinite(+prmV.vac) && +prmV.vac > 0) { vac = +prmV.vac; vdc = Math.round(vac * 1.28); }
+        /* a VAC editada leva junto a VDC e o V1mA (na mesma proporcao do componente) */
+        if (isFinite(+prmV.vac) && +prmV.vac > 0) { const k = +prmV.vac / vac; vac = +prmV.vac; vdc = Math.round(vac * 1.28); v1 = Math.round(v1 * k * 10) / 10; }
         if (isFinite(+prmV.v1ma) && +prmV.v1ma > 0) v1 = +prmV.v1ma;
         const ej = grandezaDoNome(cmV, 'J'), ipk = /(\d+(?:\.\d+)?)\s*KA\b/i.exec(cmV);
         info.tipo = 'varistor'; info.vac = vac; info.vdc = vdc; info.v1ma = v1; info.energia = ej > 0 ? ej : null; info.ipico = ipk ? +ipk[1] * 1000 : null;
@@ -1244,7 +1245,6 @@
         info.tipo = 'trafo'; info.vp = vp; info.vs = vs; info.va = va; info.n = n;
         info.rotulo = 'Transformador ' + fmt(vp, 'V') + ' / ' + fmt(vs, 'V') + ' ' + fmt(va, 'VA');
         info.campos = [{ k: 'vp', rot: 'Tensão do primário (V)', un: 'V', v: vp, dica: '220' }, { k: 'vs', rot: 'Tensão do secundário (V)', un: 'V', v: vs, dica: '12' }, { k: 'va', rot: 'Potência (VA)', un: '', v: va, dica: '10' }];
-        info.avisos.push('no modo DC o transformador não transfere (só funciona com AC: use o modo Tempo com a fonte senoidal no primário)');
         const f = (v, e, ctx) => {
           const vpri = v[0] - v[1], vsec = v[2] - v[3];
           const ac = !ctx || ctx.modo !== 'dc';
