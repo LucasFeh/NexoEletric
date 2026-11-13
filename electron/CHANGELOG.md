@@ -4,6 +4,24 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.112.0
+
+A barra de ferramentas da vista PCB ficou bem menor, sem perder nenhuma função (o dono: "essa barra de ferramenta eu quero
+reduzir bastante, mas sem sumir com as funcionalidades; o que já existir no menu não precisa ter na barra"). Eram 22
+botões; agora são 5:
+- **Selecionar**;
+- **Rotas** (gaveta): Trilha, Via, Pad, Furo de fixação e Auto-rotear;
+- **Desenho** (gaveta): Linha, Arco, Círculo, Retângulo, Triângulo, Polígono, a chave Preencher, Texto, Imagem ou texto →
+  serigrafia e Contorno da placa;
+- **Cobre** (gaveta): Polygon Pour em retângulo e em polígono livre, Pôr teardrops e Tirar teardrops;
+- **Régua**.
+
+Saíram da barra porque já estão nos menus ou no painel: Regras (Design » Regras), DRC (Ferramentas » Verificação de
+regras), ECO (Design » Importar alterações), Placa nova (Arquivo » Novo » PCB), Sinalizar (Colocar » Comentário),
+Ratsnest (Exibir » Conexões), e os olhos das Marcações das mudanças e das Cotas da régua (painel Propriedades » Vista).
+Todos os atalhos de teclado continuam iguais. O botão da frente de cada gaveta mostra a última ferramenta usada; o
+Preencher e os teardrops nunca vão para a frente (um clique neles muda a placa ou a chave sem querer).
+
 ## 1.111.3
 
 O × do balão fecha (o dono: "eu clico no X pra fechar o balão e ele não fecha"): com a simulação rodando o balão era

@@ -81,7 +81,7 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   /* ---- 1. a gaveta do Polygon Pour ---- */
   assert.strictEqual(await js(`!!document.getElementById('tb-editar')`), false, 'o cadeado saiu da barra');
   assert.ok(await js(`!!document.querySelector('#tb-planos .gseta')`), 'a gaveta do Polygon Pour existe');
-  assert.deepStrictEqual(await js(`[...document.querySelectorAll('#tb-planos .gaveta button')].map(b => b.id)`), ['tb-pourRet', 'tb-pourLivre'], 'retângulo e polígono na gaveta');
+  assert.deepStrictEqual(await js(`[...document.querySelectorAll('#tb-planos .gaveta button')].map(b => b.id)`), ['tb-pourRet', 'tb-pourLivre', 'tb-teardrops', 'tb-tirarTeardrops'], 'retângulo e polígono na gaveta (com os teardrops, 1.112.0)');
   await js(`document.querySelector('#tb-planos .gseta').click()`);
   assert.strictEqual(await js(`document.querySelector('#tb-planos .gaveta').hidden`), false, 'a setinha abre a gaveta');
   await espera(120); await print('1-gaveta-pour');
@@ -190,12 +190,14 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   assert.strictEqual((await est()).tool, 'select', 'Esc larga a régua');
   const meio = [cx + nx * 0.3, cy + ny * 0.3];
   assert.ok((await js(`${V}.hitsEm(${meio[0]}, ${meio[1]})`)).includes('m:m1'), 'a cota se pega com o clique');
-  await js(`document.getElementById('tb-cotas').click()`);
-  assert.strictEqual(await js(`${V}.cotasVer()`), false, 'o botão da barra esconde as cotas');
+  /* 1.112.0: o olho das cotas saiu da barra; mora no painel Propriedades » Vista */
+  const olhoCotas = `[...document.querySelectorAll('.pp-icones .ibtn')].find(b => /^Cotas da régua/.test(b.title))`;
+  await js(`${olhoCotas}.click()`);
+  assert.strictEqual(await js(`${V}.cotasVer()`), false, 'o olho do painel esconde as cotas');
   assert.ok(!(await js(`${V}.hitsEm(${meio[0]}, ${meio[1]})`)).includes('m:m1'), 'escondida, não se pega');
-  assert.strictEqual(await js(`document.getElementById('tb-cotas').getAttribute('aria-pressed')`), 'false');
+  assert.strictEqual(await js(`${olhoCotas}.getAttribute('aria-pressed')`), 'false');
   await print('5-cotas-escondidas');
-  await js(`document.getElementById('tb-cotas').click()`);
+  await js(`${olhoCotas}.click()`);
   assert.strictEqual(await js(`${V}.cotasVer()`), true, 'e mostra de novo');
   /* 3d. a cota fica depois de reabrir a vista (nesta máquina, com o projeto) */
   await abre();
@@ -236,6 +238,6 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   assert.strictEqual((await js(`${V}.sinalizadores()`)).length, 0, 'o botão Apagar do painel tira');
 
   assert.deepStrictEqual(erros, [], 'nenhum erro de script na página');
-  console.log('smoke-regua-pcb OK (gaveta do pour, cadeado no painel, 2 cotas com agarre, olho da barra, Delete na cota e no sinalizador)');
+  console.log('smoke-regua-pcb OK (gaveta do pour, cadeado no painel, 2 cotas com agarre, olho do painel Vista, Delete na cota e no sinalizador)');
   fim(0);
 })().catch(err => { console.error(err && err.stack || err); fim(1); });

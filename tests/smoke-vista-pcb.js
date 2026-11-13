@@ -183,6 +183,19 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   assert.strictEqual(sp[0].layer, 'Multi');
   await espera(300); await print('2-sem-plano');
   assert.deepStrictEqual((await js('window.__hubPcb.valida()')).filter(v => v.status === 'err'), [], 'as ops do plano validam');
+  /* 1.112.0, a barra enxuta: Selecionar, as gavetas Rotas / Desenho / Cobre e a Régua; o resto mora nos menus */
+  const barra = await js(`(() => ({ topo: [...document.querySelectorAll('#pcbtb > [id]')].map(e => e.id),
+    rotas: [...document.querySelectorAll('#tb-rotas .gaveta button')].map(b => b.id),
+    cobre: [...document.querySelectorAll('#tb-planos .gaveta button')].map(b => b.id),
+    fora: ['tb-drc', 'tb-regras', 'tb-eco', 'tb-novaPlaca', 'tb-ratsnest', 'tb-marcas', 'tb-cotas', 'tb-sinalizar'].filter(i => document.getElementById(i)) }))()`);
+  assert.deepStrictEqual(barra.topo, ['tb-select', 'tb-rotas', 'tb-formas', 'tb-planos', 'tb-medir'], 'a barra enxuta: ' + JSON.stringify(barra.topo));
+  assert.deepStrictEqual(barra.rotas, ['tb-trilha', 'tb-via', 'tb-pad', 'tb-furo', 'tb-autorotear'], 'trilha, via, pad, furo e auto-rotear juntos');
+  assert.deepStrictEqual(barra.cobre, ['tb-pourRet', 'tb-pourLivre', 'tb-teardrops', 'tb-tirarTeardrops'], 'plano de terra e teardrops juntos');
+  assert.deepStrictEqual(barra.fora, [], 'o que tem no menu saiu da barra');
+  /* o Preencher é chave dentro da gaveta e nunca vira o botão da frente */
+  await js(`document.getElementById('tb-preencher').click()`);
+  assert.ok(!/^Preencher/.test(await js(`document.querySelector('#tb-formas .gprin').title`)), 'o Preencher não vai para a frente');
+  await js(`document.getElementById('tb-preencher').click()`);
   /* a gaveta das formas e o atalho R */
   const gav = await js(`(() => { document.querySelector('#tb-formas .gseta').click(); return !document.querySelector('#tb-formas .gaveta').hidden; })()`);
   assert.ok(gav, 'a setinha abre a gaveta das formas');

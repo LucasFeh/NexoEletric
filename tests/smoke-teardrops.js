@@ -88,11 +88,11 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   const P = 'window.__hubPcb';
   assert.strictEqual(await js(`${P}.changes().length`), 0);
 
-  /* 1. a gaveta Teardrops na barra: Pôr na frente, Tirar dentro */
-  const bar = await js(`(() => { const g = document.getElementById('tb-teardropsGrupo'); if (!g) return null;
+  /* 1. Pôr e Tirar na gaveta Cobre da barra (1.112.0: junto do Polygon Pour), e nenhum dos dois vira o botão da frente */
+  const bar = await js(`(() => { const g = document.getElementById('tb-planos'); if (!g) return null;
     const p = g.querySelector('.gprin'), t = document.getElementById('tb-teardrops'), x = document.getElementById('tb-tirarTeardrops');
-    return { prin: p && p.title, por: t && t.title, tirar: x && x.title, naGaveta: !!(x && x.closest('.gaveta')) }; })()`);
-  assert.ok(bar && /Teardrops/.test(bar.prin) && /junções em T/.test(bar.por) && /Tirar teardrops/.test(bar.tirar) && bar.naGaveta, 'a gaveta: ' + JSON.stringify(bar));
+    return { prin: p && p.title, por: t && t.title, tirar: x && x.title, naGaveta: !!(x && x.closest('#tb-planos .gaveta') && t.closest('#tb-planos .gaveta')) }; })()`);
+  assert.ok(bar && /Polygon Pour/.test(bar.prin) && /junções em T/.test(bar.por) && /Tirar teardrops/.test(bar.tirar) && bar.naGaveta, 'a gaveta: ' + JSON.stringify(bar));
   const nEsp = await js(`HubPcbTeardrop.todos(${P}.EB, null).length`);
   assert.ok(nEsp > 0, 'a placa tem teardrops do espelho');
   await js(`${P}.destravar()`);
@@ -106,12 +106,12 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   assert.ok(ch1.every(c => c.op === 'region_del'));
   assert.deepStrictEqual(await js(`${P}.valida().filter(v => v.status === "err").length`), 0, 'valida');
   assert.strictEqual(await js(`HubPcbTeardrop.todos(${P}.EB, null).length`), 0, 'sem teardrop na tela');
-  /* o botão da frente continua sendo o Pôr (grupo fixo) */
-  assert.ok(/junções em T/.test(await js(`document.querySelector('#tb-teardropsGrupo .gprin').title`)), 'o botão da frente continua o Pôr');
+  /* o botão da frente continua o Polygon Pour (o Tirar não fica a um clique por engano) */
+  assert.ok(/Polygon Pour/.test(await js(`document.querySelector('#tb-planos .gprin').title`)), 'o botão da frente continua o Polygon Pour');
   await print('teardrops-1-tirados');
 
-  /* 3. Pôr (o botão da frente): os de pad/via e os de junção em T */
-  await js(`document.querySelector('#tb-teardropsGrupo .gprin').click()`);
+  /* 3. Pôr (da gaveta): os de pad/via e os de junção em T */
+  await js(`document.getElementById('tb-teardrops').click()`);
   await espera(800);
   const ch2 = await js(`${P}.changes()`);
   const postos = ch2.filter(c => c.op === 'region_add' && c.note === 'teardrop do hub').length;

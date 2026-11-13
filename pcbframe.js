@@ -4819,59 +4819,51 @@ function avisoRodape(t){ const el = $('smsg'); if (el) el.textContent = t || '';
    aparece TRAVADO, com o porque no title. */
 /* O cadeado da edicao saiu daqui (pedido do dono, 2026-10-29): mora nas Propriedades da placa, com
    nada selecionado (hub-pcbpainel.js » desenhaPlaca); a tecla E e o botao direito continuam. */
+/* 1.112.0, A BARRA ENXUTA (pedido do dono, 2026-11-13: "essa barra de ferramenta eu quero reduzir bastante, mas
+   sem sumir com as funcionalidades; o que ja existir no menu nao precisa ter na barra; as ferramentas de plano de
+   terra podem ficar todas juntas e as de trilha, via, furacao tambem"). Ficam o Selecionar, tres gavetas (Rotas,
+   Desenho, Cobre) e a Regua. Sairam, porque ja moram em outro lugar:
+     Regras -> Design » Regras · DRC -> Ferramentas » Verificacao de regras · ECO -> Design » Importar alteracoes ·
+     Placa nova -> Arquivo » Novo » PCB · Sinalizar -> Colocar » Comentario · Ratsnest -> Exibir » Conexoes ·
+     Marcacoes das mudancas e Cotas da regua -> os olhos do painel Propriedades » Vista (e Exibir » Diferencas).
+   Os atalhos de teclado de todos continuam valendo. Item com `naoFrente` nunca vira o botao da frente da gaveta
+   (o Preencher e uma chave; Por/Tirar teardrops mudam a placa num clique). '|' dentro da gaveta e um separador. */
 const BARRA = [
   { id:'select', ic:'select', tool:'select', titulo:'Selecionar e mover (Esc) — arrastar no vazio: janela (esq→dir dentro, dir→esq toca)' }, '|',
-  { id:'trilha', ic:'trilha', tool:'trilha', at:'trilha', titulo:'Trilha — roteamento interativo: clique fixa o canto, Espaço inverte, Shift+Espaço 45°/90°/livre, Shift+R contorna, para no obstáculo ou ignora (trilhas de nets diferentes não se encontram), Backspace desfaz o trecho, 2 via, * ou Ctrl+2 via e troca de camada, Tab largura, botão direito termina' },
-  { id:'via', ic:'via', tool:'via', at:'via', titulo:'Via — diâmetro e furo no painel' },
-  /* 2026-10-28: o auto-roteador em lote (hub-autoroteador.js), o Route » Auto Route » All do Altium */
-  { id:'autorotear', ic:'autorotear', acao:'autorotear', at:'autorotear', titulo:'Auto-rotear (Route » Auto Route » All) — liga as conexões abertas em várias camadas, com vias, pelas regras do projeto; mostra a prévia antes de aplicar' }, '|',
-  { id:'formas', titulo:'Formas de desenho', grupo:[
+  { id:'rotas', titulo:'Trilha, via, pad e furação', grupo:[
+    { id:'trilha', ic:'trilha', tool:'trilha', at:'trilha', titulo:'Trilha — roteamento interativo: clique fixa o canto, Espaço inverte, Shift+Espaço 45°/90°/livre, Shift+R contorna, para no obstáculo ou ignora (trilhas de nets diferentes não se encontram), Backspace desfaz o trecho, 2 via, * ou Ctrl+2 via e troca de camada, Tab largura, botão direito termina' },
+    { id:'via', ic:'via', tool:'via', at:'via', titulo:'Via — diâmetro e furo no painel' },
+    { id:'pad', ic:'pad', tool:'pad', at:'pad', titulo:'Pad avulso (Place » Pad) — passante redondo de 60 mil, furo 30 mil' },
+    { id:'furo', ic:'furo', tool:'furo', titulo:'Furo de fixação — Board Cutout redondo (diâmetro no painel)' }, '|',
+    /* 2026-10-28: o auto-roteador em lote (hub-autoroteador.js), o Route » Auto Route » All do Altium */
+    { id:'autorotear', ic:'autorotear', acao:'autorotear', at:'autorotear', titulo:'Auto-rotear (Route » Auto Route » All) — liga as conexões abertas em várias camadas, com vias, pelas regras do projeto; mostra a prévia antes de aplicar' },
+  ] },
+  { id:'formas', titulo:'Desenho: formas, texto e contorno', grupo:[
     { id:'linha', ic:'linha', tool:'linha', at:'linha', titulo:'Linha na camada atual — cliques encadeados, botão direito termina' },
     { id:'arco', ic:'arco', tool:'arco', at:'arco', titulo:'Arco — centro, início e fim' },
     { id:'circulo', ic:'circulo', tool:'circulo', at:'circulo', titulo:'Círculo — centro e raio (com Preencher: região cheia)' },
     { id:'retangulo', ic:'retangulo', tool:'retangulo', at:'retangulo', titulo:'Retângulo — dois cantos (com Preencher: fill)' },
     { id:'triangulo', ic:'triangulo', tool:'triangulo', titulo:'Triângulo — dois cantos da caixa (com Preencher: região cheia)' },
     { id:'poligono', ic:'poligono', tool:'poligono', at:'poligono', titulo:'Polígono — um clique por vértice; duplo clique, Enter ou botão direito fecha (com Preencher: região cheia)' },
+    { id:'preencher', ic:'preencher', acao:'preencher', at:'preencher', naoFrente:true, titulo:'Preencher — ligado: círculo, triângulo e polígono viram região cheia e o retângulo vira fill; desligado: contorno de trilhas' }, '|',
+    { id:'texto', ic:'texto', tool:'texto', at:'texto', titulo:'Texto — clique e digite (Enter grava); na face de baixo nasce espelhado' },
+    /* 2026-11-03: imagem ou texto -> serigrafia (hub-pcbsilkgen.js) */
+    { id:'serigrafia', ic:'serigrafia', acao:'serigrafia', titulo:'Imagem ou texto → serigrafia — um logo (PNG, JPG, SVG) ou um texto em qualquer fonte do Windows vira regiões de serigrafia, com os miolos vazados' }, '|',
+    { id:'contorno', ic:'contorno', tool:'contorno', titulo:'Contorno da placa — polígono que substitui o contorno (pergunta antes)' },
   ] },
-  { id:'texto', ic:'texto', tool:'texto', at:'texto', titulo:'Texto — clique e digite (Enter grava); na face de baixo nasce espelhado' },
-  /* 2026-11-03: imagem ou texto -> serigrafia (hub-pcbsilkgen.js; pedido do dono: "falta uma ferramenta que converta
-     imagem ou texto em serigrafia") */
-  { id:'serigrafia', ic:'serigrafia', acao:'serigrafia', titulo:'Imagem ou texto → serigrafia — um logo (PNG, JPG, SVG) ou um texto em qualquer fonte do Windows vira regiões de serigrafia, com os miolos vazados' },
-  /* 1.92.2: o botão das Artes saiu daqui (pedido do dono: "o ícone de Artes pode tirar da barra e colocar no canto
-     superior direito, do lado do menu de propriedades"): mora no canto de cima à direita do canvas (#btnArtes, ligaBotaoArtes) */
-  { id:'preencher', ic:'preencher', acao:'preencher', at:'preencher', titulo:'Preencher — ligado: círculo, triângulo e polígono viram região cheia e o retângulo vira fill; desligado: contorno de trilhas' }, '|',
-  { id:'furo', ic:'furo', tool:'furo', titulo:'Furo de fixação — Board Cutout redondo (diâmetro no painel)' },
-  { id:'contorno', ic:'contorno', tool:'contorno', titulo:'Contorno da placa — polígono que substitui o contorno (pergunta antes)' },
-  { id:'pad', ic:'pad', tool:'pad', at:'pad', titulo:'Pad avulso (Place » Pad) — passante redondo de 60 mil, furo 30 mil' },
-  /* o plano de terra em retangulo e em poligono livre e a mesma ferramenta: uma gaveta so, como a das
-     formas (pedido do dono, 2026-10-29). O item leva a forma (CFG.pourForma) junto com a ferramenta */
-  { id:'planos', titulo:'Polygon Pour (plano de terra)', grupo:[
+  /* o plano de terra (retangulo e poligono livre sao a mesma ferramenta, CFG.pourForma) e os teardrops */
+  { id:'planos', titulo:'Cobre: Polygon Pour (plano de terra) e teardrops', grupo:[
     { id:'pourRet', ic:'pour', tool:'pour', forma:'retangulo', at:'pour', titulo:'Polygon Pour em retângulo — dois cantos; plano (Top/Bottom) ou sem plano, tipo e net no painel; selecionado, as bordas esticam' },
-    { id:'pourLivre', ic:'pourLivre', tool:'pour', forma:'livre', at:'pour', titulo:'Polygon Pour em polígono livre — um clique por vértice; duplo clique, Enter ou botão direito fecha; tipo e net no painel' },
-  ] },
-  /* 2026-10-29: Pôr e Tirar na mesma gaveta (pedido do dono: "uma opção de tirar os teardrops") */
-  { id:'teardropsGrupo', titulo:'Teardrops', fixo:true, grupo:[
-    { id:'teardrops', ic:'teardrop', acao:'teardrops', at:'teardrops', titulo:'Teardrops (Tools » Teardrops) — põe os que faltam nos pads, nas vias e nas junções em T' },
-    { id:'tirarTeardrops', ic:'teardropTirar', acao:'tirarTeardrops', titulo:'Tirar teardrops — apaga todos os teardrops da placa (Ctrl+Z volta)' },
+    { id:'pourLivre', ic:'pourLivre', tool:'pour', forma:'livre', at:'pour', titulo:'Polygon Pour em polígono livre — um clique por vértice; duplo clique, Enter ou botão direito fecha; tipo e net no painel' }, '|',
+    { id:'teardrops', ic:'teardrop', acao:'teardrops', at:'teardrops', naoFrente:true, titulo:'Teardrops (Tools » Teardrops) — põe os que faltam nos pads, nas vias e nas junções em T' },
+    { id:'tirarTeardrops', ic:'teardropTirar', acao:'tirarTeardrops', naoFrente:true, titulo:'Tirar teardrops — apaga todos os teardrops da placa (Ctrl+Z volta)' },
   ] }, '|',
-  { id:'medir', ic:'medir', tool:'medir', at:'medir', titulo:'Régua — marque dois pontos (centro, ponta, meio, quadrante, vértice, canto, borda, tangente), arraste a linha e clique: a cota fica na placa' },
-  /* o olho das cotas da regua (pedido do dono, 2026-10-29) */
-  { id:'cotas', ic:'cotas', acao:'cotas', titulo:'Cotas da régua' },
-  { id:'sinalizar', ic:'sinalizar', tool:'sinalizar', at:'sinalizar', titulo:'Sinalizar um problema para a IA (annotations.js)' },
-  { id:'ratsnest', ic:'ratsnest', acao:'ratsnest', at:'ratsnest', titulo:'Linhas de conexão (ratsnest) — Ctrl+clique num cobre realça a net, Esc limpa' },
-  /* o olho das marcações das mudanças (pedido do dono, 2026-10-28): fechado, fica só a placa como ela está */
-  { id:'marcas', ic:'eye', acao:'diff', at:'diff', titulo:'Marcações das mudanças' }, '|',
-  /* Desfazer/Refazer sairam daqui (pedido do dono, 2026-10-23): moram no fim da fileira "Placa |
-     Gerber" do hub (hub-pcbdesfazer.js), e Ctrl+Z/Ctrl+Y e o menu Editar continuam valendo */
-  { id:'regras', ic:'regras', acao:'regras', at:'regras', titulo:'Regras de projeto (Design » Rules)' },
-  { id:'drc', ic:'drc', acao:'drc', at:'drc', rotulo:'DRC', titulo:'Design Rule Check (Tools » Design Rule Check) — o relatório no painel Messages' },
-  { id:'eco', ic:'eco', acao:'atualizarPcb', at:'atualizarPcb', titulo:'Atualizar a PCB pelo esquema (Design » Update PCB Document: o ECO)' },
-  { id:'novaPlaca', ic:'novaPlaca', acao:'novaPlaca', at:'novaPlaca', titulo:'Placa nova (o Board Wizard no padrão da casa)' },
-  /* Gerber e PDF sairam daqui (pedido do dono, 2026-10-14): ficam so no Arquivo, como no Altium
-     (File » Fabrication Outputs » Gerber Files e File » Smart PDF) */
+  { id:'medir', ic:'medir', tool:'medir', at:'medir', titulo:'Régua — marque dois pontos (centro, ponta, meio, quadrante, vértice, canto, borda, tangente), arraste a linha e clique: a cota fica na placa (mostrar/esconder as cotas: o olho da régua no painel Propriedades » Vista)' },
 ];
 /* os botoes de verdade da barra: os soltos e os de dentro das gavetas */
-const itensBarra = () => BARRA.reduce((l, b) => l.concat(b && b.grupo ? b.grupo : [b]), []);
+const itensBarra = () => BARRA.reduce((l, b) => l.concat(b && b.grupo ? b.grupo.filter(x => x !== '|') : [b]), []);
+/* os itens de uma gaveta, sem os separadores */
+const itensGrupo = b => b.grupo.filter(x => x !== '|');
 const GRUPO_ATUAL = {};
 /* o botao esta na mao? o da gaveta do Polygon Pour so com a forma dele (a mesma ferramenta, duas formas) */
 const ativoNaBarra = it => !!it.tool && it.tool === tool && (!it.forma || CFG.pourForma === it.forma);
@@ -4883,14 +4875,15 @@ function escolheForma(it, alterna){
   setTool(it.tool);
 }
 function atualDoGrupo(b){
-  const naMao = b.grupo.find(ativoNaBarra);
+  const its = itensGrupo(b);
+  const naMao = its.find(ativoNaBarra);
   if (naMao) return naMao;
-  const porForma = b.grupo.find(x => x.forma && x.forma === CFG.pourForma);
+  const id = GRUPO_ATUAL[b.id] || lePref('grupo.' + b.id, '');
+  const ult = its.find(x => x.id === id && !x.naoFrente);
+  if (ult) return ult.forma ? (its.find(x => x.forma && x.forma === CFG.pourForma) || ult) : ult;
+  const porForma = its.find(x => x.forma && x.forma === CFG.pourForma);
   if (porForma) return porForma;
-  /* grupo fixo: o botao e sempre o primeiro (o Tirar teardrops nao fica a um clique por engano) */
-  if (b.fixo) return b.grupo[0];
-  const id = GRUPO_ATUAL[b.id] || lePref('grupo.' + b.id, b.grupo[0].id);
-  return b.grupo.find(x => x.id === id) || b.grupo[0];
+  return its[0];
 }
 function fechaGavetas(exceto){
   for (const g of document.querySelectorAll('#pcbtb .gaveta')) if (g !== exceto && !g.hidden) {
@@ -4907,12 +4900,13 @@ function montaGrupo(b){
   seta.append(HubPcbIcones.icone('gaveta'));
   const gav = document.createElement('div'); gav.className = 'gaveta'; gav.hidden = true; gav.setAttribute('role', 'group'); gav.setAttribute('aria-label', b.titulo);
   for (const it of b.grupo) {
+    if (it === '|') { const s = document.createElement('span'); s.className = 'sep'; gav.append(s); continue; }
     const el = document.createElement('button');
     el.type = 'button'; el.id = 'tb-' + it.id; el.dataset.id = it.id;
     el.append(HubPcbIcones.icone(it.ic));
-    if (it.tool) el.setAttribute('aria-pressed', 'false');
+    if (it.tool || it.id === 'preencher') el.setAttribute('aria-pressed', 'false');
     el.addEventListener('click', () => {
-      GRUPO_ATUAL[b.id] = it.id; gravaPref('grupo.' + b.id, it.id);
+      if (!it.naoFrente) { GRUPO_ATUAL[b.id] = it.id; gravaPref('grupo.' + b.id, it.id); }
       fechaGavetas();
       fechaMenu();
       if (it.forma) escolheForma(it, false);
@@ -5082,7 +5076,7 @@ function pintaBarra(){
     const box = $('tb-' + b.id); if (!box) continue;
     const at = atualDoGrupo(b), prin = box.querySelector('.gprin');
     prin.replaceChildren(HubPcbIcones.icone(at.ic));
-    prin.setAttribute('aria-pressed', String(b.grupo.some(x => x.tool && x.tool === tool)));
+    prin.setAttribute('aria-pressed', String(itensGrupo(b).some(x => x.tool && x.tool === tool)));
     const t = at.at ? teclaDe(at.at) : '';
     prin.title = (at.titulo || '') + (t ? ' (' + t + ')' : '');
     prin.setAttribute('aria-label', prin.title);
@@ -7425,7 +7419,7 @@ function fichaFerramenta(){
       const c = draft && draft.tipo === 'medida' && draft.b ? cotaDoDraft() : null, g = c && HCOT ? HCOT.geometria(c) : null;
       F.campos.push({ k:'d', rot:'Medida', tipo:'ro', v:g ? fmtDist(g.valor) + ' ' + unidade + ' · ' + HCOT.MODOS[g.modo] : '— (marque os dois pontos)' });
       if (g) F.campos.push(par('Δ', { k:'dx', rot:'dX', tipo:'ro', v:fmtDist(g.dx) }, { k:'dy', rot:'dY', tipo:'ro', v:fmtDist(g.dy) }));
-      F.campos.push({ k:'tool.cotasVer', rot:'Mostrar as cotas', tipo:'bool', v:show.cotas, dica:'o mesmo botão da régua com olho, na barra' });
+      F.campos.push({ k:'tool.cotasVer', rot:'Mostrar as cotas', tipo:'bool', v:show.cotas, dica:'o mesmo olho da régua do painel Propriedades » Vista' });
       F.campos.push(
         { nota:'1º clique: um ponto. 2º clique: o outro (ou aperte num, arraste e solte no outro). Depois mexa o mouse para levar a linha da cota e clique para deixá-la na placa.' },
         { nota:'Agarra em centro (pad, via, furo, círculo), ponta, meio, quadrante (borda do círculo), vértice, canto, borda do cobre e na tangente de um círculo ou arco — a tangente encosta do lado da outra ponta. Fora deles, a grade; Ctrl solta tudo.' },
