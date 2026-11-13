@@ -4,6 +4,25 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.107.0
+
+Sentido da corrente, cores do positivo e do GND, e o simulador só na aba Simulador (o dono: "positivo e negativo estão
+pro mesmo lado"; "a corrente positiva, a trilha no 2D e no 3D seja amarelo, e a corrente passando seja vermelha; no
+negativo e qualquer GND, inclusive na visão do esquema no simulador, seja preto, e a corrente dentro branco"; "tira a
+influência do simulador do esquema principal ... tudo que tem relação com o simulador fica só na aba de simulação").
+
+- **Sentido da corrente nas trilhas.** A fonte da simulação é ideal (não tem pad) e o que os pinos não fechavam entrava
+  pelo pino de maior corrente — no + e no GND a corrente ia para o mesmo componente. Agora entra/sai pelo pad do
+  CONECTOR da net (a entrada de alimentação): no + a corrente sai do conector até as cargas e no GND volta para ele.
+- **Cores.** PCB 2D e 3D: as trilhas do positivo amarelas com a corrente vermelha; as do GND (qualquer terra) pretas
+  com a corrente branca. No esquema do Simulador os fios do GND ficam pretos (com uma borda clara) e a corrente
+  branca. No 3D a camada fica acima da máscara (antes quase não aparecia).
+- **O esquema principal sem o simulador.** Sem o botão Simular, sem cliques nem desenho da simulação e sem o botão
+  NexoCODE, que passou para a barra da aba Simulador. Pedidos da IA/NexoCode que chegam ao esquema principal vão para
+  a aba Simulador (abrindo-a se preciso); o batimento do NexoCode, o desconectar e o estado não abrem a aba.
+- **A vista PCB principal sem o simulador.** A camada da corrente começa desligada fora da aba e o painel "Corrente
+  nas trilhas" saiu (na aba Simulador ficam os balões no clique).
+
 ## 1.106.1
 
 - O "Desconectado · conectar e rodar" do balão do MCU manda ao NexoCode (0.6.0+) também `--mcu <ref>` (conecta a ESTE

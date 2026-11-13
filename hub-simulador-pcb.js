@@ -112,6 +112,7 @@
       for (const l of p.layer === 'Multi' ? camadas : [p.layer]) for (const k of nosPerto(p.net, l, p.x, p.y, p.r)) liga(g, kp, k, 1e-4);
       const pin = pinos && pinos[p.ref + '-' + p.name];
       if (pin && isFinite(pin.i)) g.inj.set(kp, (g.inj.get(kp) || 0) - pin.i);
+      if (/^(J|CN|P|X|CON|XS|XP|JP|BT|BAT|PS)\d/i.test(p.ref || '')) (g.conectores || (g.conectores = new Set())).add(kp);
       else if (p.ref && pinos && !pin) sem.push(p.ref + '-' + p.name);
       p.no = kp;
     }
@@ -143,9 +144,12 @@
       const pot = new Float64Array(n);
       for (const membros of grupos.values()) {
         if (membros.length < 2) continue;
-        /* referencia: o no com mais corrente injetada (a fonte da net), senao o primeiro */
+        /* referencia (por onde entra/sai o que os pinos nao fecham — a fonte ideal da simulacao nao tem pad): o pad do
+           CONECTOR da net (a entrada de alimentacao: a corrente do + sai dele e a do GND volta para ele — 1.107.0, antes
+           era o pino de maior corrente e o + e o GND andavam para o mesmo lado); senao o no com mais corrente */
+        const chavesG = [...g.nos.keys()];
         let ref = membros[0], mx = -1;
-        for (const i of membros) { const k = [...g.nos.keys()][i]; const q = Math.abs(g.inj.get(k) || 0); if (q > mx) { mx = q; ref = i; } }
+        for (const i of membros) { const k = chavesG[i]; const q = Math.abs(g.inj.get(k) || 0) + (g.conectores && g.conectores.has(k) ? 1e6 : 0); if (q > mx) { mx = q; ref = i; } }
         const loc = new Map(); let m = 0;
         for (const i of membros) if (i !== ref) loc.set(i, m++);
         if (!m) continue;
@@ -197,12 +201,15 @@
     /* a aba Simulador do hub abre a placa com ?modo=sim2d | sim3d | bancada: area de simulacao, sem as ferramentas */
     const modoPg = (() => { try { return new URLSearchParams(location.search).get('modo') || ''; } catch (_e) { return ''; } })();
     const naAba = /^(sim2d|sim3d|bancada)$/.test(modoPg);
-    const st = { ligado: naAba || (() => { try { return localStorage.getItem(PREF) !== '0'; } catch (_e) { return true; } })(), calc: true,
+    /* 1.107.0 (o dono: "tudo que tem relação com o simulador fica só na aba de simulação"): fora da aba a camada da
+       simulacao comeca desligada e o painel nao aparece (a IA ainda pode pedir pcb_mostrar) */
+    const st = { ligado: naAba, calc: true,
                  dados: null, res: null, versao: 0, ui: null, rotulos: [], setas: null, fase: 0, montado: 0,
                  /* os baloes em cima das trilhas comecam ESCONDIDOS (pedido do dono: "nao quero balao de descricao de tudo") */
                  baloes: (() => { try { return localStorage.getItem('nexoSim.baloes') === '1'; } catch (_e) { return false; } })() };
     let topo = window;
     try { topo = window.top && window.top.document ? window.top : window; } catch (_e) { topo = window; }
+    function terraDe(d) { const t = new Set((d && d.terra) || []); if (!t.size && d && d.nets) for (const n of Object.keys(d.nets)) if (/^(GND|AGND|DGND|PGND|SGND|0V|VSS|TERRA|EARTH)/i.test(n)) t.add(n); return t; }
     function dadosDoTopo() { try { const d = topo.__nexoSim; return d && d.projeto === H.projeto() ? d : null; } catch (_e) { return null; } }
     try { topo.addEventListener('nexo-sim', () => { st.dados = dadosDoTopo(); agenda(); }); } catch (_e) { /* outra origem */ }
 
@@ -241,7 +248,7 @@
       const u = ui(); if (!u) return;
       /* na aba Simulador o painel "Corrente nas trilhas" e os rotulos automaticos sairam (pedido do dono: "so atrapalha;
          os baloes surgem interativamente"): o clique na trilha ou no pino abre o balao */
-      u.el.hidden = !H.em3d() || naAba;
+      u.el.hidden = true;   // 1.107.0: o painel "Corrente nas trilhas" saiu (fora da aba nao ha simulacao; na aba, os baloes)
       u.rot.hidden = !H.em3d() || !st.ligado || !st.baloes || naAba;
       u.el.querySelector('[data-a=bal]').classList.toggle('on', st.baloes);
       const bOn = u.el.querySelector('[data-a=on]'); bOn.textContent = st.ligado ? 'ligado' : 'desligado'; bOn.classList.toggle('on', st.ligado);
@@ -288,11 +295,15 @@
       const g = new T.Group(); g.name = 'simCorrente';
       const imax = Math.max(st.res.imax, 1e-9);
       const vivos = st.res.segs.filter(s => Math.abs(s.i) > Math.max(1e-6, imax * 1e-3));
-      const fator = s => Math.pow(Math.min(1, Math.abs(s.i) / imax), 0.45);
-      for (const s of vivos) {
-        const f = fator(s), z = /bottom/i.test(s.layer) ? -esp - 0.045 : /top/i.test(s.layer) ? 0.045 : -esp / 2;
+      /* 1.107.0 (o dono): a trilha do positivo AMARELA com a corrente VERMELHA; a do negativo/GND PRETA com a corrente
+         BRANCA — todas as trilhas das nets com tensao, nao so as com corrente */
+      const terra = terraDe(st.dados);
+      const pintadas = st.res.segs.filter(s => terra.has(s.net) || (st.dados.nets && st.dados.nets[s.net] != null) || Math.abs(s.i) > 1e-6);
+      for (const s of pintadas) {
+        const z = /bottom/i.test(s.layer) ? -esp - 0.08 : /top/i.test(s.layer) ? 0.08 : -esp / 2;   // acima da mascara (1.107.0)
         const geo = new T.BoxGeometry(s.len, s.w * 1.04, 0.02);
-        const m = new T.MeshBasicMaterial({ color: cor(T, f), transparent: true, opacity: 0.55 + 0.4 * f, depthWrite: false, toneMapped: false });
+        const gnd = terra.has(s.net);
+        const m = new T.MeshBasicMaterial({ color: gnd ? 0x050505 : 0xfacc15, transparent: true, opacity: gnd ? 0.92 : 0.85, depthWrite: false, toneMapped: false });
         const ms = new T.Mesh(geo, m);
         ms.position.set((s.x1 + s.x2) / 2, (s.y1 + s.y2) / 2, z);
         ms.rotation.z = Math.atan2(s.y2 - s.y1, s.x2 - s.x1);
@@ -310,8 +321,11 @@
       const usadas = lista.slice(0, MAXS);
       if (usadas.length) {
         const cone = new T.ConeGeometry(1, 2.2, 3); cone.rotateZ(-Math.PI / 2);   // aponta para +X
-        const mat = new T.MeshBasicMaterial({ color: 0xfff7d6, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false });
+        const mat = new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false });
         const inst = new T.InstancedMesh(cone, mat, usadas.length);
+        const cVerm = new T.Color(0xef4444), cBranco = new T.Color(0xffffff);
+        usadas.forEach((a, idx) => inst.setColorAt(idx, terra.has(a.s.net) ? cBranco : cVerm));
+        if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
         inst.renderOrder = 6;
         g.add(inst);
         st.setas = { inst, usadas, T, esp };
@@ -331,7 +345,7 @@
             if (dir < 0) d = a.n * a.passo - d;
             const t = Math.min(1, d / L);
             const x = s.x1 + (s.x2 - s.x1) * t, y = s.y1 + (s.y2 - s.y1) * t;
-            const z = /bottom/i.test(s.layer) ? -e - 0.09 : /top/i.test(s.layer) ? 0.09 : -e / 2;
+            const z = /bottom/i.test(s.layer) ? -e - 0.14 : /top/i.test(s.layer) ? 0.14 : -e / 2;
             const ang = Math.atan2(s.y2 - s.y1, s.x2 - s.x1) + (dir < 0 ? Math.PI : 0);
             E.set(0, 0, ang); Q.setFromEuler(E);
             const k = Math.max(0.22, Math.min(0.9, s.w * 0.9));
@@ -423,17 +437,21 @@
         ctx.save();
         ctx.lineCap = 'round';
         /* o cobre pela tensao da net */
+        /* 1.107.0: o positivo AMARELO, o GND PRETO (com uma borda para aparecer no fundo escuro) */
+        const terra = terraDe(st.dados);
         for (const s of st.res.segs) {
-          const v = st.dados.nets[s.net];
-          if (v == null) continue;
-          ctx.strokeStyle = corV(v); ctx.globalAlpha = 0.55; ctx.lineWidth = s.w;
+          const v = st.dados.nets[s.net], gnd = terra.has(s.net);
+          if (v == null && !gnd) continue;
+          if (gnd) { ctx.strokeStyle = 'rgba(148,163,184,.55)'; ctx.globalAlpha = 1; ctx.lineWidth = s.w + px(2); ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke(); }
+          ctx.strokeStyle = gnd ? '#050505' : '#facc15'; ctx.globalAlpha = gnd ? 0.95 : 0.8; ctx.lineWidth = s.w;
           ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
         }
-        /* os pontos da corrente */
-        ctx.globalAlpha = 1; ctx.fillStyle = '#facc15'; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = px(0.8);
+        /* os pontos da corrente: VERMELHOS no positivo, BRANCOS no GND */
+        ctx.globalAlpha = 1; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = px(0.8);
         const passo = Math.max(px(18), 0.8), raio = Math.max(px(2.4), 0.12);
         for (const s of st.res.segs) {
           if (!velPonto(s.i)) continue;
+          ctx.fillStyle = terra.has(s.net) ? '#ffffff' : '#ef4444';
           const L = Math.hypot(s.x2 - s.x1, s.y2 - s.y1); if (L < 1e-6) continue;
           const ux = (s.x2 - s.x1) / L, uy = (s.y2 - s.y1) / L;
           let d = (((fase.get(s.id) || 0) * px(1)) % passo + passo) % passo;

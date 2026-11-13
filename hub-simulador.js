@@ -152,6 +152,7 @@
     try { topo = window.top && window.top.document ? window.top : window; } catch (_e) { topo = window; }
     const v = VISTA();
     const dados = st.ligado && st.an ? { projeto: v && v.projeto ? v.projeto() : '', t: st.res.t, modo: st.res.modo, versao: Date.now(),
+      terra: (st.mt && st.mt.terra) || [],
       pinos: Object.fromEntries(Object.entries(st.an.pinos).map(([k, p]) => [k, { v: p.v, i: p.i, net: p.net }])),
       nets: Object.fromEntries(Object.entries(st.an.nets).filter(([n]) => !n.includes('#')).map(([n, x]) => [n, x.v])),
       comps: Object.fromEntries(Object.entries(st.an.comps).map(([r, c]) => [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor, rpm: c.rpm, corrente: c.corrente }])),
@@ -384,12 +385,17 @@
     if (si !== st.folhaFluxo) calculaFluxos();
     const px = 1 / cam.scale;
     ctx.save();
-    /* fios pintados pela tensao */
-    if (st.mostrar.cores && st.fluxos) {
+    /* fios pintados pela tensao; o GND (qualquer terra) PRETO com uma borda clara (1.107.0, pedido do dono: "no negativo e
+       qualquer GND, inclusive na visão do esquema no simulador, seja preto, e a corrente dentro branco") */
+    const terra = new Set((st.mt && st.mt.terra) || []);
+    if (st.fluxos) {
       ctx.lineCap = 'round';
-      ctx.lineWidth = Math.max(3.2 * px, 14);   // cobre o fio da folha mesmo de perto
       for (const s of st.fluxos) {
-        ctx.strokeStyle = corDaTensao(vMostra(s.net), 0.95);
+        const gnd = terra.has(s.net);
+        if (!gnd && !st.mostrar.cores) continue;
+        if (gnd) { ctx.strokeStyle = 'rgba(148,163,184,.6)'; ctx.lineWidth = Math.max(4.6 * px, 20); ctx.beginPath(); ctx.moveTo(s.ax, s.ay); ctx.lineTo(s.bx, s.by); ctx.stroke(); }
+        ctx.lineWidth = Math.max(3.2 * px, 14);   // cobre o fio da folha mesmo de perto
+        ctx.strokeStyle = gnd ? '#050505' : corDaTensao(vMostra(s.net), 0.95);
         ctx.beginPath(); ctx.moveTo(s.ax, s.ay); ctx.lineTo(s.bx, s.by); ctx.stroke();
       }
     }
@@ -431,7 +437,8 @@
         let d = ((fase * px) % passo + passo) % passo;
         for (; d < L; d += passo) { ctx.beginPath(); ctx.arc(ax + ux * d, ay + uy * d, raio, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
       };
-      if (st.fluxos) for (const s of st.fluxos) if (velocidadePonto(s.i)) pontosEm(s.ax, s.ay, s.bx, s.by, st.fase.get(s.id) || 0);
+      if (st.fluxos) for (const s of st.fluxos) if (velocidadePonto(s.i)) { ctx.fillStyle = terra.has(s.net) ? '#ffffff' : '#facc15'; pontosEm(s.ax, s.ay, s.bx, s.by, st.fase.get(s.id) || 0); }
+      ctx.fillStyle = '#facc15';
       /* por dentro do componente de dois pinos: do pino por onde a corrente entra ao outro */
       for (const c of st.comps || []) {
         if (c.folha !== si || c.pinos.length !== 2) continue;
@@ -1622,6 +1629,10 @@
   function instala() {
     const v = VISTA();
     if (!v) return false;
+    /* 1.107.0 (o dono: "tira a influência do simulador do esquema principal ... tudo que tem relação com o simulador fica
+       só na aba de simulação"): fora da aba Simulador nao ha botao Simular, nem clique, nem desenho; os pedidos do
+       NexoCode/MCP que chegam aqui vao para a aba (mcp) */
+    if (!st.aba) return true;
     botao.poe();
     const host = v.canvas().parentElement;
     host.addEventListener('mousemove', aoMover, { passive: true });
@@ -1696,6 +1707,12 @@
       tb.append(sel);
     }
     tb.append($c('span', 'sep'));
+    /* 1.107.0: o botao NexoCODE (o firmware deste esquema com IA, hub-nexocode.js) mora aqui, nao no esquema principal */
+    if (window.HubNexoCode && typeof window.HubNexoCode.abrir === 'function') {
+      const nc = bt('</> NexoCODE', 'NexoCODE — gerar o firmware deste esquema com IA (abre o NexoCode com os pinos, a funcionalidade e as referências)', () => window.HubNexoCode.abrir());
+      nc.style.color = '#f59e0b';
+      tb.append($c('span', 'sep'));
+    }
     bt('ⓘ Recolher informações', 'A IA busca o datasheet de cada componente na internet e mapeia os pinos (função, limites); fica salvo no componente, na biblioteca', () => recolher());
     for (const ev of ['mousedown', 'pointerdown', 'wheel', 'contextmenu', 'dblclick']) tb.addEventListener(ev, e => e.stopPropagation(), { passive: ev === 'wheel' });
     host.append(tb);
@@ -1779,6 +1796,16 @@
   async function mcp(a) {
     a = a || {};
     { const w = abaDoProjeto(); if (w) return w.HubSimulador.mcp(a); }   // a aba Simulador do projeto responde
+    if (!st.aba) {
+      /* 1.107.0: o esquema principal nao simula — abre a aba Simulador do projeto e passa o pedido a ela. O batimento do
+         NexoCode (lote vazio), o desconectar e o estado NAO abrem a aba (a cada segundo puxariam a pessoa de volta) */
+      const ac0 = a.acao || 'estado', vazio = o => !o || typeof o !== 'object' || !Object.keys(o).length;
+      if (ac0 === 'estado' || (ac0 === 'gpio_lote' && (a.desconectar || (vazio(a.gpio) && vazio(a.pecas) && vazio(a.acionar)))))
+        return { ligado: false, sem_simulador: true, mcu: a.mcu || null, dica: 'a simulação fica na aba Simulador do projeto' };
+      try { const t = window.top; if (t && t !== window && typeof t.goTab === 'function') t.goTab('sim'); } catch (_e) { /* ok */ }
+      for (let k = 0; k < 60; k++) { await espera(250); const w = abaDoProjeto(); if (w) return w.HubSimulador.mcp(a); }
+      throw new Error('a simulação fica na aba Simulador do projeto: abra-a (vista_abrir {aba:"simulador"}) e repita');
+    }
     const acao = a.acao || 'estado';
     const garante = () => { if (!st.ligado) liga(true); if (st.sujo) monta(); };
     switch (acao) {

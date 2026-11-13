@@ -342,7 +342,7 @@ caso('1.102.1: média na tela, Analisar (lista/osciloscópio), acionar do NexoCo
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
   const sim = ler('hub-simulador.js'), pcb = ler('hub-simulador-pcb.js'), banc = ler('hub-bancada.js');
   assert.ok(/st\.acc = null; st\.vis = null;   \/\/ a media e do circuito montado/.test(sim), 'remontar descarta a media velha (o gpio_lote do NexoCode dava "reading map")');
-  assert.ok(/u\.el\.hidden = !H\.em3d\(\) \|\| naAba;/.test(pcb) && /function alternaBalaoTrilha/.test(pcb) && /b\.contas/.test(pcb) && /contas: false/.test(pcb), 'PCB: sem o painel na aba; balão no clique da trilha, contas fechadas');
+  assert.ok(/u\.el\.hidden = true;/.test(pcb) && /function alternaBalaoTrilha/.test(pcb) && /b\.contas/.test(pcb) && /contas: false/.test(pcb), 'PCB: sem o painel na aba; balão no clique da trilha, contas fechadas');
   assert.ok(/motores\[ref\] = \{ rpm:/.test(sim) && /out\.tensao = vm; out\.kv = info\.kv;/.test(ler('hub-simulador-circuito.js')), 'gpio_lote devolve os motores da bancada (o painel do motor do NexoCode)');
   assert.ok(/__nexoSimAba\[pj\] = window/.test(sim) && /if \(w\) return w\.HubSimulador\.mcp\(a\)/.test(sim) && /if \(abaDoProjeto\(\)\) return;/.test(sim), 'uma simulação por projeto: o Esquema passa os pedidos para a aba Simulador');
   assert.ok(/function resParaMostrar\(\)/.test(sim) && /acumula\(\);/.test(sim) && /st\.sim\.anda\(1\)/.test(sim), 'a média dos passos (o PWM não pisca) e um passo de cada vez');
@@ -398,6 +398,34 @@ caso('1.103.1: leve — PWM com motor sem a busca em linha travar, anda/soma/mé
   assert.ok(/if \(andou\) st\.res = st\.sim\.resultado\(\);/.test(sim), 'um resultado por quadro');
   assert.ok(/analise\.tomaSerie\(\)/.test(sim) && /_ligado: \(\) => st\.ligado/.test(sim), 'o osciloscópio do pad lê a simulação ligada');
   assert.ok(/if \(chave === chaveB && svgB\.childNodes\.length\) return;/.test(pcb) && /if \(chave === chaveP\) return;/.test(pec), 'balões e peças só se mexem quando algo mudou');
+});
+caso('1.107.0: o + sai do conector e o GND volta para ele (sentido certo); cores; nada do simulador no esquema principal', () => {
+  /* a fonte da simulacao e ideal (sem pad): o que os pinos nao fecham entra/sai pelo pad do CONECTOR da net */
+  const eb = {
+    components: [
+      { ref: 'J1', pads: [{ id: 'j1', name: '1', net: '+5V', layer: 'Top', x: 0, y: 0, w: 1, h: 1 }, { id: 'j2', name: '2', net: 'GND', layer: 'Top', x: 0, y: 10, w: 1, h: 1 }] },
+      { ref: 'R1', pads: [{ id: 'r1', name: '1', net: '+5V', layer: 'Top', x: 20, y: 0, w: 1, h: 1 }, { id: 'r2', name: '2', net: 'GND', layer: 'Top', x: 20, y: 10, w: 1, h: 1 }] },
+      { ref: 'R2', pads: [{ id: 'q1', name: '1', net: '+5V', layer: 'Top', x: 10, y: 0, w: 1, h: 1 }, { id: 'q2', name: '2', net: 'GND', layer: 'Top', x: 10, y: 10, w: 1, h: 1 }] },
+    ],
+    tracks: [
+      { id: 'p', net: '+5V', layer: 'Top', x1: 0, y1: 0, x2: 20, y2: 0, w: 0.5 },
+      { id: 'g', net: 'GND', layer: 'Top', x1: 0, y1: 10, x2: 20, y2: 10, w: 0.5 },
+    ],
+  };
+  /* R1 puxa 30 mA e R2 10 mA; o J1 (sem modelo) nao tem corrente no pino */
+  const r = P.correntes(eb, { 'J1-1': { i: 0 }, 'J1-2': { i: 0 }, 'R1-1': { i: 0.03 }, 'R1-2': { i: -0.03 }, 'R2-1': { i: 0.01 }, 'R2-2': { i: -0.01 } }, {});
+  const seg = (id, x) => r.segs.find(s => s.trilha === id && Math.min(s.x1, s.x2) <= x && Math.max(s.x1, s.x2) >= x);
+  const sentido = s => Math.sign(s.i) * Math.sign(s.x2 - s.x1);   // +1 = para a direita (para longe do J1)
+  assert.strictEqual(sentido(seg('p', 5)), 1, 'no + a corrente sai do conector');
+  assert.strictEqual(sentido(seg('g', 5)), -1, 'no GND a corrente volta para o conector');
+  perto(Math.abs(seg('p', 5).i), 0.04, 1e-6, 'perto do J1 passam os 40 mA'); perto(Math.abs(seg('p', 15).i), 0.03, 1e-6, 'depois do R2, 30 mA');
+  const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
+  const pcb = ler('hub-simulador-pcb.js'), sim = ler('hub-simulador.js'), nc = ler('hub-nexocode.js');
+  assert.ok(/color: gnd \? 0x050505 : 0xfacc15/.test(pcb) && /terra\.has\(a\.s\.net\) \? cBranco : cVerm/.test(pcb) && /ctx\.fillStyle = terra\.has\(s\.net\) \? '#ffffff' : '#ef4444';/.test(pcb), 'PCB: + amarelo com a corrente vermelha, GND preto com a corrente branca');
+  assert.ok(/ctx\.strokeStyle = gnd \? '#050505'/.test(sim) && /terra\.has\(s\.net\) \? '#ffffff' : '#facc15'/.test(sim) && /terra: \(st\.mt && st\.mt\.terra\) \|\| \[\]/.test(sim), 'esquema do Simulador: GND preto com a corrente branca');
+  assert.ok(/if \(!st\.aba\) return true;\s*botao\.poe\(\);/.test(sim) && /const st = \{ ligado: naAba, calc: true,/.test(pcb), 'fora da aba Simulador: sem botão, sem clique, sem camada');
+  assert.ok(/function montaBotao\(\)\{[\s\S]{0,300}return;/.test(nc) && /window\.HubNexoCode\.abrir\(\)/.test(sim), 'o NexoCODE só na barra da aba Simulador');
+  assert.ok(/sem_simulador: true/.test(sim), 'o batimento do NexoCode não abre a aba');
 });
 caso('1.106.0: "Desconectado" no balão do MCU conecta: abre no NexoCode o firmware ligado ao projeto e roda', () => {
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');

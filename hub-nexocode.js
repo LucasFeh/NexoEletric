@@ -371,6 +371,10 @@
 
   /* ------------------------------------------------------------ o botao na barra do esquema -------------------------------- */
   function montaBotao(){
+    /* 1.107.0: o botao saiu do esquema principal (o dono: "nem o botão de NexoCODE tinha que ter lá"); ele fica na barra
+       da aba Simulador (hub-simulador.js chama HubNexoCode.abrir) */
+    return;
+    // eslint-disable-next-line no-unreachable
     const tb = document.getElementById('schtb');
     if (!tb || document.getElementById('tbNexoCode')) return;
     const sep = document.createElement('span'); sep.className = 'sep';
