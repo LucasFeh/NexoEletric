@@ -4,6 +4,27 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.105.1
+
+O clique no 3D do Simulador e a seta do microcontrolador (o dono: "cliquei em um componente na placa, a retícula ficou
+grudada nela"; "quando eu clicar e marcar ele no 3D, apareça uma seta mostrando que tá conectado").
+
+- **O componente clicado não fica mais marcado.** No Simulador, o clique na PCB 3D ainda selecionava o componente
+  como no editor, e o corpo ficava pintado. Agora o `aoClicar` e o `aoMenu` da vista 3D não fazem nada na área do
+  Simulador (`AREA_SIM` no pcbframe.js). O clique direito também não abre mais o menu de edição nem o menu do navegador.
+- **O clique de verdade passa a funcionar no 3D.** A vista 3D cancela o `pointerdown`, então o `mousedown` do Simulador
+  nunca chegava. Por isso o balão do MCU, o cartão do pino, o balão da trilha e a seleção da bancada não abriam com o
+  clique do mouse no 3D. O Simulador agora trata o clique no `pointerdown`:
+  - clique que acerta algo é dele, e a vista não gira;
+  - clique no vazio continua girando a vista;
+  - clique no vazio sem arrastar fecha o cartão.
+- **O anel amarelo do pino não gruda.** Ele some ao fixar ou fechar o cartão e ao sair da vista.
+- **A seta do MCU no 3D.** Clicar no microcontrolador abre o balão e põe uma seta 3D inclinada sobre ele:
+  - verde e brilhando com o NexoCode conectado, cinza sem ele;
+  - muda de cor quando conecta ou desconecta;
+  - sobe e desce devagar;
+  - sai junto com o balão.
+
 ## 1.105.0
 
 O balão do microcontrolador na placa (o dono: "na visão 3D, se eu clico em cima do microcontrolador e ele tá desconectado,

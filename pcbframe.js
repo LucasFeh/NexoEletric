@@ -6479,12 +6479,17 @@ function prepara3d(){
     try {
       V3 = await HubPcb3dVista.cria(host, {
         aoClicar(ref, ev){
+          /* a AREA DE SIMULACAO (aba Simulador: ?modo=sim2d|sim3d|bancada) nao seleciona nada: o clique e do simulador
+             (balao, cartao, bancada) — selecionar deixava o destaque grudado no componente (1.105.1) */
+          if (AREA_SIM) return;
           const a = ref ? alvoDoRef(ref) : null;
           if (!a) { if (!ev.shiftKey) selLimpa(); }
           else if (ev.shiftKey) { if (selTem(a)) selTira(a); else selSoma(a); }
           else selSo([a]);
         },
         aoMenu(ref, ev, corpo){
+          /* nem o menu de edicao (Colocar, Editar footprint...): o dono via dois menus, este e o do navegador por cima */
+          if (AREA_SIM) return;
           CORPO_MENU = corpo || null;
           const a = ref ? alvoDoRef(ref) : null;
           if (a && !selTem(a)) selSo([a]);
@@ -6509,6 +6514,8 @@ function agendaPrepara3d(){
   const vai = () => { prepara3d().catch(e => console.warn('3D: pre-carga', e)); };
   setTimeout(() => { if (typeof requestIdleCallback === 'function') requestIdleCallback(vai, { timeout:3000 }); else vai(); }, 400);
 }
+/* a aba Simulador abre esta vista como area de simulacao (sem as ferramentas de construir) */
+const AREA_SIM = (() => { try { return /^(sim2d|sim3d|bancada)$/.test(new URLSearchParams(location.search).get('modo') || ''); } catch (_e) { return false; } })();
 async function entra3d(){
   if (modo3d) return;
   if (typeof HubPcb3dVista === 'undefined' || !HubPcb3dVista.disponivel()) { HubDialog.toast('esta máquina não tem WebGL: a vista 3D não abre', 'warn', 4000); return; }

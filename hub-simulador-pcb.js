@@ -413,6 +413,9 @@
       return 'rgb(' + g.map((x, i) => Math.round(x + (f[i] - x) * k)).join(',') + ')';
     }
     let hoverPad = null;
+    /* 1.105.1 ("cliquei em um componente na placa e a reticula ficou grudada nela"): o anel do pad sob o mouse some ao
+       fixar/fechar o cartao e ao sair da vista (antes ficava no pad clicado ate passar por outro) */
+    function soltaAnel() { if (!hoverPad) return; hoverPad = null; if (!H.em3d()) H.redesenha(); }
     window.HubSimPcb2d = {
       desenha(ctx, px) {
         if (!naAba || !st.ligado || !st.res || !st.dados) return;
@@ -516,7 +519,7 @@
         for (const e of ['mousedown', 'wheel', 'contextmenu']) cartao.addEventListener(e, x => x.stopPropagation());
         document.body.append(cartao);
       }
-      if (!p) { cartao.hidden = true; cartaoPad = null; soltaSerie(); return; }
+      if (!p) { cartao.hidden = true; cartaoPad = null; soltaSerie(); soltaAnel(); return; }
       const pin = st.dados && st.dados.pinos ? st.dados.pinos[p.ref + '-' + p.nome] : null;
       const ds = pinoDoDatasheet(p.ref, p.nome);
       const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -541,12 +544,13 @@
       cartaoPad = fixo ? p : null;
       if (fixo) {
         cartao.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
-          if (b.dataset.m === 'x') { soltaSerie(); cartao.hidden = true; cartaoPad = null; return; }
+          if (b.dataset.m === 'x') { soltaSerie(); cartao.hidden = true; cartaoPad = null; soltaAnel(); return; }
           modoCartao = b.dataset.m; mostraCartao(p, { clientX: parseFloat(cartao.style.left) - 16, clientY: parseFloat(cartao.style.top) - 14 }, true);
         });
         if (modoCartao === 'osc') { assinaSerie(p.net); desenhaOsc(); }
       }
       cartao.classList.toggle('fixo', !!fixo);
+      if (fixo) soltaAnel();   /* o cartao fixo ja marca o pad (a linha ate ele): o anel do mouse nao fica grudado */
       cartao.hidden = false;
       cartao.style.left = Math.min(ev.clientX + 16, window.innerWidth - 330) + 'px';
       cartao.style.top = Math.min(ev.clientY + 14, window.innerHeight - cartao.offsetHeight - 8) + 'px';
@@ -681,7 +685,10 @@
       b.el.querySelector('[data-b=x]').onclick = () => fechaBalao(b);
       b.el.querySelector('[data-b=c]').onclick = () => { b.contas = !b.contas; pintaBalaoTrilha(b); };
     }
-    function fechaBalao(b) { const i = baloes.indexOf(b); if (i >= 0) baloes.splice(i, 1); b.el.remove(); if (!baloes.length && svgB) svgB.textContent = ''; }
+    function fechaBalao(b) {
+      const i = baloes.indexOf(b); if (i >= 0) baloes.splice(i, 1); b.el.remove(); if (!baloes.length && svgB) svgB.textContent = '';
+      if (b.mcu && setasMcu.delete(b.mcu)) montaSetas();
+    }
     function alternaBalaoTrilha(hit) {
       const k = chaveSeg(hit.s), ja = baloes.find(b => b.chave === k);
       if (ja) { fechaBalao(ja); return; }
@@ -733,6 +740,8 @@
       const con = !!(m && m.conectado), est = !d ? 'sem' : con ? (m.rodando ? 'rod' : 'par') : 'desc';
       if (b.sig === est) return;
       b.sig = est;
+      const sa = setasMcu.get(b.mcu);
+      if (sa && sa.con !== con) { sa.con = con; montaSetas(); }
       const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
       const proj = (() => { try { return new URLSearchParams(location.search).get('p') || ''; } catch (_e) { return ''; } })();
       b.el.classList.toggle('desc', est !== 'rod' && est !== 'par'); b.el.classList.toggle('con', con);
@@ -741,6 +750,44 @@
           : con ? '<div class="st">● Conectado ao NexoCode</div><div class="f">firmware ' + (est === 'rod' ? 'rodando' : 'parado') + '</div>'
           : '<div class="st">✕ Desconectado</div><div class="f">nenhum código do NexoCode está ligado a este microcontrolador — abra o firmware do projeto no NexoCode (Documents/NexoCode/' + esc(proj) + '): ele conecta sozinho e o MCU fica verde</div>');
       b.el.querySelector('[data-x]').onclick = () => fechaBalao(b);
+    }
+    /* A SETA DO MCU NO 3D (1.105.1, pedido do dono: "quando eu clicar e marcar ele no 3D apareça uma seta, mostrando
+       que tá conectado"): marcado o MCU (o balao aberto), uma seta sobre ele aponta para o corpo — verde e brilhando
+       com o NexoCode conectado, cinza sem ele — e sobe e desce devagar. Sai com o balao. */
+    const setasMcu = new Map();   // ref -> {x, y, bottom, con}
+    let tSeta = 0;
+    function montaSetas() {
+      const V = H.vista3d && H.vista3d();
+      if (!V || !V.extra || !V.T) return;
+      if (!setasMcu.size) { V.extra('nexocode-mcu', null); if (V.animaExtra) V.animaExtra('nexocode-mcu', null); return; }
+      const T = V.T(), e = V.espessura ? V.espessura() : 1.6;
+      const raiz = new T.Group(); raiz.name = 'nexocode-mcu';
+      for (const [ref, a] of setasMcu) {
+        const cor = a.con ? 0x22c55e : 0x9ca3af;
+        const mat = new T.MeshStandardMaterial({ color: cor, emissive: cor, emissiveIntensity: a.con ? 0.7 : 0.15, roughness: 0.35, metalness: 0.05 });
+        /* a seta INCLINADA (vem de cima e de lado): de cima, como a vista abre, uma seta em pe vira um circulo */
+        const g = new T.Group(); g.name = 'seta-' + ref;
+        const ponta = new T.Mesh(new T.ConeGeometry(2.6, 4.5, 28), mat);
+        ponta.rotation.z = Math.PI; ponta.position.y = 2.25;            /* a ponta na origem, apontando para -Y local */
+        const haste = new T.Mesh(new T.CylinderGeometry(0.9, 0.9, 8, 18), mat);
+        haste.position.y = 4.5 + 4;
+        g.add(ponta, haste);
+        const dir = new T.Vector3(-0.75, 0.75, a.bottom ? -1 : 1).normalize();   /* da ponta para a cauda */
+        g.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), dir);
+        const z0 = a.bottom ? -e - 4 : 4;                                 /* a ponta logo acima do corpo do MCU */
+        g.position.set(a.x, a.y, z0);
+        g.userData = { base: g.position.clone(), dir, ref, conectado: a.con };
+        raiz.add(g);
+      }
+      V.extra('nexocode-mcu', raiz);
+      if (V.animaExtra) V.animaExtra('nexocode-mcu', dt => {
+        tSeta += dt || 0;
+        for (const g of raiz.children) g.position.copy(g.userData.base).addScaledVector(g.userData.dir, 1.6 * (1 + Math.sin(tSeta * 3.2)) / 2);
+      });
+    }
+    function marcaSetaMcu(hit, con) {
+      if (hit) setasMcu.set(hit.ref, { x: hit.ax, y: hit.ay, bottom: !!hit.bottom, con: !!con });
+      montaSetas();
     }
     function alternaBalaoMcu(hit) {
       const ja = baloes.find(b => b.mcu === hit.ref);
@@ -752,11 +799,13 @@
       const b = { el, mcu: hit.ref, ax: hit.ax, ay: hit.ay, bottom: hit.bottom, dx: 30, dy: -26 };
       baloes.push(b);
       pintaBalaoMcu(b);
+      marcaSetaMcu(hit, b.sig === 'rod' || b.sig === 'par');
       rodaBaloes();
     }
     try { topo.addEventListener('nexo-sim', () => { for (const b of baloes) if (b.mcu) pintaBalaoMcu(b); }); } catch (_e) { /* ok */ }
     /* o que os testes e a IA usam daqui */
-    window.HubSimPcbBaloes = { lista: () => baloes.map(b => ({ chave: b.chave || null, cartao: !!b.cartao, mcu: b.mcu || null, estado: b.sig || null, i: b.s ? b.s.i : null })), trilhaEm, alternaBalaoTrilha, mcuEm, alternaBalaoMcu };
+    window.HubSimPcbBaloes = { lista: () => baloes.map(b => ({ chave: b.chave || null, cartao: !!b.cartao, mcu: b.mcu || null, estado: b.sig || null, i: b.s ? b.s.i : null })), trilhaEm, alternaBalaoTrilha, mcuEm, alternaBalaoMcu,
+      setas: () => [...setasMcu].map(([ref, a]) => ({ ref, conectado: a.con, bottom: a.bottom })) };
     /* o que a bancada (hub-bancada.js) usa daqui */
     window.HubSimPcbInt = { padEm, padsDaPlaca, H, dados: () => st.dados, mostraCartao };
     const CSS2 = `.simpcb-cartao{position:fixed; z-index:70; min-width:220px; max-width:320px; padding:9px 11px; border-radius:10px; pointer-events:none;
@@ -788,22 +837,44 @@
       sty.textContent = '#pcbtb, #cantoesq, #splitR, #props, #abas, #status, #alertaCodigo, #btnPaineis, #btnArtes, #menubar, #help, #annform, #txtbox{display:none !important} body{background:#000 !important}';
       document.head.append(sty);
       setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
+      /* o clique: bancada, MCU, pad, trilha (true = usou o clique) */
+      const trataClique = e => {
+        /* a bancada (mover item, ligar fio) pega o clique primeiro */
+        if (window.HubBancada && window.HubBancada.consome && window.HubBancada.consome(e)) return true;
+        const p = padEm(e);
+        /* o corpo do MCU ganha do pad de DENTRO dele (o pad termico/GND embaixo do modulo ESP32); os pinos da borda
+           continuam abrindo o cartao do pad */
+        const mc = mcuEm(e);
+        const padDeDentro = p && mc && p.ref === mc.ref && Math.min(p.x - mc.caixa.x1, mc.caixa.x2 - p.x, p.y - mc.caixa.y1, mc.caixa.y2 - p.y) > 1.5;
+        if (mc && (!p || padDeDentro)) { alternaBalaoMcu(mc); return true; }
+        if (p) { mostraCartao(p, e, true); return true; }
+        const sg = trilhaEm(e);
+        if (sg) { alternaBalaoTrilha(sg); return true; }
+        return false;
+      };
+      let baixo3d = null;
       const guarda = alvo => {
         alvo.addEventListener('mousedown', e => {
           if (e.button !== 0) return;
-          /* a bancada (mover item, ligar fio) pega o clique primeiro */
-          if (window.HubBancada && window.HubBancada.consome && window.HubBancada.consome(e)) { e.stopPropagation(); e.preventDefault(); return; }
-          const p = padEm(e);
           e.stopPropagation(); e.preventDefault();
-          /* o corpo do MCU ganha do pad de DENTRO dele (o pad termico/GND embaixo do modulo ESP32); os pinos da borda
-             continuam abrindo o cartao do pad */
-          const mc = mcuEm(e);
-          const padDeDentro = p && mc && p.ref === mc.ref && Math.min(p.x - mc.caixa.x1, mc.caixa.x2 - p.x, p.y - mc.caixa.y1, mc.caixa.y2 - p.y) > 1.5;
-          if (mc && (!p || padDeDentro)) { alternaBalaoMcu(mc); return; }
-          if (p) { mostraCartao(p, e, true); return; }
-          const sg = trilhaEm(e);
-          if (sg) { alternaBalaoTrilha(sg); return; }
-          mostraCartao(null);
+          if (H.em3d()) return;   /* o 3D trata no pointerdown (abaixo) */
+          if (!trataClique(e)) mostraCartao(null);
+        }, true);
+        /* 1.105.1: no 3D a vista cancela o pointerdown (o mousedown acima nunca chegava) e o clique dela SELECIONAVA o
+           componente como no editor (o corpo pintado que ficava grudado). Aqui: o clique que acerta algo e do
+           Simulador (a vista nao gira nem seleciona); no vazio a vista gira como sempre, e o clique sem arrastar fecha o
+           cartao */
+        alvo.addEventListener('pointerdown', e => {
+          baixo3d = null;
+          if (e.button !== 0 || !H.em3d()) return;
+          if (trataClique(e)) { e.stopPropagation(); return; }
+          baixo3d = { x: e.clientX, y: e.clientY };
+        }, true);
+        alvo.addEventListener('pointerup', e => {
+          if (e.button !== 0 || !H.em3d() || !baixo3d) return;
+          const andou = Math.hypot(e.clientX - baixo3d.x, e.clientY - baixo3d.y) >= 3;
+          baixo3d = null;
+          if (!andou) mostraCartao(null);   /* a vista nao seleciona nada no Simulador (pcbframe: aoClicar sem efeito nos modos sim) */
         }, true);
         alvo.addEventListener('mousemove', e => {
           if (cartao && cartao.classList.contains('fixo') && !cartao.hidden) return;
@@ -813,7 +884,7 @@
           hoverPad = p;
           if (mudou && !H.em3d()) H.redesenha();
         }, { passive: true });
-        alvo.addEventListener('mouseleave', () => { hoverPad = null; if (cartao && !cartao.classList.contains('fixo')) cartao.hidden = true; }, { passive: true });
+        alvo.addEventListener('mouseleave', () => { soltaAnel(); if (cartao && !cartao.classList.contains('fixo')) cartao.hidden = true; }, { passive: true });
         alvo.addEventListener('dblclick', e => e.stopPropagation(), true);
         alvo.addEventListener('contextmenu', e => { e.stopPropagation(); e.preventDefault(); }, true);
       };

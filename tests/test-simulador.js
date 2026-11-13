@@ -403,7 +403,7 @@ caso('1.105.0: o clique no microcontrolador na PCB 2D/3D mostra se o NexoCode es
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
   const sim = ler('hub-simulador.js'), pcb = ler('hub-simulador-pcb.js');
   assert.ok(/mcus: Object\.fromEntries\(/.test(sim) && /conectado: !!n, rodando: !!\(n && n\.rodando\)/.test(sim), 'o Esquema publica os MCUs e a conexão do NexoCode');
-  assert.ok(/function mcuEm\(ev\)/.test(pcb) && /function alternaBalaoMcu\(hit\)/.test(pcb) && /if \(mc && \(!p \|\| padDeDentro\)\) \{ alternaBalaoMcu\(mc\); return; \}/.test(pcb), 'o clique no corpo do MCU (e no pad de dentro dele) abre o balão');
+  assert.ok(/function mcuEm\(ev\)/.test(pcb) && /function alternaBalaoMcu\(hit\)/.test(pcb) && /if \(mc && \(!p \|\| padDeDentro\)\) \{ alternaBalaoMcu\(mc\); return true; \}/.test(pcb), 'o clique no corpo do MCU (e no pad de dentro dele) abre o balão');
   assert.ok(/✕ Desconectado/.test(pcb) && /● Conectado ao NexoCode/.test(pcb) && /if \(b\.mcu\) pintaBalaoMcu\(b\)/.test(pcb), 'desconectado/conectado, atualizado com a simulação');
 });
 caso('1.104.0: só 2D e 3D — o 3D é a bancada, e as peças do NexoCode (Wokwi) ficam sobre a mesa', () => {

@@ -48,4 +48,19 @@ caso('o estado do MCP diz qual MCU está com o NexoCode', () => {
   assert.ok(/nexocode: Object\.fromEntries\(Object\.keys\(st\.nexoCode \|\| \{\}\)/.test(s));
 });
 
+const pcb = fs.readFileSync(path.join(__dirname, '..', 'hub-simulador-pcb.js'), 'utf8');
+const pf = fs.readFileSync(path.join(__dirname, '..', 'pcbframe.js'), 'utf8');
+caso('1.105.1: o clique no 3D chega ao Simulador (pointerdown) e não seleciona o componente do editor', () => {
+  /* a vista 3D da preventDefault no pointerdown: o mousedown nunca chega (so pointerdown, pointerup e click) */
+  assert.ok(/alvo\.addEventListener\('pointerdown', e => \{[\s\S]{0,200}if \(trataClique\(e\)\) \{ e\.stopPropagation\(\); return; \}/.test(pcb), 'o 3D trata o clique no pointerdown');
+  assert.ok(/if \(H\.em3d\(\)\) return;   \/\* o 3D trata no pointerdown/.test(pcb), 'o mousedown não trata de novo no 3D');
+  assert.ok(/if \(AREA_SIM\) return;/.test(pf) && (pf.match(/if \(AREA_SIM\) return;/g) || []).length >= 2, 'aoClicar/aoMenu sem efeito na área do Simulador');
+  assert.ok(/function soltaAnel\(\)/.test(pcb) && /if \(fixo\) soltaAnel\(\);/.test(pcb), 'o anel do pad não gruda');
+});
+caso('1.105.1: a seta 3D sobre o MCU marcado — verde conectado, cinza sem o NexoCode, sai com o balão', () => {
+  assert.ok(/V\.extra\('nexocode-mcu', raiz\)/.test(pcb) && /const cor = a\.con \? 0x22c55e : 0x9ca3af;/.test(pcb));
+  assert.ok(/marcaSetaMcu\(hit, b\.sig === 'rod' \|\| b\.sig === 'par'\);/.test(pcb), 'abre com o balão do MCU');
+  assert.ok(/if \(sa && sa\.con !== con\) \{ sa\.con = con; montaSetas\(\); \}/.test(pcb), 'muda de cor quando conecta/desconecta');
+  assert.ok(/if \(b\.mcu && setasMcu\.delete\(b\.mcu\)\) montaSetas\(\);/.test(pcb), 'fecha com o balão');
+});
 console.log('test-simulador-nexocode: ' + n + ' casos ok');
