@@ -163,21 +163,93 @@
     if (nomes.some(n => /^-/.test(n))) return 0x1f2937;
     return 0xeab308;
   }
+  /* O CABO SEM COLISAO (1.111.2, o dono: "o cabo também não é pra passar por dentro da placa; na hora de traçar o cabo,
+     evite colisão com outros objetos"): antes o cabo subia um pouco e fazia uma barriga no meio — atravessava a placa.
+     Agora: sai pelo topo do componente da ponta (o borne), sobe acima do mais alto que esta no caminho (a placa, os
+     componentes, os itens da bancada), atravessa por cima e desce na outra ponta; a curva pronta e conferida ponto a
+     ponto e sobe mais ate nada encostar */
+  function obstaculos(v) {
+    const T = v.T(), out = [], esp = v.espessura(), bb = st.bb || caixaDaPlaca();
+    out.push({ placa: true, x1: bb.x1, y1: bb.y1, x2: bb.x2, y2: bb.y2, z1: -esp - 0.2, z2: 0.3 });
+    const pl = Hh() && Hh().placa();
+    if (v.caixaDe) for (const c of (pl && pl.components) || []) { const k = v.caixaDe(c.ref); if (k) out.push(Object.assign({ ref: c.ref }, k)); }
+    for (const [id, g] of st.objs) {
+      const bx = new T.Box3().setFromObject(g); if (bx.isEmpty()) continue;
+      out.push({ item: id, x1: bx.min.x, y1: bx.min.y, z1: bx.min.z, x2: bx.max.x, y2: bx.max.y, z2: bx.max.z });
+    }
+    return out;
+  }
+  /* o dono de cada ponta (o componente do pad, o item do terminal): o cabo pode encostar nele */
+  const donoDe = (o, pt) => pt.tipo === 'pad' ? o.ref === pt.ref : pt.tipo === 'item' ? o.item === pt.item : false;
+  function rotaDoFio(T, v, obs, f, a, b) {
+    const R = 0.65 + 0.8;   // o raio do cabo e uma folga
+    const livres = obs.filter(o => !donoDe(o, f.a) && !donoDe(o, f.b));
+    /* a ponta no pad sai pelo topo do componente dele (o fio entra no borne por cima) */
+    const saida = (p, pt) => {
+      if (pt.tipo !== 'pad') return p.clone().add(new T.Vector3(0, 0, 2));
+      const k = obs.find(o => o.ref === pt.ref && p.x >= o.x1 - 0.5 && p.x <= o.x2 + 0.5 && p.y >= o.y1 - 0.5 && p.y <= o.y2 + 0.5);
+      return new T.Vector3(p.x, p.y, Math.max(p.z, k ? k.z2 : p.z) + 2);
+    };
+    let a1 = saida(a, f.a), b1 = saida(b, f.b);
+    /* a coluna da ponta bloqueada (o terminal embaixo da placa): anda de lado ate sair da sombra do obstaculo */
+    const desvia = (p1, alto) => {
+      for (const o of livres) {
+        if (p1.x < o.x1 - R || p1.x > o.x2 + R || p1.y < o.y1 - R || p1.y > o.y2 + R || o.z2 < p1.z || o.z1 > alto) continue;
+        const op = [[o.x1 - R - 3 - p1.x, 0], [o.x2 + R + 3 - p1.x, 0], [0, o.y1 - R - 3 - p1.y], [0, o.y2 + R + 3 - p1.y]].sort((u, w) => Math.hypot(...u) - Math.hypot(...w))[0];
+        return new T.Vector3(p1.x + op[0], p1.y + op[1], p1.z);
+      }
+      return null;
+    };
+    const bate = (p, perto) => livres.some(o => p.x > o.x1 - R && p.x < o.x2 + R && p.y > o.y1 - R && p.y < o.y2 + R && p.z > o.z1 - R && p.z < o.z2 + R) && !perto;
+    /* a altura de passagem: acima de tudo que esta no corredor entre as pontas */
+    const corredor = o => {
+      const vx = b1.x - a1.x, vy = b1.y - a1.y, L2 = vx * vx + vy * vy || 1e-9;
+      const cx = (o.x1 + o.x2) / 2, cy = (o.y1 + o.y2) / 2, t = Math.max(0, Math.min(1, ((cx - a1.x) * vx + (cy - a1.y) * vy) / L2));
+      const px = a1.x + t * vx, py = a1.y + t * vy;
+      return px > o.x1 - R - 2 && px < o.x2 + R + 2 && py > o.y1 - R - 2 && py < o.y2 + R + 2
+        || Math.hypot(px - cx, py - cy) < Math.hypot(o.x2 - o.x1, o.y2 - o.y1) / 2 + R + 2;
+    };
+    let H = Math.max(a1.z, b1.z) + 6;
+    const noCaminho = [];
+    for (const o of livres) if (corredor(o)) { noCaminho.push(o.placa ? 'placa' : o.ref || o.item); H = Math.max(H, o.z2 + R + 3); }
+    const H0 = H, batidas = [];
+    let curva = null;
+    for (let volta = 0; volta < 8; volta++) {
+      const pts = [a, a1];
+      const da = desvia(a1, H); if (da) pts.push(da);
+      pts.push(new T.Vector3((da || a1).x, (da || a1).y, H));
+      const dist = Math.hypot(b1.x - a1.x, b1.y - a1.y);
+      const db = desvia(b1, H);
+      const fimAlto = new T.Vector3((db || b1).x, (db || b1).y, H);
+      if (dist > 20) pts.push(new T.Vector3((pts[pts.length - 1].x + fimAlto.x) / 2, (pts[pts.length - 1].y + fimAlto.y) / 2, H + Math.min(10, dist * 0.04)));
+      pts.push(fimAlto);
+      if (db) pts.push(db);
+      pts.push(b1, b);
+      curva = new T.CatmullRomCurve3(pts, false, 'centripetal');
+      const amostra = curva.getPoints(160);
+      const n = amostra.length;
+      const i = amostra.findIndex((p, k) => bate(p, k < 3 || k > n - 4));
+      if (i < 0) break;
+      batidas.push(i);
+      H += 5;
+    }
+    curva.userData = { H0, H, noCaminho, batidas, a1: a1.toArray(), b1: b1.toArray() };
+    return curva;
+  }
   function desenhaFios() {
     const v = V(); if (!v || !st.gFios) return;
     const T = v.T();
     for (const c of st.gFios.children.slice()) { st.gFios.remove(c); c.geometry && c.geometry.dispose(); }
+    const obs = obstaculos(v);
     for (const f of estado().fios) {
       const a = pontoDe(f.a), b = pontoDe(f.b);
       if (!a || !b) continue;
-      const dist = a.distanceTo(b);
-      const subida = Math.min(18, 6 + dist * 0.12);
-      const meio = new T.Vector3((a.x + b.x) / 2, (a.y + b.y) / 2, Math.max(st.mesaZ + 1.2, Math.min(a.z, b.z) - dist * 0.12));
-      const curva = new T.CatmullRomCurve3([a, a.clone().add(new T.Vector3(0, 0, subida)), meio, b.clone().add(new T.Vector3(0, 0, subida)), b]);
+      const curva = rotaDoFio(T, v, obs, f, a, b);
       const sel = st.sel && st.sel.tipo === 'fio' && st.sel.id === f.id;
       const tubo = new T.Mesh(new T.TubeGeometry(curva, 64, sel ? 1.05 : 0.65, 8, false), new T.MeshStandardMaterial({ color: sel ? 0xfacc15 : corDoFio(f), roughness: 0.45, emissive: sel ? 0x6b4e00 : 0x000000 }));
       tubo.userData.fio = f.id;
       tubo.userData.pts = curva.getPoints(40);
+      tubo.userData.rota = curva.userData;
       st.gFios.add(tubo);
     }
     v.pede();
@@ -564,5 +636,17 @@
   }
 
   /* ativo()/mesaZ(): as pecas do NexoCode (hub-simulador-pecas.js) ficam sobre a mesa quando a bancada esta ligada */
-  window.HubBancada = { ativa, consome, mcp, estado, ativo: () => st.ativo && !!st.raiz, mesaZ: () => st.mesaZ };
+  /* o que os testes e a IA conferem: os cabos (os pontos de cada um) e os obstaculos (as caixas) */
+  function conferirCabos() {
+    const v = V(); if (!v || !st.gFios) return [];
+    const obs = obstaculos(v), b = estado();
+    return st.gFios.children.map(t => {
+      const f = b.fios.find(x => x.id === t.userData.fio); if (!f) return null;
+      const pts = t.userData.pts || [], n = pts.length;
+      const bates = [];
+      pts.forEach((p, i) => { if (i < 2 || i > n - 3) return; for (const o of obs) if (!donoDe(o, f.a) && !donoDe(o, f.b) && p.x > o.x1 && p.x < o.x2 && p.y > o.y1 && p.y < o.y2 && p.z > o.z1 && p.z < o.z2) bates.push(o.placa ? 'placa' : o.ref || o.item); });
+      return { fio: f.id, zMax: Math.max(...pts.map(p => p.z)), bate: [...new Set(bates)], rota: t.userData.rota };
+    }).filter(Boolean);
+  }
+  window.HubBancada = { ativa, consome, mcp, estado, ativo: () => st.ativo && !!st.raiz, mesaZ: () => st.mesaZ, conferirCabos };
 })();

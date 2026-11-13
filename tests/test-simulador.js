@@ -568,6 +568,15 @@ caso('1.111.0: resistência, potência e tolerância do resistor editáveis, com
   assert.ok(sim.includes('a fracao da potencia (1/4, 1/8 W)'), 'a potência em fração (1/4)');
 });
 
+caso('1.111.2: o cabo da bancada desvia (sai pelo topo do borne, passa por cima do que está no caminho) e a trilha diz quem queimou', () => {
+  const banc = fs.readFileSync(path.join(RAIZ, 'hub-bancada.js'), 'utf8'), pcb = fs.readFileSync(path.join(RAIZ, 'hub-simulador-pcb.js'), 'utf8');
+  assert.ok(/function obstaculos\(v\)/.test(banc) && /out\.push\(\{ placa: true/.test(banc) && /v\.caixaDe\(c\.ref\)/.test(banc) && /new T\.Box3\(\)\.setFromObject\(g\)/.test(banc), 'os obstáculos: a placa, os componentes e os itens da bancada');
+  assert.ok(/function rotaDoFio\(T, v, obs, f, a, b\)/.test(banc) && /Math\.max\(p\.z, k \? k\.z2 : p\.z\) \+ 2/.test(banc), 'o cabo sai pelo topo do componente da ponta');
+  assert.ok(/H = Math\.max\(H, o\.z2 \+ R \+ 3\)/.test(banc) && /H \+= 5;/.test(banc) && !/Math\.min\(a\.z, b\.z\) - dist \* 0\.12/.test(banc), 'passa acima do que está no caminho; a curva conferida ponto a ponto (sem a barriga que atravessava a placa)');
+  assert.ok(/conferirCabos/.test(banc), 'a conferência dos cabos para os testes e a IA');
+  assert.ok(/queimou e abriu o circuito/.test(pcb), 'a trilha sem corrente diz que o componente queimou e abriu');
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();

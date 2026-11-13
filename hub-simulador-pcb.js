@@ -1073,8 +1073,13 @@
       const contas = b.contas ? '<div class="f">R = ρ·L/(w·t) = 1,72e-8·' + n(s.len) + ' mm/(' + n(s.w) + ' mm·35 µm) = ' + fmt(s.r, 'Ω')
         + '<br>ΔV = I·R = ' + fmt(s.dv, 'V') + ' · P = I²·R = ' + fmt(s.p, 'W')
         + '<br>ΔT (IPC-2221) ≈ ' + n(s.dT) + ' °C · Imáx p/ +10 °C = ' + fmt(s.imax10, 'A') + '</div>' : '';
+      /* 1.111.2 (o dono: "mesmo sem corrente na trilha o componente tá queimado"): o componente QUEIMADO abre o circuito —
+         a trilha dele fica sem corrente; o balao diz quem queimou e com quanto */
+      const pl = H.placa(), qs = [];
+      for (const c of (pl && pl.components) || []) { const sc = compSim(c.ref); if (sc && sc.queimado && (c.pads || []).some(p => p.net === s.net)) qs.push(c.ref + (sc.motivo ? ' (' + sc.motivo.split(' (')[0] + ')' : '')); }
       return caixaBalao({
         tipo: 'trilha', nome: s.layer, sub: n(s.w) + ' mm', net: s.net, v: v == null ? null : v,
+        nota: qs.length && Math.abs(s.i) < 1e-6 ? 'sem corrente: ' + qs.join(', ') + ' queimou e abriu o circuito' : '',
         acoes: '<button data-b="c" class="' + (b.contas ? 'on' : '') + '" title="Mostrar as contas">contas</button><button data-b="x" title="Fechar">×</button>',
         linhas: [['Corrente', fmt(Math.abs(s.i), 'A')], ['Queda na trilha', fmt(Math.abs(s.dv || 0), 'V')]], extra: contas,
       });

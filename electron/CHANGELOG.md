@@ -4,6 +4,17 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.111.2
+
+- O cabo da bancada não atravessa mais a placa nem outros objetos (o dono: "o cabo também não é pra passar por dentro
+  da placa; na hora de traçar o cabo, evite colisão com outros objetos"). Antes ele subia um pouco das pontas e fazia
+  uma barriga no meio, que entrava na placa. Agora sai pelo topo do componente da ponta (o borne), sobe acima do mais
+  alto que está no caminho (a placa, os componentes e os itens da bancada), atravessa por cima e desce na outra ponta;
+  a ponta embaixo da placa anda de lado até sair dela. A curva pronta é conferida ponto a ponto e sobe mais até nada
+  encostar (HubBancada.conferirCabos() mostra o resultado).
+- A trilha sem corrente ao lado de um componente queimado diz no balão: "sem corrente: LD2 (corrente de 29,78 mA) queimou
+  e abriu o circuito" — o componente queimado abre (como o de verdade), por isso a corrente vai a zero.
+
 ## 1.111.1
 
 O queimado no 3D mais visível (visto no LD2 do TESTE-ESP32-LEDS): o corpo do componente queimado fica VERMELHO (uma capa
