@@ -1062,6 +1062,8 @@
         if (cap && q && q[4] > 0) info.imax = Math.max(q[4], Math.min(info.imax, cap / 1000 * 3));
         const mais = achaPino(info, ['+', 'POS', 'VBAT', 'A', '1'], 1), menos = achaPino(info, ['-', 'NEG', 'GND', 'K', '2'], 2);
         info.tipo = 'bateria'; info.v = v; info.rint = rint; info.cap = cap; info.recarregavel = recarga;
+        /* a net do + e da bateria: o nome dela ("BAT", "VBAT") nao vira outra fonte brigando com ela */
+        if (mais && mais.net && menos && menos.net && ehTerra(menos.net)) produzidas.add(mais.net);
         info.rotulo = 'Bateria ' + fmt(v, 'V') + (q ? ' (' + q[5] + ')' : '') + (cap ? ' ' + (cap >= 1000 ? fmt(cap / 1000, 'Ah') : Math.round(cap) + ' mAh') : '');
         info.campos = [{ k: 'v', rot: 'Tensão (V)', un: 'V', v, dica: '3,7, 12' }, { k: 'rint', rot: 'Resistência interna (Ω)', un: 'Ω', v: rint, dica: '0,15' }, { k: 'cap', rot: 'Capacidade (mAh)', un: '', v: cap, dica: '2000' }];
         const e = fonteV(info, nomeTerm(info, mais), nomeTerm(info, menos), v, 'bateria', rint);

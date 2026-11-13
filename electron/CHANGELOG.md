@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.115.1
+
+Bateria: a net do + de uma bateria (com o − no terra) não vira mais fonte pelo nome — a net "BAT"/"VBAT" virava uma
+fonte de 3,7 V brigando com a bateria (no teste, uma CR2032 aparecia com "carga reversa" de 47 mA).
+
 ## 1.115.0
 
 Simulador — lote 3 da lib Almox e as correções do lote 2 (testado ao vivo no SIM-TIPOS pela outra sessão).
