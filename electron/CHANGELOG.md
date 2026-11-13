@@ -4,6 +4,36 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.115.0
+
+Simulador — lote 3 da lib Almox e as correções do lote 2 (testado ao vivo no SIM-TIPOS pela outra sessão).
+
+- Chave: DIP switch de N vias (N chaves independentes, i ↔ 2N+1−i, cada uma no campo; o clique muda todas), a de
+  2 polos/6 vias, a liga-desliga-liga e a rotativa (campo posição; o clique passa para a próxima); a corrente do
+  contato (do nome: "3A-120V", "50mA") — acima de 1,5× o contato queima e abre. O BTS711 (CI high-side) e os
+  interruptores ópticos (EE-SX, OPB, PHCT, ITR) não são mais chave.
+- Relé: antes da chave (o "1 Form C G5LE-14-DC5" virava chave); a bobina pelo código (Finder .005/.012/.024,
+  G5LE-DC5, Metaltex AX1RC-5V — o "24VDC" depois é do contato); campos tensão e resistência da bobina e corrente do
+  contato. A bobina não puxa abaixo de 75 % (alerta) e queima acima de 1,5×; o contato queima acima de 1,5×; alerta
+  sem diodo de roda livre. Pinos sem nome: 1-2 bobina, 3 comum, 4 NA, 5 NF. Relé de estado sólido (PVG612, AQY/AQW,
+  Crydom): LED na entrada que liga a saída (campos corrente de ligar e corrente da saída).
+- Bateria: a tensão do nome manda ("12 V 50 Ah Li-ion" é 12 V; "500 mah" não é volt), a química dá a tensão que falta e
+  a resistência interna (CR2032 15 Ω, LR44, Li-SOCl₂, CR123A, Li-ion/LiPo, LiFePO4, NiMH, chumbo, 9 V, alcalina);
+  campos tensão, resistência interna e capacidade (autonomia na análise); queima no curto e alerta forte de carga
+  reversa numa não recarregável. Os módulos indicadores de bateria ficam de fora.
+- Regulador: LM2931/LM2937 (eram COMPARADOR), LM2940, LM340, BD450M5, NCV1117, NCP700, RT9080/9045, TS2950, LP2951,
+  MIC5283, LT1129, NCV4274, TL783, TPS7A4001, LM337 (−1,25 V) e o genérico pelo nome ("8.0V 1.0A"); referências
+  REF195, MCP1541, LT1021, AD584; TL431 (referência shunt, com Vref/Ik/P); ICL7660 (inversor −Vin); LM2577 boost com a
+  pinagem dele. Campos Vout, corrente máxima, dropout e Vin máx: Vin acima de 1,1× queima; acima do que o encapsulamento
+  aguenta o térmico desliga (alerta). "canalis" → "canais".
+- DC/DC isolado (Mornsun/Recom/TI/TRACO, os 140 da lib): faixa de entrada, Vout (±), potência e rendimento do nome
+  ("10.8~13.2/5 2W", "24/±15 2W", "E2415S-1WR3", "VRB2405LD-10WR3", "THN30-7215", DCP01xxxx, MT3608); saída com Vout
+  (Imax = P/Vout), a entrada consome Pout/η, sem saída fora da faixa; queima acima de 1,5× Imax ou 1,2× Vin máx.
+- Correções do lote 2: o PTC rearmável disparado fica numa potência quase constante (a do nome; I = P/V) e rearma
+  quando o circuito já não a sustenta; TR600-150 = 150 mA; B59985 = 4,6 Ω/1 A; "5%50W" = 50 W; "5.8mm" não é ohm;
+  o texto do NTC sem repetição; o potenciômetro digital (X9118) não é pot; os campos do IGBT (Vge máx, Vces 600);
+  o choke de modo comum de 4 pinos com 2 enrolamentos; o porta-fusível não abre até pôr a corrente do fusível.
+
 ## 1.114.1
 
 Potenciômetro: o motivo da queima do trecho usa P = V²/R com a resistência de agora (o cursor girado mudava a R antes

@@ -771,10 +771,15 @@
   /* ------------------------------------------------------------------------------------------------ comandos (tela e MCP) */
   function alternaChave(ref) { const inf = info(ref); defineChave(ref, !(inf && inf.fechada)); }
   function defineChave(ref, fechada) {
-    const inf = info(ref); if (!inf || !inf.sw) return false;
+    const inf = info(ref); if (!inf) return false;
+    /* 1.115.0 (lote 3): a chave de N posicoes passa para a proxima a cada clique; o DIP e a de 2 polos mudam todos os contatos */
+    if (inf.posicoes) { defineParam(ref, 'posicao', ((inf.posicao || 0) + 1) % inf.posicoes + 1); return true; }
+    if (!inf.sw && !inf.aplicaChave) return false;
     if (!fechada) inf.doNexoCode = false;
-    inf.fechada = !!fechada; inf.sw.fechada = !!fechada;
-    if (inf.sw2) inf.sw2.fechada = !fechada;
+    inf.fechada = !!fechada;
+    if (inf.aplicaChave) inf.aplicaChave(!!fechada);
+    else { inf.sw.fechada = !!fechada; if (inf.sw2) inf.sw2.fechada = !fechada; }
+    if (inf.dip) { delete st.cfg.params[ref]; inf.rotulo = inf.rotulo.replace(/\(\d+\)$/, '(' + inf.dip.map(e => e.fechada ? '1' : '0').join('') + ')'); }
     inf.rotulo = inf.rotulo.replace(/\((fechad[oa]|abert[oa])\)/, fechada ? '(fechado)' : '(aberto)');
     st.cfg.chaves[ref] = !!fechada; gravaCfg();
     if (st.modo === 'dc') st.res = st.sim.dc(); else st.res = st.sim.passo(1);

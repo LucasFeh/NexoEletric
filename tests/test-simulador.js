@@ -725,6 +725,82 @@ caso('1.114.0 (lote 2 da lib Almox): MOSFET/IGBT, potenciômetro, termistor, fus
   perto(um({ ref: 'LD1', comment: 'Sensor Emissores infravermelhos Infrared 890nm 2V 20mA OP233', sym: 'LED [PTH]', pinos: [pin(1, 'A', 'A'), pin(2, 'K', 'K')] }).vf, 1.2, 1e-9, 'o IR com "2V" no nome (é o máximo)');
 });
 
+caso('1.115.0 (lote 3 da lib Almox): chave/DIP, relé/SSR, bateria, regulador/referência, DC/DC; e as correções do lote 2', () => {
+  const roda = (comps, cfg) => { const mt = C.monta(comps, cfg || {}); const s = M.cria(mt.elementos, { terra: mt.terra }); return { a: C.analisa(mt, s.dc()).comps, mt, s }; };
+  const um = (c, cfg) => C.monta([c], cfg || {}).comps.get(c.ref);
+  const P = (n, nm, net) => pin(n, nm || '', net);
+  /* relé: G5LE 5 V (não chave), a bobina puxa, o contato fecha; queima do contato e da bobina; o diodo de roda livre */
+  const rele = (vb, carga, extra) => roda([{ ref: 'K1', comment: '5Vdc 1 Form C (SPDT-NO, NC) G5LE-14-DC5', sym: 'RELE [PINAGEM A DEFINIR]', pinos: [P(1, '', '+' + vb + 'V'), P(2, '', 'GND'), P(3, '', '+12V'), P(4, '', 'NA')] },
+    { ref: 'R1', valor: carga, pinos: [P(1, '1', 'NA'), P(2, '2', 'GND')] }].concat(extra || []));
+  const k1 = rele(5, '12');
+  assert.ok(k1.mt.comps.get('K1').tipo === 'rele' && k1.mt.comps.get('K1').vbob === 5, 'G5LE: relé de 5 V');
+  perto(Math.abs(k1.a.R1.corrente), 1, 0.02, 'a bobina puxou e o contato NA ligou a carga');
+  assert.ok(k1.a.K1.alertas.some(a => /roda livre/.test(a)), 'sem diodo de roda livre: alerta');
+  assert.ok(/contato queimou/.test(rele(5, '0.5').a.K1.queima || ''), '24 A no contato de 10 A queima');
+  assert.ok(/bobina queimou/.test(rele(9, '12').a.K1.queima || ''), '9 V na bobina de 5 V queima');
+  assert.ok(!rele(5, '12', [{ ref: 'D1', comment: '1N4148', sym: 'DIODO RETIFICADOR [PTH]', pinos: [P(1, 'A', 'GND'), P(2, 'K', '+5V')] }]).a.K1.alertas.some(a => /roda livre/.test(a)), 'com o diodo na bobina: sem o alerta');
+  assert.strictEqual(um({ ref: 'K1', comment: '30.22.7.005.0010', sym: 'RELE [PINAGEM A DEFINIR]', pinos: [P(1), P(2), P(3), P(4)] }).vbob, 5, 'Finder .005 = 5 V');
+  assert.strictEqual(um({ ref: 'K1', comment: 'AX1RC-5V 15A 24VDC Metaltex', sym: 'RELE [PINAGEM A DEFINIR]', pinos: [P(1), P(2), P(3), P(4)] }).vbob, 5, 'Metaltex AX1RC-5V: a bobina é 5 V');
+  /* relé de estado sólido PVG612: o LED liga a saída */
+  const ssr = (r) => roda([{ ref: 'U1', comment: 'PVG612PBF', sym: 'RELE [6P]', pinos: [P(1, '', 'LA'), P(2, '', 'GND'), P(3, '', 'NC'), P(4, '', '+12V'), P(5, '', 'S'), P(6, '', 'OUT')] },
+    { ref: 'R1', valor: r, pinos: [P(1, '1', '+5V'), P(2, '2', 'LA')] }, { ref: 'R2', valor: '100', pinos: [P(1, '1', 'OUT'), P(2, '2', 'GND')] }]);
+  const so = ssr('330'); assert.ok(so.mt.comps.get('U1').tipo === 'ssr' && Math.abs(so.a.R2.corrente) > 0.1, 'PVG612: 10 mA no LED fecha a saída: ' + so.a.R2.corrente);
+  assert.ok(Math.abs(ssr('100k').a.R2.corrente) < 1e-3, 'com 40 µA no LED a saída fica aberta');
+  /* chave: DIP (cada chave), 3 posições, o contato queima */
+  const dipP = Array.from({ length: 8 }, (_, i) => P(i + 1, String(i + 1), i < 4 ? '+5V' : 'L' + (8 - i)));
+  const dip = (prm) => roda([{ ref: 'S1', comment: 'azul 4 vias 180° DS04', sym: 'DIP SWITCH 4V [PTH]', pinos: dipP }].concat([1, 2, 3, 4].map(k => ({ ref: 'R' + k, valor: '1k', pinos: [P(1, '1', 'L' + k), P(2, '2', 'GND')] }))), { params: prm || {} });
+  const d2 = dip({ S1: { sw2: 1 } });
+  assert.ok(Math.abs(d2.a.R2.corrente) > 4e-3 && Math.abs(d2.a.R1.corrente) < 1e-6, 'DIP: só a chave 2 fechada (2–7) liga a carga 2');
+  const tres = pos => roda([{ ref: 'S1', comment: 'Liga, Desliga, Liga 1P 3A-120V', sym: 'CHAVE', pinos: [P(1, '1', 'A'), P(2, '2', '+12V'), P(3, '3', 'B')] },
+    { ref: 'R5', valor: '1k', pinos: [P(1, '1', 'A'), P(2, '2', 'GND')] }, { ref: 'R6', valor: '1k', pinos: [P(1, '1', 'B'), P(2, '2', 'GND')] }], { params: { S1: { posicao: pos } } }).a;
+  assert.ok(Math.abs(tres(1).R5.corrente) > 0.01 && Math.abs(tres(2).R5.corrente) < 1e-6 && Math.abs(tres(2).R6.corrente) < 1e-6 && Math.abs(tres(3).R6.corrente) > 0.01, 'liga-desliga-liga');
+  const tq = roda([{ ref: 'S1', comment: 'Switch 6x6 Flat 4 vias 24V 50mA', sym: 'CHAVE 4V [PTH]', pinos: [P(1, '1', '+12V'), P(2, '2', '+12V'), P(3, '3', 'X'), P(4, '4', 'X')] },
+    { ref: 'R1', valor: '10', pinos: [P(1, '1', 'X'), P(2, '2', 'GND')] }], { chaves: { S1: true } }).a.S1;
+  assert.ok(/contato queimou/.test(tq.queima || ''), 'o tátil de 50 mA com 1,2 A: o contato queima');
+  /* bateria: a tensão do nome, a química, o curto, a carga reversa */
+  const bat = (nome, sym) => um({ ref: 'BT1', comment: nome, sym: sym || 'BATERIA', pinos: [P(1, '+', 'A'), P(2, '-', 'GND')] });
+  assert.ok(bat('12 V 50 Ah - Li-ion Litio').v === 12 && bat('12 V 50 Ah - Li-ion Litio').cap === 50000, '12 V 50 Ah');
+  assert.ok(bat('500 mah 501240').v === 3.7 && bat('500 mah 501240').cap === 500, 'o "500 mah" não é volt');
+  assert.ok(bat('Para Paquímetro Lr44 / A76 (Elgin)').v === 1.5 && bat('Panasonic 3v CR2032').rint === 15, 'LR44 1,5 V; CR2032 15 Ω');
+  assert.ok(bat('Indicador bateria 2S a 8S 5V-30V 10mA JX-4615').tipo === 'ignorado', 'o indicador não é bateria');
+  const curto = roda([{ ref: 'BT1', comment: 'Panasonic 3v CR2032', sym: 'BATERIA', pinos: [P(1, '+', 'VB'), P(2, '-', 'GND')] }, { ref: 'R1', valor: '10', pinos: [P(1, '1', 'VB'), P(2, '2', 'GND')] }]).a.BT1;
+  assert.ok(/curto/.test(curto.queima || ''), 'CR2032 em 10 Ω: curto: ' + curto.corrente);
+  const rev = roda([{ ref: 'BT1', comment: 'Panasonic 3v CR2032', sym: 'BATERIA', pinos: [P(1, '+', 'VB'), P(2, '-', 'GND')] }, { ref: 'R1', valor: '1k', pinos: [P(1, '1', '+5V'), P(2, '2', 'VB')] }]).a.BT1;
+  assert.ok(rev.alertas.some(a => /não recarregável/.test(a)), 'corrente entrando numa CR2032: alerta');
+  /* regulador: o LM2937 não é comparador; Vin acima do máximo queima; TL431; ICL7660 */
+  const reg = vin => roda([{ ref: 'U1', comment: 'LM2937ET-5.0', sym: 'REGULADOR [3P]', pinos: [P(1, '', '+' + vin + 'V'), P(2, '', 'GND'), P(3, '', 'V5')] }, { ref: 'R1', valor: '100', pinos: [P(1, '1', 'V5'), P(2, '2', 'GND')] }]);
+  const r12 = reg(12);
+  assert.ok(r12.mt.comps.get('U1').tipo === 'regulador', 'LM2937 é regulador'); perto(Math.abs(r12.a.R1.corrente), 0.05, 0.002, 'saída de 5 V');
+  assert.ok(/entrada de/.test(reg(40).a.U1.queima || ''), '40 V no LM2937 (26 V) queima');
+  const tl = roda([{ ref: 'U2', comment: 'TL431', sym: 'REFERENCIA DE TENSAO [3P]', pinos: [P(1, 'REF', 'K'), P(2, 'A', 'GND'), P(3, 'K', 'K')] }, { ref: 'R1', valor: '1k', pinos: [P(1, '1', '+12V'), P(2, '2', 'K')] }]);
+  perto(tl.s.dc().v.K, 2.495, 0.05, 'TL431 com REF no K: 2,495 V');
+  const inv = roda([{ ref: 'U3', comment: 'ICL7660ESA+', sym: 'REGULADOR [8P]', pinos: [1, 2, 3, 4, 5, 6, 7, 8].map(k => P(k, '', k === 8 ? '+5V' : k === 3 ? 'GND' : k === 5 ? 'NEG' : 'X' + k)) }, { ref: 'R1', valor: '10k', pinos: [P(1, '1', 'NEG'), P(2, '2', 'GND')] }]);
+  assert.ok(inv.s.dc().v.NEG < -4.8, 'ICL7660: −5 V: ' + inv.s.dc().v.NEG);
+  /* DC/DC isolado */
+  const dc = (vin, r) => roda([{ ref: 'U4', comment: '10.8~13.2/5 2W A1205S', sym: 'CONVERSOR DC/DC [PINAGEM A DEFINIR]', pinos: [P(1, '', 'GND'), P(2, '', '+' + vin + 'V'), P(3, '', 'GND'), P(4, '', 'V5I')] },
+    { ref: 'R1', valor: r, pinos: [P(1, '1', 'V5I'), P(2, '2', 'GND')] }]);
+  const d12 = dc(12, '25');
+  perto(Math.abs(d12.a.R1.corrente), 0.2, 0.01, 'DC/DC: 5 V em 25 Ω'); assert.ok(d12.a.U4.corrente > 0.19, 'a corrente de saída');
+  assert.ok(/sobrecarregada/.test(dc(12, '5').a.U4.queima || ''), '1 A num de 2 W (0,4 A) queima');
+  assert.ok(dc(8, '25').a.U4.alertas.some(a => /abaixo da faixa/.test(a)), 'Vin abaixo da faixa: sem saída');
+  /* correções do lote 2 */
+  assert.strictEqual(um({ ref: 'F1', comment: '22R 250V 300mA 650-TR600-150F', sym: 'TERMISTOR [PTH]', pinos: [P(1), P(2)] }).ihold, 0.15, 'TR600-150 = 150 mA');
+  assert.ok(um({ ref: 'RT1', comment: 'B59985C0120A070', sym: 'TERMISTOR', pinos: [P(1), P(2)] }).r === 4.6, 'B59985 = 4,6 Ω');
+  assert.strictEqual(C.leValor('(De Potência) 50R 5%50W').potencia, 50, 'o "5%50W"');
+  assert.ok(!(um({ ref: 'RT1', comment: '3.4W 550mA 5.8mm', sym: 'TERMISTOR', pinos: [P(1), P(2)] }).r === 5.8), 'o "5.8mm" não é ohm');
+  assert.ok(!/a 25 °C/.test(um({ ref: 'RT1', comment: '10K', sym: 'TERMISTOR', pinos: [P(1), P(2)] }).rotulo), 'o NTC a 25 °C sem a repetição');
+  assert.ok(um({ ref: 'RV1', comment: 'X9118TV14Z', sym: 'POTENCIOMETRO', pinos: [P(1), P(2), P(3, 'W')] }).tipo !== 'pot', 'o potenciômetro digital não é pot');
+  assert.ok(um({ ref: 'Q1', comment: 'IKP20N60T', sym: 'IGBT [PTH]', pinos: [P(1, 'G'), P(2, 'C'), P(3, 'E')] }).campos.some(x => /Vge máx/.test(x.rot)), 'IGBT: Vge máx');
+  const cm = um({ ref: 'L1', comment: 'Chokes / Filtros de Modo Comum 11mH 600mA', sym: 'INDUTOR [PTH]', pinos: [P(1), P(2), P(3), P(4)] });
+  assert.ok(cm.tipo === 'indutor' && cm.elementos.filter(e => e.tipo === 'L').length === 2, 'o choke de modo comum: 2 enrolamentos');
+  const porta = roda([{ ref: 'F1', comment: 'para PCB (5x20mm)', sym: 'FUSIVEL [PTH]', pinos: [P(1, '', '+12V'), P(2, '', 'X')] }, { ref: 'R1', valor: '1', pinos: [P(1, '1', 'X'), P(2, '2', 'GND')] }]).a.F1;
+  assert.ok(!porta.queima, 'o porta-fusível sem fusível definido não abre');
+  const pp = C.monta([{ ref: 'F1', comment: 'Rearmável (PPTC) 60V 0.3A', sym: 'FUSIVEL PTC', pinos: [P(1, '', '+12V'), P(2, '', 'X')] }, { ref: 'R1', valor: '1', pinos: [P(1, '1', 'X'), P(2, '2', 'GND')] }], {});
+  const sp = M.cria(pp.elementos, { terra: pp.terra }); sp.dc(); sp.passo(30);
+  const ap = C.analisa(pp, sp.passo(1)).comps.F1;
+  assert.ok(ap.disparado && Math.abs(ap.corrente) < 0.15 && Math.abs(ap.corrente) > 0.05, 'o PPTC disparado em 12 V fica em ~P/V (1 W → ~85 mA): ' + ap.corrente);
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();
