@@ -247,6 +247,12 @@
       const rot = { resistor: 'Resistência', capacitor: 'Capacitância', indutor: 'Indutância' }[sc.tipo];
       const lin = (k, r, v, dica) => '<div class="ed"><span>' + escB(r) + '</span><input data-ed-in="' + k + '" value="' + escB(v == null ? '' : v) + '" placeholder="' + escB(dica) + '"><button data-ed="' + k + '">aplicar</button></div>';
       if (rot) h += lin('valor', rot, sc.valor, '330, 4k7, 100n');
+      /* 1.111.0: a potencia nominal e a tolerancia do resistor */
+      if (sc.tipo === 'resistor') {
+        const pot = p => { for (const d of [2, 4, 8, 16]) if (Math.abs(p * d - 1) < 1e-9) return '1/' + d; return String(+(+p).toFixed(3)).replace('.', ','); };
+        h += lin('potencia', 'Potência (W)', sc.potencia ? pot(sc.potencia) : '', '1/4, 0,5');
+        h += lin('tol', 'Tolerância (%)', sc.tol ? String(sc.tol).replace('.', ',') : '', '5, 1, 10');
+      }
       if (sc.tipo === 'led') {
         h += lin('vf', 'Tensão de ativação', sc.vf != null ? String(+(+sc.vf).toFixed(2)).replace('.', ',') : '', 'V, ex. 2,1');
         h += lin('imax', 'Corrente máxima', sc.imax != null ? String(+(sc.imax * 1000).toFixed(1)).replace('.', ',') + 'm' : '', 'A, ex. 20m');
@@ -1177,13 +1183,16 @@
       const vs = pinos.map(p => p.v).filter(isFinite);
       const v = sc && sc.vdd != null ? sc.vdd : vs.length === 2 ? Math.abs(vs[0] - vs[1]) : vs.length ? Math.max(...vs.map(Math.abs)) : null;
       const i = sc && isFinite(sc.corrente) ? Math.abs(sc.corrente) : pinos.length ? Math.max(...pinos.map(p => Math.abs(p.i || 0))) : null;
-      const sig = JSON.stringify([v, i, sc && sc.p, sc && sc.queimado, sc && sc.valor, sc && sc.vf, sc && sc.imax, sc && sc.brilho != null ? +sc.brilho.toFixed(2) : null]);
+      const sig = JSON.stringify([v, i, sc && sc.p, sc && sc.queimado, sc && sc.valor, sc && sc.vf, sc && sc.imax, sc && sc.potencia, sc && sc.tol, sc && sc.brilho != null ? +sc.brilho.toFixed(2) : null]);
       if (b.sig === sig) return;
       b.sig = sig;
       let h = caixaBalao({
         tipo: sc ? sc.tipo : '', nome: ref, sub: sc && sc.valor ? sc.valor : '', net: vs.length === 2 ? 'tensão sobre ele' : '',
         v, nota: sc ? '' : 'fora da simulação', acoes: '<button data-x title="Fechar">×</button>',
-        linhas: sc ? [['Corrente', i != null && i > 1e-10 ? fmt(i, 'A') : '0 A'], ['Potência', sc.p != null ? fmt(Math.abs(sc.p), 'W') : ''], sc.tipo === 'led' ? ['Brilho', Math.round(Math.min(1, sc.brilho || 0) * 100) + ' %'] : null] : [],
+        linhas: sc ? [['Corrente', i != null && i > 1e-10 ? fmt(i, 'A') : '0 A'],
+          ['Potência', sc.p != null ? fmt(Math.abs(sc.p), 'W') + (sc.potencia ? ' de ' + fmt(sc.potencia, 'W') + ' (' + Math.round(Math.abs(sc.p) / sc.potencia * 100) + ' %)' : '') : ''],
+          sc.tol ? ['Valor real', fmt(sc.rReal, 'Ω') + ' (±' + String(sc.tol).replace('.', ',') + ' %)'] : null,
+          sc.tipo === 'led' ? ['Brilho', Math.round(Math.min(1, sc.brilho || 0) * 100) + ' %'] : null] : [],
         extra: edicaoDoComp(ref, sc, true), lib: (sc && sc.lib) || (c && c.comment) || '', cor: corDoComp(sc), queimado: !!(sc && sc.queimado),
       }).replace('<div class="nota"></div>', '');
       if (sc && sc.queimado) h = h.replace('<div class="vv', '<div class="nota" style="color:#fca5a5">' + escB(sc.motivo || 'passou do limite') + '</div><div class="vv');

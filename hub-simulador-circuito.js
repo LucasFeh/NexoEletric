@@ -322,8 +322,17 @@
         let r = val.v;
         if (!(r >= 0)) { r = 10e3; info.avisos.push('sem valor: simulando com 10 kΩ (mude o Value ou em Valores da simulação)'); }
         if (r === 0) r = 1e-3;
-        info.tipo = 'resistor'; info.rotulo = 'Resistor ' + fmt(r, 'Ω');
-        info.r = r; info.potencia = val.potencia || potenciaDoFootprint(c.footprint);
+        /* 1.111.0 (o dono: "quero um campo de valor de resistência / potência / tolerância e ver o efeito na simulação"):
+           cfg.params[ref] = {potencia (W), tol (%)}. A potencia nominal muda quando ele queima (acima de 2x); a
+           tolerancia faz o resistor DE VERDADE: o valor real cai num ponto da faixa (fixo por componente, sempre entre
+           a metade e a borda da faixa, para o efeito aparecer) e e ele que entra no circuito */
+        const prmR = (cfg.params && cfg.params[ref]) || {};
+        const nominal = r;
+        info.tol = isFinite(+prmR.tol) && +prmR.tol > 0 ? +prmR.tol : null;
+        if (info.tol) r = nominal * (1 + info.tol / 100 * desvioDe(ref));
+        info.tipo = 'resistor'; info.rotulo = 'Resistor ' + fmt(nominal, 'Ω') + (info.tol ? ' ±' + String(info.tol).replace('.', ',') + ' %' : '');
+        info.r = r; info.rNominal = nominal;
+        info.potencia = isFinite(+prmR.potencia) && +prmR.potencia > 0 ? +prmR.potencia : (val.potencia || potenciaDoFootprint(c.footprint));
         resistor(info, p1, p2, r);
         continue;
       }
@@ -950,6 +959,13 @@
     return null;
   }
 
+  /* o ponto da faixa de tolerancia de cada resistor: -1..-0,5 ou 0,5..1 (fixo pelo nome: o mesmo a cada simulacao) */
+  function desvioDe(ref) {
+    let h = 2166136261;
+    for (const ch of String(ref)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+    const u = (h % 10007) / 10006;
+    return (u < 0.5 ? -1 : 1) * (0.5 + Math.abs(u - 0.5));
+  }
   function potenciaDoFootprint(fp) {
     const f = norm(fp);
     const m = /\b(0201|0402|0603|0805|1206|1210|1812|2010|2512)\b/.exec(f);
@@ -1004,6 +1020,8 @@
           if (Math.abs(ia) > 1e-12) out.linhas.push(L('Sentido', 'a corrente vai de ' + (a.net || 'pino ' + a.num) + ' para ' + (b.net || 'pino ' + b.num), (a.net || a.num) + ' → ' + (b.net || b.num)));
           out.linhas.push(L('Potência', 'P = V² / R = (' + fmt(vr, 'V') + ')² / ' + fmt(info.r, 'Ω'), fmt(vr * vr / info.r, 'W')));
           if (info.potencia && vr * vr / info.r > info.potencia * 0.8) out.alertas.push('dissipa ' + fmt(vr * vr / info.r, 'W') + ': ' + (vr * vr / info.r > info.potencia ? 'ACIMA' : 'perto') + ' da potência nominal (' + fmt(info.potencia, 'W') + ')');
+          if (info.tol) out.linhas.push(L('Tolerância', fmt(info.rNominal, 'Ω') + ' ±' + String(info.tol).replace('.', ',') + ' %: este resistor mede ' + fmt(info.r, 'Ω'), fmt(info.r, 'Ω')));
+          out.potenciaNominal = info.potencia; out.tol = info.tol; out.rReal = info.r; out.rNominal = info.rNominal;
           out.corrente = ia; out.de = ia >= 0 ? a : b;
           break;
         }

@@ -171,10 +171,18 @@
     if (!Object.keys(p).length) delete st.cfg.params[ref];
     gravaCfg(); st.sujo = true; agenda();
   }
+  /* a potencia como se escreve: 1/4 W, 0,5 W, 2 W */
+  function fmtPot(p) {
+    for (const d of [2, 4, 8, 16]) if (Math.abs(p * d - 1) < 1e-9) return '1/' + d;
+    return String(+(+p).toFixed(3)).replace('.', ',');
+  }
   /** troca o componente queimado por um novo */
   function trocaComponente(ref) { delete st.cfg.queimados[ref]; gravaCfg(); st.sujo = true; agenda(); }
   /* o valor digitado: 4k7, 330R, 1,5 mA, 100n — numero com prefixo (para os parametros do LED) */
   function numeroDe(txt) {
+    /* 1.111.0: a fracao da potencia (1/4, 1/8 W) */
+    const fr = /^\s*(\d+)\s*\/\s*(\d+)/.exec(String(txt || ''));
+    if (fr && +fr[2] > 0) return +fr[1] / +fr[2];
     const m = /^\s*([-+]?\d+(?:[.,]\d+)?)\s*([pnuµmkKM]?)/.exec(String(txt || ''));
     if (!m) return NaN;
     const k = { p: 1e-12, n: 1e-9, u: 1e-6, 'µ': 1e-6, m: 1e-3, k: 1e3, K: 1e3, M: 1e6 }[m[2]] || 1;
@@ -201,7 +209,8 @@
         const vdd = Array.isArray(inf.alim) && inf.alim[0] && inf.alim[0].net ? vMostra(inf.alim[0].net) : undefined;
         return [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor, rpm: c.rpm, corrente: c.corrente,
           tipo: inf.tipo || '', lib: String(cp.comment || cp.valor || cp.sym || '').trim(), titulo: c.titulo || inf.rotulo || '', vdd,
-          queimado: !!c.queimado, motivo: c.motivo || '', valor: inf.valorTxt || '', vf: inf.vf, imax: inf.imax, editado: st.cfg.valores[r] != null || !!st.cfg.params[r] }];
+          queimado: !!c.queimado, motivo: c.motivo || '', valor: inf.valorTxt || '', vf: inf.vf, imax: inf.imax, editado: st.cfg.valores[r] != null || !!st.cfg.params[r],
+          potencia: inf.potencia, tol: inf.tol, rReal: inf.r, rNominal: inf.rNominal }];
       })),
       /* 1.105.0: os microcontroladores e a conexao com o NexoCode (o clique no MCU na PCB 2D/3D mostra o balao) */
       mcus: Object.fromEntries((st.comps || []).filter(c => { const inf = info(c.ref); return inf && inf.tipo === 'mcu'; }).map(c => {
@@ -1025,6 +1034,11 @@
         if (inf && /^(resistor|capacitor|indutor)$/.test(inf.tipo)) {
           const rot = { resistor: 'Resistência', capacitor: 'Capacitância', indutor: 'Indutância' }[inf.tipo];
           campo(rot, inf.valorTxt, inf.tipo === 'resistor' ? '330, 4k7, 1M' : inf.tipo === 'capacitor' ? '100n, 10u' : '10u', v => defineValor(h.ref, v));
+        }
+        /* 1.111.0: a potencia nominal (queima acima de 2x) e a tolerancia (o valor real dentro da faixa) do resistor */
+        if (inf && inf.tipo === 'resistor') {
+          campo('Potência (nominal)', inf.potencia ? fmtPot(inf.potencia) : '', 'em W, ex. 1/4, 0,5', v => defineParam(h.ref, 'potencia', numeroDe(v)));
+          campo('Tolerância (%)', inf.tol ? String(inf.tol).replace('.', ',') : '', 'ex. 5, 1, 10', v => defineParam(h.ref, 'tol', numeroDe(v)));
         }
         if (inf && inf.tipo === 'led') {
           campo('Tensão de ativação (Vf)', inf.vf != null ? String(+inf.vf.toFixed(2)).replace('.', ',') : '', 'em V, ex. 2,1', v => defineParam(h.ref, 'vf', numeroDe(v)));
@@ -1937,7 +1951,7 @@
       case 'gpio': garante(); defineGpio(a.ref + '-' + a.pino, a.modo ? { modo: a.modo, duty: a.duty, f: a.f } : null); monta(); return { pino: a.ref + '-' + a.pino, ...(st.an && st.an.pinos[a.ref + '-' + a.pino] || {}) };
       case 'terra': garante(); st.cfg.terra = (a.nets || []).slice(); gravaCfg(); monta(); return { terra: st.mt.terra };
       case 'parametros': garante(); if (!info(a.ref)) throw new Error('componente ' + a.ref + ' fora da simulação');
-        for (const k of ['vf', 'imax']) if (a[k] !== undefined) defineParam(a.ref, k, a[k] == null ? null : (typeof a[k] === 'number' ? a[k] : numeroDe(a[k])));
+        for (const k of ['vf', 'imax', 'potencia', 'tol']) if (a[k] !== undefined) defineParam(a.ref, k, a[k] == null ? null : (typeof a[k] === 'number' ? a[k] : numeroDe(a[k])));
         monta(); return st.an && st.an.comps[a.ref];
       case 'trocar': garante(); trocaComponente(a.ref); monta(); return st.an && st.an.comps[a.ref];
       case 'queimados': return { queimados: Object.assign({}, st.cfg.queimados) };

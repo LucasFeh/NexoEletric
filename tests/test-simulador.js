@@ -547,6 +547,27 @@ caso('1.110.2: o componente marcado/selecionado com a caixa em volta do corpo in
   assert.ok(/for \(const b of baloes\) \{\n\s+const ref = b\.comp \|\| b\.mcu/.test(pcb), 'no 2D também');
 });
 
+caso('1.111.0: resistência, potência e tolerância do resistor editáveis, com efeito na simulação', () => {
+  const comps = [
+    { ref: 'R1', valor: '100', footprint: 'R0603', pinos: [pin(1, '1', '+5V'), pin(2, '2', 'GND')] }];
+  const roda2 = cfg => { const mt = C.monta(comps, cfg); const s = M.cria(mt.elementos, { terra: mt.terra }); return { a: C.analisa(mt, s.dc()).comps, mt }; };
+  const base = roda2({}), r0 = base.mt.comps.get('R1');
+  perto(Math.abs(base.a.R1.corrente), 0.05, 1e-6, '5 V / 100 Ω');
+  assert.ok(!r0.tol && r0.r === 100, 'sem tolerância: o nominal');
+  const t = roda2({ params: { R1: { tol: 10 } } }), rt = t.mt.comps.get('R1');
+  assert.ok(rt.r !== 100 && Math.abs(rt.r - 100) >= 5 - 1e-9 && Math.abs(rt.r - 100) <= 10 + 1e-9, 'com ±10 % o valor real cai entre a metade e a borda da faixa: ' + rt.r);
+  perto(Math.abs(t.a.R1.corrente), 5 / rt.r, 1e-6, 'e é o valor real que conduz');
+  assert.ok(t.a.R1.linhas.some(l => /Tolerância/.test(l.k || l[0] || JSON.stringify(l))), 'a linha da tolerância na análise');
+  perto(roda2({ params: { R1: { tol: 10 } } }).mt.comps.get('R1').r, rt.r, 1e-12, 'o mesmo ponto da faixa a cada simulação');
+  const p = roda2({ params: { R1: { potencia: 0.125 } } });
+  perto(p.mt.comps.get('R1').potencia, 0.125, 1e-12, 'a potência nominal editada');
+  perto(p.a.R1.potenciaNominal, 0.125, 1e-12, 'e vai para a análise (a queima usa > 2× ela)');
+  const sim = fs.readFileSync(path.join(RAIZ, 'hub-simulador.js'), 'utf8'), pcb = fs.readFileSync(path.join(RAIZ, 'hub-simulador-pcb.js'), 'utf8');
+  assert.ok(/campo\('Potência \(nominal\)'/.test(sim) && /campo\('Tolerância \(%\)'/.test(sim) && /\['vf', 'imax', 'potencia', 'tol'\]/.test(sim), 'no menu do esquema e no MCP');
+  assert.ok(/lin\('potencia', 'Potência \(W\)'/.test(pcb) && /lin\('tol', 'Tolerância \(%\)'/.test(pcb) && /\['Valor real', /.test(pcb), 'no balão da placa');
+  assert.ok(sim.includes('a fracao da potencia (1/4, 1/8 W)'), 'a potência em fração (1/4)');
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();

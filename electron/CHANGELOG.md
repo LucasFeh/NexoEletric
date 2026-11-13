@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.111.0
+
+Resistência, potência e tolerância do resistor na simulação (o dono: "quero um campo de valor de resistência /
+potência / tolerância, e quero que o efeito seja visto na simulação na alteração deles").
+
+- No balão do componente (o clique no corpo no 2D/3D, e no pino) e no menu do componente no esquema do Simulador:
+  **Resistência**, **Potência (W)** — aceita 1/4, 0,5, 250m — e **Tolerância (%)**.
+- Potência: é a nominal; o resistor que dissipa mais que o dobro QUEIMA (abre, vermelho com fumaça). O balão mostra
+  quanto ele dissipa e a porcentagem da nominal ("Potência 0,12 W de 1/4 W (48 %)").
+- Tolerância: o resistor de verdade — o valor real cai num ponto da faixa (fixo para cada componente, entre a metade
+  e a borda, para o efeito aparecer) e é ele que entra no circuito: a corrente muda. O balão mostra "Valor real" e a
+  análise a linha da tolerância.
+- "↺ Voltar ao valor do esquema" desfaz tudo. Pela IA: sim_controlar parametros {ref, potencia, tol}.
+
 ## 1.110.2
 
 A seleção do componente em volta dele inteiro (o dono: "a seleção do componente não dá pra ser ele todo? tipo, em volta
