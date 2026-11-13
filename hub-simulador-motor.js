@@ -23,6 +23,8 @@
      const s = HubSimMotor.cria(elementos, {terra:['GND'], dt:1e-4})
      s.dc()            -> resultado (ponto de operacao; reinicia o tempo)
      s.passo(n)        -> resultado (n passos de transiente de s.dt)
+     s.anda(n)         -> t (os mesmos n passos sem montar o resultado; o laco da tela)
+     s.somador() / s.soma(acc) / s.media(acc) / s.zera(acc)   a media dos passos (tensoes, correntes, potencias)
      s.resultado()     -> {t, ok, iter, v:{no: volts}, el:[{ref, i:[...], p}], flutuantes:[no], aviso}
      s.tensao(no)      s.correntes(el)
    Correntes: i[k] = corrente que ENTRA no elemento pelo terminal k (vinda do no). Potencia p = soma v[k]*i[k]
@@ -164,8 +166,9 @@
         const nj = e._n[j];
         if (!nj) continue;
         const h = 1e-6 * Math.max(1, Math.abs(v[j]));
-        const vv = v.slice(); vv[j] += h;
-        const I1 = e.f(vv, e, ctxNL);
+        const vj = v[j]; v[j] = vj + h;
+        const I1 = e.f(v, e, ctxNL);
+        v[j] = vj;
         for (let q = 0; q < k; q++) {
           const nq = e._n[q];
           if (!nq) continue;
@@ -199,35 +202,66 @@
     }
     /* Newton com amortecimento e BUSCA EM LINHA: o passo so e aceito se o residuo cair; senao vai pela metade (ate
        1/64). Sem isso, modelo com trecho plano (limite de corrente do regulador) fica pulando de um lado ao outro. */
+    /* LIMITADOR DE JUNCAO (pnjlim do SPICE, 1.103.1): o elemento que declara junc [[a, c, n·Vt, Is, pol?]] (diodo, LED,
+       BJT, diodo de corpo do MOSFET) nao deixa a tensao da juncao saltar alem do joelho numa iteracao — acima do
+       Vcrit ela anda pelo log. Vira uma ESCALA do passo inteiro (a direcao de Newton fica a mesma). Sem isso, o MOSFET
+       do PWM desligando com o motor fazia o Newton pedir +60 V no dreno (o diodo de roda livre ainda linearizado em
+       reverso), a exponencial estourava e o passo levava centenas de iteracoes */
+    const comJunc = els.filter(e => e.tipo === 'NL' && Array.isArray(e.junc) && e.junc.length);
+    for (const e of comJunc) e._vcrit = e.junc.map(j => j[2] * Math.log(j[2] / (Math.SQRT2 * Math.max(j[3] || 1e-14, 1e-30))));
+    function limiteJuncoes(xa, xn) {
+      let k = 1;
+      for (const e of comJunc) {
+        for (let q = 0; q < e.junc.length; q++) {
+          const j = e.junc[q], na = e._n[j[0]], nc = e._n[j[1]], pol = j[4] || 1, nvt = j[2];
+          const vOld = pol * (V(xa, na) - V(xa, nc));
+          const dv = pol * ((na ? xn[na - 1] - xa[na - 1] : 0) - (nc ? xn[nc - 1] - xa[nc - 1] : 0));
+          const vNew = vOld + dv;
+          if (!(vNew > e._vcrit[q]) || Math.abs(dv) <= 2 * nvt) continue;
+          let vLim;
+          if (vOld > 0) { const arg = 1 + dv / nvt; vLim = arg > 0 ? vOld + nvt * Math.log(arg) : e._vcrit[q]; }
+          else vLim = nvt * Math.log(vNew / nvt);
+          const f = (vLim - vOld) / dv;
+          if (f > 0 && f < k) k = f;
+        }
+      }
+      return k;
+    }
+    /* os buffers do Newton (1.103.1: a copia da matriz a cada iteracao era metade do tempo do passo) */
+    const Ac = new Float64Array(N * N), sol = new Float64Array(N), d = new Float64Array(N);
     function newton(maxIter) {
       const MAXI = maxIter || MAX_ITER;
       let xa = x.slice();
       monta(xa);
       let r0 = residuo(xa);
       for (let it = 1; it <= MAXI; it++) {
-        const sol = b.slice();
-        const Ac = A.slice();
+        sol.set(b);
+        Ac.set(A);
         if (!resolve(Ac, sol, N)) { s.aviso = 'matriz singular (fonte em curto ou laço só de fontes)'; return { ok: false, it }; }
         /* amortecimento GLOBAL (o vetor todo escalado: a direcao de Newton fica a mesma, e a busca em linha sempre acha
            descida). O no quase solto nao pede mais milhares de volts porque o GMIN e 1 nS */
         let maxDv = 0;
         for (let i = 0; i < nNos; i++) maxDv = Math.max(maxDv, Math.abs(sol[i] - xa[i]));
-        const k = maxDv > DV_MAX ? DV_MAX / maxDv : 1;
-        const d = new Float64Array(N);
+        const k = Math.min(maxDv > DV_MAX ? DV_MAX / maxDv : 1, limiteJuncoes(xa, sol));
         for (let i = 0; i < N; i++) d[i] = (sol[i] - xa[i]) * k;
         let conv = k === 1;
         for (let i = 0; conv && i < N; i++) {
           const tol = i < nNos ? 1e-6 + 1e-4 * Math.abs(sol[i]) : 1e-9 + 1e-4 * Math.abs(sol[i]);
           if (Math.abs(d[i]) > tol) conv = false;
         }
-        let lam = 1, xt = null, r1 = Infinity;
+        let lam = 1, r1 = Infinity;
+        const xt = new Float64Array(N);
         for (let tentativa = 0; tentativa < 24; tentativa++) {
-          xt = new Float64Array(N);
           for (let i = 0; i < N; i++) xt[i] = xa[i] + d[i] * lam;
           monta(xt);
           r1 = residuo(xt);
           if (!isFinite(r1)) { lam /= 2; continue; }
           if (r1 <= r0 * (1 - 1e-4 * lam) || r1 < 1e-9 || tentativa === 23) break;
+          /* 1.103.1: a busca so acha descida com lambda pequeno nas primeiras iteracoes — a chave virando no transiente
+             (o MOSFET do PWM desliga e a corrente do motor tem de passar para o diodo de roda livre: o residuo SOBE no
+             caminho). Andar de 1/64 em 1/64 levava 40 iteracoes e a continuacao (230 contas por passo, a tela
+             travava). O passo cheio (ja amortecido pelo DV_MAX) passa por cima e o Newton fecha em poucas */
+          if (lam <= 0.25 && it <= 12) { lam = 1; for (let i = 0; i < N; i++) xt[i] = xa[i] + d[i]; monta(xt); r1 = residuo(xt); break; }
           lam /= 2;
         }
         for (let i = 0; i < N; i++) if (!isFinite(xt[i])) { s.aviso = 'o cálculo divergiu'; return { ok: false, it }; }
@@ -354,7 +388,15 @@
     }
 
     /* nos flutuantes: sem caminho DC ate a terra (so capacitor, entrada de alta impedancia) */
+    let flutCache = null, flutChave = null;
     function flutuantes() {
+      let ch = '';
+      for (const e of els) if (e.tipo === 'SW') ch += e.fechada ? '1' : '0';
+      if (flutCache && ch === flutChave) return flutCache.slice();
+      flutChave = ch; flutCache = flutuantes0();
+      return flutCache.slice();
+    }
+    function flutuantes0() {
       const pai = nomes.map((_, i) => i);
       const acha = i => { while (pai[i] !== i) { pai[i] = pai[pai[i]]; i = pai[i]; } return i; };
       const une = (a, c) => { a = acha(a); c = acha(c); if (a !== c) pai[c] = a; };
@@ -379,9 +421,52 @@
       });
       return { t: s.t, modo: s.modo, ok: s.ok, iter: s.iter, aviso: s.aviso, v, el, flutuantes: flutuantes() };
     }
+    /* ANDAR SEM O RESULTADO (1.103.1): o laco da tela anda passo a passo (o PWM chaveia a cada passo) e montar o
+       resultado inteiro a cada passo (objetos de cada elemento, nos flutuantes) era mais caro que o proprio Newton.
+       anda(n) so avanca; soma(acc) junta a tensao de cada no e a corrente/potencia de cada elemento do passo (a
+       corrente do elemento nao linear e a da ultima conta do Newton, no ponto aceito); media(acc) devolve o
+       resultado com as medias, no formato do resultado() */
+    function anda(n) {
+      s.modo = 'tran';
+      let r = { ok: true, it: 0 };
+      for (let k = 0; k < (n || 1); k++) {
+        r = subpasso(s.dt, 0);
+        if (!r.ok) { s.aviso = s.aviso || 'um passo do transiente não convergiu'; }
+      }
+      s.ok = r.ok; s.iter = r.it;
+      return s.t;
+    }
+    function somador() { return { sim: s, n: 0, x: new Float64Array(N), i: els.map(e => new Float64Array(e._n.length)), p: new Float64Array(els.length) }; }
+    function soma(acc) {
+      if (!acc || acc.sim !== s) return;
+      acc.n++;
+      for (let q = 0; q < N; q++) acc.x[q] += x[q];
+      for (let k = 0; k < els.length; k++) {
+        const e = els[k], ai = acc.i[k];
+        const i = e.tipo === 'NL' && e._ultI ? e._ultI : correntes(e);
+        let p = 0;
+        for (let j = 0; j < ai.length; j++) { const ij = +i[j] || 0; ai[j] += ij; p += V(x, e._n[j]) * ij; }
+        acc.p[k] += p;
+      }
+    }
+    function media(acc) {
+      if (!acc || acc.sim !== s || !acc.n) return resultado();
+      const n = acc.n, xm = acc.x.map(q => q / n);
+      const v = {};
+      for (let i = 1; i < nomes.length; i++) v[nomes[i]] = xm[i - 1];
+      for (const t of terra) v[t] = 0;
+      const el = els.map((e, k) => ({ ref: e.ref, tipo: e.tipo, papel: e.papel, i: Array.from(acc.i[k], q => q / n), v: vDe(xm, e), p: acc.p[k] / n }));
+      return { t: s.t, modo: s.modo, ok: s.ok, iter: s.iter, aviso: s.aviso, v, el, flutuantes: flutuantes() };
+    }
+    function zera(acc) { if (!acc) return; acc.n = 0; acc.x.fill(0); for (const a of acc.i) a.fill(0); acc.p.fill(0); }
     s.dc = dc;
     s.liga = liga;
     s.passo = passo;
+    s.anda = anda;
+    s.somador = somador;
+    s.soma = soma;
+    s.media = media;
+    s.zera = zera;
     s.resultado = resultado;
     s.tensao = n => { const i = n === 0 ? 0 : idx.get(String(n)); return terra.has(String(n)) ? 0 : i == null ? NaN : x[i - 1]; };
     s.elementos = els;

@@ -94,23 +94,20 @@
      chaveia a cada passo do tempo, e os rotulos, as cores, os calculos e os alertas mostravam o valor do instante. Os
      passos entre duas analises sao somados (acumula) e a media ainda passa por um filtro de ~0,3 s — o que um
      multimetro mostraria. O osciloscopio continua com o valor de cada instante (st.hist / st.amostras). */
-  function acumula(r) {
-    if (!r || r.modo === 'dc') return;
-    const a = st.acc || (st.acc = { n: 0, v: Object.create(null), i: r.el.map(e => e.i.map(() => 0)), p: r.el.map(() => 0) });
-    if (a.i.length !== r.el.length || a.i.some((x, j) => x.length !== r.el[j].i.length)) { st.acc = null; return acumula(r); }
-    a.n++;
-    for (const k in r.v) a.v[k] = (a.v[k] || 0) + r.v[k];
-    r.el.forEach((e, j) => { const ai = a.i[j]; for (let q = 0; q < e.i.length; q++) ai[q] += e.i[q]; a.p[j] += e.p; });
+  /* a soma fica no motor (1.103.1: s.soma/s.media, sem montar o resultado a cada passo); st.acc e o somador do
+     circuito montado (outro circuito = outro somador) */
+  function acumula() {
+    if (!st.sim || !st.sim.somador) return;
+    if (!st.acc || st.acc.sim !== st.sim) st.acc = st.sim.somador();
+    st.sim.soma(st.acc);
   }
   function resParaMostrar() {
     const r = st.res;
-    if (!r || r.modo === 'dc' || !st.acc || !st.acc.n) { st.vis = null; return r; }
-    /* o circuito foi remontado depois da soma (outro numero de elementos): descarta a soma velha */
-    if (st.acc.i.length !== r.el.length || st.acc.i.some((x, j) => x.length !== r.el[j].i.length)) { st.acc = null; st.vis = null; return r; }
-    const a = st.acc, n = a.n;
-    const med = { v: {}, el: r.el.map((e, j) => Object.assign({}, e, { i: a.i[j].map(x => x / n), p: a.p[j] / n })) };
-    for (const k in a.v) med.v[k] = a.v[k] / n;
-    st.acc = null;
+    if (!r || r.modo === 'dc' || !st.acc || !st.acc.n || st.acc.sim !== st.sim) { st.vis = null; return r; }
+    const m0 = st.sim.media(st.acc);
+    if (m0.el.length !== r.el.length) { st.acc = null; st.vis = null; return r; }
+    const med = { v: m0.v, el: r.el.map((e, j) => Object.assign({}, e, { i: m0.el[j].i, p: m0.el[j].p })) };
+    st.sim.zera(st.acc);
     const ant = st.vis, k = ant ? 0.2 : 1;
     if (ant && ant.el.length === med.el.length) {
       for (const q in med.v) if (q in ant.v) med.v[q] = ant.v[q] + (med.v[q] - ant.v[q]) * k;
@@ -210,16 +207,23 @@
       const alvo = st.velocidade * dtReal;
       let n = Math.max(1, Math.round(alvo / st.sim.dt));
       const t0 = performance.now();
-      while (n > 0 && performance.now() - t0 < 14) {
+      /* ORCAMENTO do quadro (1.103.1, "nao ta rodando leve"): o Esquema, a PCB 3D e as pecas dividem a mesma linha de
+         execucao — 14 ms de conta por quadro de 16 ms travava o resto. Fica em ~7 ms; se os quadros ja estao
+         chegando atrasados (outra vista pesada), cai para 4 ms */
+      const orc = dtReal > 0.024 ? 4 : 7;
+      const tv = net => st.sim.tensao(net);
+      let andou = false;
+      while (n > 0 && performance.now() - t0 < orc) {
         /* um passo de cada vez: o PWM chaveia passo a passo e medir de 4 em 4 caia sempre no mesmo estado (o duty de
-           50 % aparecia 0 V na media e no osciloscopio) */
-        const k = 1;
-        try { st.res = st.sim.passo(k); } catch (e) { st.erro = 'o transiente falhou: ' + e.message; st.rodando = false; break; }
-        acumula(st.res);
-        n -= k;
-        amostra();
-        analise.amostra(st.res);
+           50 % aparecia 0 V na media e no osciloscopio). O passo nao monta o resultado (so a soma e as amostras) */
+        try { st.sim.anda(1); } catch (e) { st.erro = 'o transiente falhou: ' + e.message; st.rodando = false; break; }
+        andou = true;
+        acumula();
+        n--;
+        amostra(st.sim.t, tv);
+        analise.amostra(st.sim.t, tv);
       }
+      if (andou) st.res = st.sim.resultado();
       analisa(false);
     }
     /* os pontos andam mesmo no DC (a corrente de regime) */
@@ -237,12 +241,14 @@
     if (st.raf) { cancelAnimationFrame(st.raf); st.raf = 0; }
     laco(performance.now());
   }, 250);
-  function amostra() {
+  /* uma amostra do instante: (t, tensao(net)); sem argumentos, a do st.res */
+  function amostra(t, tv) {
     if (!st.osciloscopio.length || !st.res) return;
+    if (t == null) { t = st.res.t; const rv = st.res.v; tv = n => rv[n]; }
     const ult = st.amostras[st.amostras.length - 1];
-    if (ult && st.res.t === ult.t) return;
-    st.amostras.push({ t: st.res.t, v: st.osciloscopio.map(n => st.res.v[n]) });
-    if (st.amostras.length > 6000) st.amostras.splice(0, st.amostras.length - 6000);
+    if (ult && t === ult.t) return;
+    st.amostras.push({ t, v: st.osciloscopio.map(tv) });
+    if (st.amostras.length > 7000) st.amostras.splice(0, st.amostras.length - 6000);
   }
 
   /* ------------------------------------------------------------------------------------------------ corrente nos fios */
@@ -669,7 +675,7 @@
     on = on == null ? !st.ligado : !!on;
     if (on === st.ligado) return st.ligado;
     st.ligado = on;
-    if (on) { leCfg(); st.sujo = true; st.rodando = true; st.tUlt = 0; painel.abre(); agenda(); }
+    if (on) { leCfg(); st.sujo = true; st.rodando = true; st.tUlt = 0; painel.abre(); agenda(); analise.tomaSerie(); }
     else { painel.fecha(); dica.esconde(); menu.fecha(); st.an = null; publica(); const v = VISTA(); if (v) v.redesenha(); }
     botao.pinta();
     return st.ligado;
@@ -946,7 +952,17 @@
     function netsDe(h) {
       if (h.net) return [h.net];
       const inf = info(h.ref); if (!inf) return [];
-      return [...new Set(inf.pinos.map(p => p.net).filter(Boolean))].slice(0, 2);
+      /* 1.103.1: o componente de 3 pinos ou mais (MOSFET, transistor, regulador) mostra um canal por pino — a diferenca
+         de duas pontas quaisquer (dreno - gate) dava um serrote sem sentido. Terra fica de fora (e 0 V) */
+      const nets = [...new Set(inf.pinos.map(p => p.net).filter(Boolean))];
+      if (nets.length <= 2) return nets;
+      const out = nets.filter(n => !(st.mt.terra || []).includes(n)).slice(0, 4);
+      out.multi = true;
+      return out;
+    }
+    function rotuloDaNet(h, n) {
+      const inf = h.ref && info(h.ref); const p = inf && inf.pinos.find(q => q.net === n);
+      return p ? (p.name && p.name !== p.num ? p.name : 'pino ' + p.num) + ' · ' + n : n;
     }
     function abre(h, modo, e) {
       const j = { id: ++serie, h: Object.assign({}, h), modo, el: $c('div', 'sim-an') };
@@ -967,18 +983,34 @@
         window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
       });
       document.body.append(j.el);
-      j.el.style.left = Math.min((e ? e.clientX : 200) + 14, window.innerWidth - 380) + 'px';
-      j.el.style.top = Math.min((e ? e.clientY : 120) + 10, window.innerHeight - 260) + 'px';
+      j.el.style.left = Math.max(4, Math.min((e ? e.clientX : 200) + 14, window.innerWidth - 380)) + 'px';
+      j.el.style.top = Math.max(4, Math.min((e ? e.clientY : 120) + 10, window.innerHeight - 300)) + 'px';
       j.nets = netsDe(h); j.amostras = [];
       janelas.push(j);
       pinta(j);
+      /* cabe na tela: a altura so se sabe depois de pintar (a legenda do osciloscopio cresce com os canais) */
+      const cabe = () => { const r = j.el.getBoundingClientRect(); if (r.bottom > window.innerHeight - 4) j.el.style.top = Math.max(4, window.innerHeight - r.height - 4) + 'px'; };
+      cabe(); setTimeout(cabe, 120);
       return j;
     }
     /* a cada analise: a lista com os valores medios; o osciloscopio guarda o instante (o sinal de verdade) */
     /* as nets que a vista PCB (o cartao do pad > Osciloscopio) pediu: o sinal de cada passo, lido pelo topo */
     const assinadas = new Map();   // net -> [{t, v}]
+    /* quem registra e a simulacao que esta LIGADA (1.103.1): o Esquema normal do projeto tambem carrega este arquivo e,
+       abrindo depois da aba Simulador, tomava o lugar dela — o osciloscopio do cartao do pad ficava "esperando o
+       sinal" de uma simulacao parada. Sem ninguem ligado, o primeiro que carrega fica de reserva */
+    function registraSerie(forca) {
+      try {
+        const t = window.top || window, ja = t.__nexoSimSerie;
+        if (!forca && ja && ja._janela && ja._janela !== window && !ja._janela.closed && ja._ligado && ja._ligado()) return;
+        t.__nexoSimSerie = serieApi;
+      } catch (_e) { /* outra origem */ }
+    }
+    let serieApi = null;
     try {
-      (window.top || window).__nexoSimSerie = {
+      serieApi = {
+        _janela: window,
+        _ligado: () => st.ligado,
         assina(net) { if (net && !assinadas.has(net)) assinadas.set(net, []); return true; },
         solta(net) { assinadas.delete(net); },
         le(net) { return assinadas.get(net) || []; },
@@ -986,21 +1018,27 @@
         pwmDe(net) { return pwmDaNet(net); },
         desenha(cv, net, base) { return desenhaCanais(cv, [{ nome: net, cor: '#facc15', A: assinadas.get(net) || [], pwm: pwmDaNet(net) }], base || 'auto'); },
       };
+      /* as nets ja assinadas na outra simulacao passam para esta quando ela liga */
+      serieApi._herda = velha => { try { if (velha && velha._nets) for (const n of velha._nets()) serieApi.assina(n); } catch (_e) { /* ok */ } };
+      serieApi._nets = () => [...assinadas.keys()];
+      registraSerie(false);
     } catch (_e) { /* outra origem */ }
-    function amostra(r) {
-      if (!r) return;
+    /* amostra(t, tensao(net)) no laco; amostra(resultado) no DC */
+    function amostra(t, tv) {
+      if (t == null) return;
+      if (typeof t === 'object') { const r = t; t = r.t; tv = n => r.v[n]; }
       for (const [n, A] of assinadas) {
         const ult = A[A.length - 1];
-        if (ult && r.t === ult.t) continue;
-        A.push({ t: r.t, v: r.v[n] });
-        if (A.length > 6000) A.splice(0, A.length - 6000);
+        if (ult && t === ult.t) continue;
+        A.push({ t, v: tv(n) });
+        if (A.length > 7000) A.splice(0, A.length - 6000);   // corta em lote (cortar 1 por passo era O(n) a cada passo)
       }
       for (const j of janelas) {
         if (!j.nets.length) continue;
         const ult = j.amostras[j.amostras.length - 1];
-        if (ult && r.t === ult.t) continue;
-        j.amostras.push({ t: r.t, v: j.nets.map(n => r.v[n]) });
-        if (j.amostras.length > 6000) j.amostras.splice(0, j.amostras.length - 6000);
+        if (ult && t === ult.t) continue;
+        j.amostras.push({ t, v: j.nets.map(tv) });
+        if (j.amostras.length > 7000) j.amostras.splice(0, j.amostras.length - 6000);
       }
     }
     function atualiza() {
@@ -1056,12 +1094,22 @@
         const c2 = cv.getContext('2d'); c2.setTransform(dpr, 0, 0, dpr, 0, 0); c2.clearRect(0, 0, W, H);
         c2.fillStyle = '#6b7280'; c2.font = '11px system-ui'; c2.fillText(st.modo === 'dc' ? 'o osciloscópio anda no Tempo real' : 'esperando o sinal…', 10, H / 2); leg.textContent = ''; return;
       }
-      const canal = { nome: titulo(h), cor: '#facc15', A: A.map(a => ({ t: a.t, v: val(a) })), pwm: h.tipo === 'comp' ? null : pwmDaNet(j.nets[0]) };
-      const l = desenhaCanais(cv, [canal], j.base || 'auto')[0];
+      const varios = h.tipo === 'comp' && !!j.nets.multi;
+      const canais = varios
+        ? j.nets.map((n, k) => ({ nome: rotuloDaNet(h, n), cor: CORES_OSC[k % CORES_OSC.length], A: A.map(a => ({ t: a.t, v: a.v[k] })), pwm: pwmDaNet(n) }))
+        : [{ nome: titulo(h), cor: '#facc15', A: A.map(a => ({ t: a.t, v: val(a) })), pwm: h.tipo === 'comp' ? null : pwmDaNet(j.nets[0]) }];
+      const ls = desenhaCanais(cv, canais, j.base || 'auto');
+      const l = ls[0];
+      const canal = canais[0];
       leg.textContent = '';
       if (!j.selBase) j.selBase = seletorBase(j.base || 'auto', v => { j.base = v; pinta(j); });
-      const txt = $c('span', null, l ? l.texto : '');
-      leg.append(txt, j.selBase);
+      if (varios) {
+        for (const x of ls) { const d = $c('div', 'cn'); const b = $c('b', null, '● '); b.style.color = x.cor; d.append(b, $c('span', null, x.nome + ': ' + x.texto)); leg.append(d); }
+        leg.append(j.selBase);
+      } else {
+        const txt = $c('span', null, l ? l.texto : '');
+        leg.append(txt, j.selBase);
+      }
       if (l && l.aviso) {
         const av = $c('div', 'av', l.aviso);
         const b = $c('button', null, 'ver de verdade'); b.title = 'Simulação lenta o bastante para o sinal amostrado mostrar o PWM';
@@ -1069,7 +1117,8 @@
         av.append(' ', b); leg.append(av);
       }
     }
-    return { abre, atualiza, amostra, lista: () => janelas };
+    function tomaSerie() { try { const t = window.top || window, velha = t.__nexoSimSerie; if (velha !== serieApi) { registraSerie(true); serieApi._herda(velha); } } catch (_e) { /* ok */ } }
+    return { abre, atualiza, amostra, lista: () => janelas, tomaSerie };
   })();
 
   function osciloscopio(net, on) {

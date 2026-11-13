@@ -282,13 +282,19 @@
     return { x: r.left + q.x, y: r.top + q.y };
   }
 
+  /* 1.103.1: le as ancoras e os tamanhos primeiro e so mexe na tela quando algo mudou (antes refazia tudo, lendo e
+     escrevendo cartao a cartao, em todo quadro) */
+  let chaveP = '';
   function posiciona() {
+    const lidos = [...cartoes].map(([id, c]) => ({ id, c, a: ancora(id), w: c.el.offsetWidth || 160, h: c.el.offsetHeight || 80 }));
+    const chave = lidos.map(o => o.id + ':' + (!o.a ? 'd' : o.a.fora ? 'f' : Math.round(o.a.x) + ',' + Math.round(o.a.y)) + ':' + o.w + 'x' + o.h).join('|') + '|' + window.innerWidth + 'x' + window.innerHeight;
+    if (chave === chaveP) return;
+    chaveP = chave;
     svg.textContent = '';
     const postos = [];
     let naDoca = 0;
     const NS = 'http://www.w3.org/2000/svg', mk = (t, at) => { const e = document.createElementNS(NS, t); for (const k in at) e.setAttribute(k, at[k]); return e; };
-    for (const [id, c] of cartoes) {
-      const a = ancora(id);
+    for (const { id, c, a, w: w0, h: h0 } of lidos) {
       if (!a || a.fora) {
         /* sem componente nesta vista (net:..., outra folha, atrás da placa): a doca */
         if (a && a.fora && c.ref) { c.el.style.display = 'none'; if (c.el.parentElement !== camada) camada.append(c.el); continue; }
@@ -298,7 +304,7 @@
       }
       if (c.el.parentElement !== camada) camada.append(c.el);
       c.el.style.display = '';
-      const w = c.el.offsetWidth || 160, h = c.el.offsetHeight || 80;
+      const w = w0, h = h0;
       if (a.caixa) postos.push(a.caixa);
       let L = 0, T = 0;
       for (const d of [24, 60, 110, 170, 240]) {

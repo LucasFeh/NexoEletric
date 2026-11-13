@@ -295,7 +295,8 @@
         if (bv && bid) i += 5e-3 * lexp((vd - bv) / (nz * VT));
         return [i, -i];
       };
-      return poe(info, { tipo: 'NL', nos: [na, nk], f, papel: papel || 'diodo', vf: m.vf }, [m.rs ? null : pinoA, pk(info, k)]);
+      /* junc: a juncao para o limitador do Newton (pnjlim, 1.103.1) — [anodo, catodo, n·Vt, Is] */
+      return poe(info, { tipo: 'NL', nos: [na, nk], f, papel: papel || 'diodo', vf: m.vf, junc: [[0, 1, n * VT, is]] }, [m.rs ? null : pinoA, pk(info, k)]);
     }
     function fonteV(info, mais, menos, v, papel, rs) {
       return poe(info, { tipo: 'V', nos: [mais, menos], v, rs: rs == null ? 1e-3 : rs, papel: papel || 'fonte' }, [null, null]);
@@ -444,7 +445,7 @@
             const ib = 1e-11 * (lexp(vbd / (1.6 * VT)) - 1) * pol;
             return [id - ib, 0, -id + ib];
           };
-          info.q = poe(info, { tipo: 'NL', nos: [nomeTerm(info, d), nomeTerm(info, g), nomeTerm(info, s)], f, dc: [[0, 2]], papel: 'MOSFET' }, [pk(info, d), pk(info, g), pk(info, s)]);
+          info.q = poe(info, { tipo: 'NL', nos: [nomeTerm(info, d), nomeTerm(info, g), nomeTerm(info, s)], f, dc: [[0, 2]], papel: 'MOSFET', junc: [[2, 0, 1.6 * VT, 1e-11, pol]] }, [pk(info, d), pk(info, g), pk(info, s)]);
           if (!fet) info.avisos.push('MOSFET sem modelo conhecido: Vth 2 V');
           if (!(achaPino(info, [/^G(ATE)?$/i], null))) info.avisos.push('pinos sem nome G/D/S: usei a ordem do encapsulamento');
           continue;
@@ -463,7 +464,7 @@
           const ib = Is / BF * (ef - 1) + Is / BR * (er - 1);
           return [pol * ic + 1e-12 * (v[0] - v[2]), pol * ib, -pol * (ic + ib) - 1e-12 * (v[0] - v[2])];
         };
-        info.q = poe(info, { tipo: 'NL', nos: [nomeTerm(info, C_), nomeTerm(info, B), nomeTerm(info, E)], f, papel: 'BJT' }, [pk(info, C_), pk(info, B), pk(info, E)]);
+        info.q = poe(info, { tipo: 'NL', nos: [nomeTerm(info, C_), nomeTerm(info, B), nomeTerm(info, E)], f, papel: 'BJT', junc: [[1, 2, nf * VT, Is, pol], [1, 0, nf * VT, Is, pol]] }, [pk(info, C_), pk(info, B), pk(info, E)]);
         continue;
       }
       /* --- chave / botao */
@@ -660,7 +661,7 @@
             const ice = ctr * Math.max(il, 0) * Math.tanh(Math.max(vce, 0) / 0.15) + 1e-10 * vce;
             return [il, -il, ice, -ice];
           };
-          info.ci = poe(info, { tipo: 'NL', nos: [nomeTerm(info, A), nomeTerm(info, K), nomeTerm(info, Cc), nomeTerm(info, E)], f, dc: [[0, 1], [2, 3]], papel: 'opto' }, [pk(info, A), pk(info, K), pk(info, Cc), pk(info, E)]);
+          info.ci = poe(info, { tipo: 'NL', nos: [nomeTerm(info, A), nomeTerm(info, K), nomeTerm(info, Cc), nomeTerm(info, E)], f, dc: [[0, 1], [2, 3]], papel: 'opto', junc: [[0, 1, 1.8 * VT, is]] }, [pk(info, A), pk(info, K), pk(info, Cc), pk(info, E)]);
           continue;
         }
         /* ULN2003 / ULN2803 */

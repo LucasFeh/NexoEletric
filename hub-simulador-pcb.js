@@ -586,17 +586,24 @@
       const r = cv.getBoundingClientRect(), q = H.mundoParaTela(b.ax, b.ay);
       return { x: r.left + q.x, y: r.top + q.y, atras: false };
     }
+    /* 1.103.1 ("nao ta rodando leve"): le tudo primeiro (pontos e tamanhos) e so escreve quando algo mudou — antes
+       escrevia e lia o tamanho balao a balao em todo quadro (o navegador refazia o layout a cada um) */
+    let chaveB = '';
     function posicionaBaloes() {
       camadaBaloes();
-      svgB.textContent = '';
       for (let i = baloes.length - 1; i >= 0; i--) if (baloes[i].cartao && baloes[i].el.hidden) baloes.splice(i, 1);   // o cartao fechado sai
       const postosB = [], pontosB = [];
-      for (const b of baloes) { const q = telaDe(b); if (q && !q.atras) pontosB.push(q); }
-      for (const b of baloes) {
-        const p = telaDe(b);
+      const lidos = baloes.map(b => { const q = telaDe(b); return { b, p: q, w: b.el.offsetWidth || 200, h: b.el.offsetHeight || 60 }; });
+      const chave = lidos.map(o => (o.p && !o.p.atras ? Math.round(o.p.x) + ',' + Math.round(o.p.y) : 'x') + ':' + o.w + 'x' + o.h).join('|') + '|' + window.innerWidth + 'x' + window.innerHeight;
+      if (chave === chaveB && svgB.childNodes.length) return;
+      chaveB = chave;
+      svgB.textContent = '';
+      for (const o of lidos) if (o.p && !o.p.atras) pontosB.push(o.p);
+      for (const o of lidos) {
+        const b = o.b, p = o.p;
         if (!p || p.atras) { if (!b.cartao) b.el.style.display = 'none'; continue; }
         b.el.style.display = '';
-        const w = b.el.offsetWidth || 200, h = b.el.offsetHeight || 60;
+        const w = o.w, h = o.h;
         /* o primeiro lugar livre em volta do ponto (acima a direita, acima a esquerda, abaixo...), mais longe se preciso:
            um balao nao cobre o outro nem o ponto de outro balao */
         let L = 0, T = 0;

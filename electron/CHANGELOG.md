@@ -4,6 +4,30 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.103.1
+
+Simulador leve de novo e o osciloscópio abrindo (o dono: "o osciloscópio nem abre agora, tá tudo muito bugado, não tá rodando leve").
+
+- **O PWM com o motor travava o cálculo.** Cada vez que o MOSFET do PWM desligava, a corrente do motor tinha de passar para
+  o diodo de roda livre: o Newton pedia dezenas de volts no dreno, a exponencial do diodo estourava e o passo levava de
+  100 a 260 iterações (a continuação pseudo-transiente). Agora as junções (diodo, LED, BJT, diodo de corpo do MOSFET,
+  opto) têm o limitador do SPICE (pnjlim) como escala do passo, e a busca em linha não anda mais de 1/64 em 1/64 nas
+  primeiras iterações. O DEMO-MOTOR-ESP32 com o PWM de 20 kHz caiu de 3,4 ms para 0,07 ms por passo: a simulação anda
+  em tempo real (antes ~15 %).
+- **Um resultado por quadro, não por passo.** O laço anda passo a passo (o PWM chaveia a cada passo) e montava o
+  resultado inteiro a cada um (objetos de cada elemento, nós flutuantes). A média da tela vem da soma no motor
+  (`anda`/`somador`/`soma`/`media`) e os nós flutuantes ficam em cache pelo estado das chaves. A corrente média do pino
+  do PWM agora é a resolvida (antes mostrava a do estado do passo seguinte).
+- **Orçamento do quadro.** A conta usava até 14 ms de cada quadro de 16 ms (o Esquema, a PCB 3D e as peças dividem a
+  mesma linha de execução); agora ~7 ms, e 4 ms quando os quadros já chegam atrasados. 60 quadros/s na aba Simulador
+  com Esquema + PCB 3D + motor na bancada.
+- **Osciloscópio.** O do componente de 3 pinos ou mais mostra um canal por pino (gate e dreno do MOSFET, com o PWM
+  reconstruído) — a diferença de duas pontas quaisquer dava um serrote sem sentido; a janela não sai mais da tela. O
+  do cartão do pad na PCB lê a simulação LIGADA (o Esquema normal do projeto, abrindo depois da aba Simulador, tomava o
+  lugar dela e o osciloscópio ficava esperando o sinal).
+- Os balões da PCB e os cartões das peças do NexoCode só se reposicionam quando algo muda (antes refaziam o layout
+  cartão a cartão em todo quadro); as amostras do osciloscópio são cortadas em lote.
+
 ## 1.103.0 — 2026-11-12
 
 **As peças do Wokwi vivas no Simulador do NexoEletric (o NexoCode só controla).** Pedido do dono: "o simulador do Wokwi

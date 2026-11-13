@@ -344,7 +344,7 @@ caso('1.102.1: média na tela, Analisar (lista/osciloscópio), acionar do NexoCo
   assert.ok(/u\.el\.hidden = !H\.em3d\(\) \|\| naAba;/.test(pcb) && /function alternaBalaoTrilha/.test(pcb) && /b\.contas/.test(pcb) && /contas: false/.test(pcb), 'PCB: sem o painel na aba; balão no clique da trilha, contas fechadas');
   assert.ok(/motores\[ref\] = \{ rpm:/.test(sim) && /out\.tensao = vm; out\.kv = info\.kv;/.test(ler('hub-simulador-circuito.js')), 'gpio_lote devolve os motores da bancada (o painel do motor do NexoCode)');
   assert.ok(/__nexoSimAba\[pj\] = window/.test(sim) && /if \(w\) return w\.HubSimulador\.mcp\(a\)/.test(sim) && /if \(abaDoProjeto\(\)\) return;/.test(sim), 'uma simulação por projeto: o Esquema passa os pedidos para a aba Simulador');
-  assert.ok(/function resParaMostrar\(\)/.test(sim) && /acumula\(st\.res\)/.test(sim) && /const k = 1;/.test(sim), 'a média dos passos (o PWM não pisca) e um passo de cada vez');
+  assert.ok(/function resParaMostrar\(\)/.test(sim) && /acumula\(\);/.test(sim) && /st\.sim\.anda\(1\)/.test(sim), 'a média dos passos (o PWM não pisca) e um passo de cada vez');
   assert.ok(/case 'analisar':/.test(sim) && /'📈 Osciloscópio'/.test(sim) && !/dica\.mostra\(h, e\)/.test(sim), 'Analisar no clique, sem balão no mouse');
   assert.ok(/tensoes: false/.test(sim) && /if \(!j\.v2\) st\.mostrar\.tensoes = false/.test(sim), 'as pílulas de tensão começam desligadas');
   assert.ok(/a\.acionar/.test(sim) && /APERTADO \(NexoCode\)/.test(sim), 'gpio_lote acionar: o botão do NexoCode aperta a chave');
@@ -356,6 +356,48 @@ caso('1.102.1: média na tela, Analisar (lista/osciloscópio), acionar do NexoCo
   assert.ok(ctrl.entrada.properties.acao.enum.includes('analisar'), 'sim_controlar analisar');
 });
 
+caso('1.103.1: leve — PWM com motor sem a busca em linha travar, anda/soma/média = passo, orçamento do quadro, osciloscópio da simulação ligada', () => {
+  const comps = [
+    { ref: 'U1', comment: 'ESP32-WROOM-32D', pinos: [pin(2, '3V3', '+3V3'), pin(1, 'GND', 'GND'), pin(10, 'IO25', 'PWM')] },
+    { ref: 'R1', valor: '100', pinos: [pin(1, '1', 'PWM'), pin(2, '2', 'G')] }, { ref: 'R2', valor: '100k', pinos: [pin(1, '1', 'G'), pin(2, '2', 'GND')] },
+    { ref: 'Q1', comment: 'AO3400', pinos: [pin(1, 'G', 'G'), pin(2, 'D', 'M-'), pin(3, 'S', 'GND')] },
+    { ref: 'D1', comment: 'SS14', pinos: [pin(1, 'A', 'M-'), pin(2, 'K', '+5V')] }];
+  const monta = () => {
+    const mt = C.monta(comps, { gpio: { 'U1-10': { modo: 'pwm', duty: 0.6, f: 20000 } }, externos: [{ ref: 'M1', tipo: 'motor_dc', nos: ['+5V', 'M-'], eletrico: { r_ohm: 2.5, kv_rpm_v: 2500, i0_a: 0.15 } }] });
+    const s = M.cria(mt.elementos, { terra: mt.terra, dt: 1 / 1440 }); s.liga();
+    return { mt, s };
+  };
+  /* o MOSFET do PWM desliga a cada poucos passos e a corrente do motor passa para o diodo: antes eram ~100 iterações
+     de Newton por passo (a busca em linha andava de 1/64 em 1/64 e caía na continuação) */
+  const a = monta();
+  let it = 0;
+  for (let k = 0; k < 400; k++) { a.s.anda(1); it += a.s.iter; assert.ok(a.s.ok, 'passo ' + k + ' convergiu'); }
+  assert.ok(it / 400 < 20, 'iterações por passo com PWM e motor: ' + (it / 400).toFixed(1));
+  /* anda + soma + media dá o mesmo que passo(1) somado à mão (a tela mostra a média sem montar o resultado a cada passo) */
+  const b = monta(), c = monta();
+  const acc = b.s.somador();
+  const somaV = {}, somaP = []; let n = 0;
+  for (let k = 0; k < 120; k++) {
+    b.s.anda(1); b.s.soma(acc);
+    const r = c.s.passo(1); n++;
+    for (const q in r.v) somaV[q] = (somaV[q] || 0) + r.v[q];
+    r.el.forEach((e, j) => { somaP[j] = (somaP[j] || 0) + e.p; });
+  }
+  const med = b.s.media(acc);
+  for (const q of ['M-', 'G', 'PWM']) perto(med.v[q], somaV[q] / n, 1e-9, 'média de ' + q);
+  /* os elementos com estado (o pino do PWM vira o _on, o motor anda a rotação) DEPOIS do passo: o resultado() recalcula
+     com o estado novo e a soma usa a corrente que o Newton resolveu — so os sem estado batem um a um */
+  med.el.forEach((e, j) => { if (!b.s.elementos[j].atualiza) perto(e.p, somaP[j] / n, 1e-6 + Math.abs(somaP[j] / n) * 1e-6, 'potência média de ' + (e.ref || e.papel)); });
+  perto(b.s.t, c.s.t, 1e-12, 'o mesmo tempo');
+  b.s.zera(acc); assert.strictEqual(acc.n, 0);
+  /* a tela: o orçamento do quadro, a soma no motor, o osciloscópio registrado pela simulação ligada, posições só quando mudam */
+  const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
+  const sim = ler('hub-simulador.js'), pcb = ler('hub-simulador-pcb.js'), pec = ler('hub-simulador-pecas.js');
+  assert.ok(/const orc = dtReal > 0\.024 \? 4 : 7;/.test(sim) && /performance\.now\(\) - t0 < orc/.test(sim), 'orçamento de ~7 ms por quadro');
+  assert.ok(/if \(andou\) st\.res = st\.sim\.resultado\(\);/.test(sim), 'um resultado por quadro');
+  assert.ok(/analise\.tomaSerie\(\)/.test(sim) && /_ligado: \(\) => st\.ligado/.test(sim), 'o osciloscópio do pad lê a simulação ligada');
+  assert.ok(/if \(chave === chaveB && svgB\.childNodes\.length\) return;/.test(pcb) && /if \(chave === chaveP\) return;/.test(pec), 'balões e peças só se mexem quando algo mudou');
+});
 caso('1.103.0: as peças vivas do Wokwi (NexoCode → gpio_lote.pecas) no Simulador, e as entradas de volta', () => {
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
   const pc = ler('hub-simulador-pecas.js');
