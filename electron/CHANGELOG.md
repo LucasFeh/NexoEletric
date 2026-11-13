@@ -4,6 +4,12 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.111.1
+
+O queimado no 3D mais visível (visto no LD2 do TESTE-ESP32-LEDS): o corpo do componente queimado fica VERMELHO (uma capa
+do tamanho do modelo 3D), a fumaça é maior, mais densa e com tons de cinza, e o brilho e a fumaça não são mais
+cortados pela placa (a câmera de lado cortava o sprite numa linha reta e aparecia um retângulo escuro).
+
 ## 1.111.0
 
 Resistência, potência e tolerância do resistor na simulação (o dono: "quero um campo de valor de resistência /

@@ -436,12 +436,22 @@
         const sc = compSim(c.ref);
         if (!sc || !sc.queimado) continue;
         const [cx, cy] = centroComp(c), baixo = /bottom/i.test(c.layer || ''), z0 = baixo ? -esp - 1.2 : 1.2;
-        const verm = new T.Sprite(new T.SpriteMaterial({ map: texturaBrilho(T), color: new T.Color(0xff2a1a), transparent: true, opacity: 0.85, depthWrite: false, blending: T.AdditiveBlending, toneMapped: false }));
-        verm.scale.set(10, 10, 1); verm.position.set(cx, cy, z0); verm.renderOrder = 7; g.add(verm);
-        for (let k = 0; k < 8; k++) {
-          const sp = new T.Sprite(new T.SpriteMaterial({ map: texturaBrilho(T), color: new T.Color(0xd4d4dc), transparent: true, opacity: 0.75, depthWrite: false, toneMapped: false }));
+        /* 1.111.0 (o dono viu o LD2 queimado: "o LED precisa ficar vermelho"): o CORPO fica vermelho — uma capa vermelha
+           do tamanho do modelo 3D dele —, o brilho e a fumaca sem o teste de profundidade (a placa cortava o sprite numa
+           linha reta: o retangulo escuro), e a fumaca maior e mais densa (aparece sobre o verde da placa) */
+        const V3 = H.vista3d && H.vista3d(), kq = V3 && V3.caixaDe ? V3.caixaDe(c.ref) : null;
+        if (kq) {
+          const capa = new T.Mesh(new T.BoxGeometry(kq.x2 - kq.x1 + 0.08, kq.y2 - kq.y1 + 0.08, Math.max(0.05, kq.z2 - kq.z1) + 0.06),
+            new T.MeshBasicMaterial({ color: new T.Color(0xc81e1e), transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }));
+          capa.position.set((kq.x1 + kq.x2) / 2, (kq.y1 + kq.y2) / 2, (kq.z1 + kq.z2) / 2); capa.renderOrder = 6; g.add(capa);
+        }
+        const zt = kq ? (baixo ? kq.z1 - 0.2 : kq.z2 + 0.2) : z0;
+        const verm = new T.Sprite(new T.SpriteMaterial({ map: texturaBrilho(T), color: new T.Color(0xff2a1a), transparent: true, opacity: 0.9, depthWrite: false, depthTest: false, blending: T.AdditiveBlending, toneMapped: false }));
+        verm.scale.set(9, 9, 1); verm.position.set(cx, cy, zt); verm.renderOrder = 7; g.add(verm);
+        for (let k = 0; k < 12; k++) {
+          const sp = new T.Sprite(new T.SpriteMaterial({ map: texturaBrilho(T), color: new T.Color(k % 3 === 2 ? 0x8f8f98 : 0xe6e6ec), transparent: true, opacity: 0.9, depthWrite: false, depthTest: false, toneMapped: false }));
           sp.renderOrder = 8; g.add(sp);
-          fumacas.push({ sp, x: cx, y: cy, z: z0, sobe: baixo ? -1 : 1, fase: k / 8 });
+          fumacas.push({ sp, x: cx, y: cy, z: zt, sobe: baixo ? -1 : 1, fase: k / 12 });
         }
       }
       V.extra('simCorrente', g);
@@ -453,7 +463,7 @@
         for (const f of fumacas) {
           const u = (st.fase * 0.35 + f.fase) % 1;
           f.sp.position.set(f.x + Math.sin((st.fase + f.fase * 7) * 1.3) * 1.5 * u, f.y + Math.cos((st.fase + f.fase * 5) * 1.1) * 1.2 * u, f.z + f.sobe * (0.5 + 24 * u));
-          const t = 3 + 13 * u; f.sp.scale.set(t, t, 1); f.sp.material.opacity = 0.8 * (1 - u);
+          const t = 4 + 16 * u; f.sp.scale.set(t, t, 1); f.sp.material.opacity = 0.95 * (1 - u) * Math.min(1, u * 6);
         }
         if (st.setas) {
           const { inst, usadas: us, esp: e } = st.setas;
