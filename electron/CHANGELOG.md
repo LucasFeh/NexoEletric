@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.114.1
+
+Potenciômetro: o motivo da queima do trecho usa P = V²/R com a resistência de agora (o cursor girado mudava a R antes
+de a média do quadro trazer a corrente nova, e o motivo saía com a potência antiga).
+
 ## 1.114.0
 
 Simulador — lote 2 da lib Almox e as correções do lote 1 (testado ao vivo no SIM-TIPOS pela outra sessão).

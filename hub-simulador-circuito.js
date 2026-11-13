@@ -1407,7 +1407,8 @@
             if (info.potencia && info.r) {
               out.corrente = Math.max(Math.abs(ra.i[0]), Math.abs(rb.i[0]));
               for (const [el, rr, nome] of [[info.r1, ra, 'ponta–cursor'], [info.r2, rb, 'cursor–ponta']]) {
-                const lim = info.potencia * Math.max(0.02, el.r / info.r), pr = Math.abs(rr.p);
+                /* P = V²/R com a R de agora (o cursor girado muda a R antes da media do quadro trazer a corrente nova) */
+                const dv = rr.v[0] - rr.v[1], lim = info.potencia * Math.max(0.02, el.r / info.r), pr = dv * dv / Math.max(el.r, 1e-6);
                 if (pr > lim * 2) queima('o trecho ' + nome + ' (' + fmt(el.r, 'Ω') + ') dissipou ' + fmt(pr, 'W') + ' (aguenta ' + fmt(lim, 'W') + ' de ' + fmt(info.potencia, 'W') + ' da pista; queima acima de 2×)');
               }
             }
