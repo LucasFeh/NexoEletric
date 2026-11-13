@@ -4,6 +4,12 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.106.1
+
+- O "Desconectado · conectar e rodar" do balão do MCU manda ao NexoCode (0.6.0+) também `--mcu <ref>` (conecta a ESTE
+  microcontrolador) e `--projeto <nome>` (a pasta de Documentos/NexoCode com o nome do projeto que ainda não estava
+  ligada passa a sincronizar com ele). Com o NexoCode 0.6.0 o firmware já abre rodando.
+
 ## 1.106.0
 
 Conectar o NexoCode pelo balão do microcontrolador (o dono: "quando eu clicar em cima e ele estiver desconectado, quero

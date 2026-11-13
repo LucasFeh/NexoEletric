@@ -205,8 +205,9 @@ def pasta_ligada(projeto):
     return ''
 
 
-def abrir_pasta(pasta, rodar=True):
-    """Abre o NexoCode na pasta (ja aberto: a janela aberta troca para ela) e, com rodar, ja roda o firmware."""
+def abrir_pasta(pasta, rodar=True, mcu='', projeto=''):
+    """Abre o NexoCode na pasta (ja aberto: a janela aberta troca para ela) e, com rodar, ja roda o firmware.
+    NexoCode 0.6.0+: --mcu <ref> conecta a esse MCU e --projeto <nome> liga a pasta ao projeto se ainda nao estiver."""
     if os.environ.get('NEXOCODE_NAO_ABRIR') == '1':
         return ''
     exe = acha_exe()
@@ -217,7 +218,12 @@ def abrir_pasta(pasta, rodar=True):
         flags = getattr(subprocess, 'DETACHED_PROCESS', 0x8) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x200)
     env = dict(os.environ)
     env.pop('ELECTRON_RUN_AS_NODE', None)
-    subprocess.Popen([exe, '--abrir', pasta] + (['--rodar'] if rodar else []), cwd=os.path.dirname(exe), creationflags=flags,
+    args = [exe, '--abrir', pasta] + (['--rodar'] if rodar else [])
+    if mcu:
+        args += ['--mcu', str(mcu)]
+    if projeto:
+        args += ['--projeto', str(projeto)]
+    subprocess.Popen(args, cwd=os.path.dirname(exe), creationflags=flags,
                      close_fds=True, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return exe
 
@@ -293,7 +299,7 @@ def registra(app, root, eh_local=None):
             return _json({'ok': False, 'semCodigo': True, 'projeto': projeto,
                           'erro': 'nenhum código do NexoCode está ligado a "%s" — crie o firmware pelo botão NexoCODE do Esquema' % projeto}, 404)
         try:
-            exe = abrir_pasta(pasta, corpo.get('rodar') is not False)
+            exe = abrir_pasta(pasta, corpo.get('rodar') is not False, str(corpo.get('mcu') or ''), projeto)
         except OSError as e:
             return _json({'ok': False, 'pasta': pasta, 'erro': 'não consegui abrir o NexoCode (%s)' % e}, 503)
         if not exe and os.environ.get('NEXOCODE_NAO_ABRIR') != '1':

@@ -403,7 +403,7 @@ caso('1.106.0: "Desconectado" no balão do MCU conecta: abre no NexoCode o firmw
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
   const pcb = ler('hub-simulador-pcb.js'), rota = ler('tools/rotas/nexocode.py');
   assert.ok(/<button class="conectar" data-con/.test(pcb) && /fetch\('\/api\/nexocode\/conectar'/.test(pcb), 'o botão chama a rota');
-  assert.ok(/@app\.route\('\/api\/nexocode\/conectar', methods=\['POST'\]\)/.test(rota) && /\[exe, '--abrir', pasta\] \+ \(\['--rodar'\] if rodar else \[\]\)/.test(rota), 'a rota abre o NexoCode na pasta com --rodar');
+  assert.ok(/@app\.route\('\/api\/nexocode\/conectar', methods=\['POST'\]\)/.test(rota) && /\[exe, '--abrir', pasta\] \+ \(\['--rodar'\] if rodar else \[\]\)/.test(rota) && /args \+= \['--mcu', str\(mcu\)\]/.test(rota) && /args \+= \['--projeto', str\(projeto\)\]/.test(rota), 'a rota abre o NexoCode na pasta com --rodar');
   assert.ok(/def pasta_ligada\(projeto\)/.test(rota) && /'\.nexocode', 'projeto\.json'/.test(rota), 'a pasta pelo vínculo do projeto');
 });
 caso('1.105.0: o clique no microcontrolador na PCB 2D/3D mostra se o NexoCode está conectado', () => {
