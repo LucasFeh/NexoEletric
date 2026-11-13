@@ -539,12 +539,71 @@
       const g = [110, 116, 128], f = t >= 0 ? [34, 197, 94] : [239, 68, 68];
       return 'rgb(' + g.map((x, i) => Math.round(x + (f[i] - x) * k)).join(',') + ')';
     }
-    let hoverPad = null;
-    /* 1.105.1 ("cliquei em um componente na placa e a reticula ficou grudada nela"): o anel do pad sob o mouse some ao
-       fixar/fechar o cartao e ao sair da vista (antes ficava no pad clicado ate passar por outro) */
-    function soltaAnel() { if (!hoverPad) return; hoverPad = null; if (!H.em3d()) H.redesenha(); }
+    let hoverAlvo = null;
+    /* 1.105.1 ("cliquei em um componente na placa e a reticula ficou grudada nela"): a marca sob o mouse some ao
+       fixar/fechar o cartao e ao sair da vista; 1.110.0: volta no proximo movimento do mouse */
+    function soltaAnel() { if (!hoverAlvo) return; hoverAlvo = null; marcaAlvo3d(); if (!H.em3d()) H.redesenha(); }
+    const chaveAlvo = a => !a ? '' : a.tipo === 'pad' ? 'p|' + a.pad.ref + '|' + a.pad.nome : a.tipo === 'mcu' ? 'm|' + a.mcu.ref : 't|' + a.trilha.s.trilha + '|' + a.trilha.s.layer;
+    /* o contorno do alvo em mm (no plano da placa): o pad girado, a caixa do MCU; a trilha = os trechos dela */
+    function contornoDoAlvo(a, folga) {
+      if (a.tipo === 'pad') {
+        const p = a.pad, pd = p.pad || {}, w = (+pd.w || 2 * p.r || 1) / 2 + folga, h = (+pd.h || 2 * p.r || 1) / 2 + folga, an = (+pd.rot || 0) * Math.PI / 180;
+        const c = Math.cos(an), sn = Math.sin(an);
+        return [[-w, -h], [w, -h], [w, h], [-w, h]].map(([u, v]) => [p.x + u * c - v * sn, p.y + u * sn + v * c]);
+      }
+      if (a.tipo === 'mcu') { const k = a.mcu.caixa, f = 1 + folga; return [[k.x1 - f, k.y1 - f], [k.x2 + f, k.y1 - f], [k.x2 + f, k.y2 + f], [k.x1 - f, k.y2 + f]]; }
+      return null;
+    }
+    const trechosDoAlvo = a => (st.res && st.res.segs || []).filter(s => s.trilha === a.trilha.s.trilha && s.layer === a.trilha.s.layer);
+    const COR_ALVO = '#22d3ee';
+    /* no 3D: uma camada propria na cena (o contorno ciano por cima de tudo), refeita so quando o alvo muda */
+    function marcaAlvo3d() {
+      const V = H.em3d() && H.vista3d && H.vista3d();
+      if (!V || typeof V.extra !== 'function') return;
+      const a = hoverAlvo;
+      if (!a) { V.extra('simAlvo', null); return; }
+      const T = V.T(), esp = V.espessura(), g = new T.Group(); g.name = 'simAlvo';
+      const baixo = !!(V.estado && V.estado().el < 0);   // o alvo e sempre da face que a camera ve
+      const z = baixo ? -esp - 0.12 : 0.12;
+      const mat = op => new T.MeshBasicMaterial({ color: new T.Color(COR_ALVO), transparent: true, opacity: op, depthTest: false, depthWrite: false, toneMapped: false, side: T.DoubleSide });
+      const barra = (x1, y1, x2, y2, larg, op) => {
+        const L = Math.hypot(x2 - x1, y2 - y1); if (L < 1e-6) return;
+        const m = new T.Mesh(new T.PlaneGeometry(L + larg, larg), mat(op));
+        m.position.set((x1 + x2) / 2, (y1 + y2) / 2, z); m.rotation.z = Math.atan2(y2 - y1, x2 - x1); m.renderOrder = 20; g.add(m);
+      };
+      /* a espessura do traco: ~2,5 px na tela */
+      const pq = pontoNaPlaca(ultMouse || { clientX: 0, clientY: 0 }), lp = Math.max(0.05, 2.5 / ((pq && pq.esc) || 20));
+      if (a.tipo === 'trilha') {
+        for (const s of trechosDoAlvo(a)) barra(s.x1, s.y1, s.x2, s.y2, (s.w || 0.25) + 2 * lp, 0.5);
+      } else {
+        const P = contornoDoAlvo(a, a.tipo === 'pad' ? 0.1 + lp : 0);
+        for (let i = 0; i < P.length; i++) { const [x1, y1] = P[i], [x2, y2] = P[(i + 1) % P.length]; barra(x1, y1, x2, y2, lp, 0.95); }
+        if (a.tipo === 'pad') {
+          const sh = new T.Shape(P.map(([x, y]) => new T.Vector2(x, y)));
+          const m = new T.Mesh(new T.ShapeGeometry(sh), mat(0.28)); m.position.z = z; m.renderOrder = 19; g.add(m);
+        }
+      }
+      V.extra('simAlvo', g);
+    }
+    function marcaAlvo2d(ctx, px) {
+      const a = hoverAlvo; if (!a || H.em3d()) return;
+      ctx.save(); ctx.globalAlpha = 1; ctx.strokeStyle = COR_ALVO; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      if (a.tipo === 'trilha') {
+        ctx.globalAlpha = 0.55;
+        for (const s of trechosDoAlvo(a)) { ctx.lineWidth = (s.w || 0.25) + px(5); ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke(); }
+      } else {
+        const P = contornoDoAlvo(a, a.tipo === 'pad' ? px(3) : 0);
+        ctx.beginPath(); P.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath();
+        if (a.tipo === 'pad') { ctx.fillStyle = 'rgba(34,211,238,.25)'; ctx.fill(); }
+        ctx.lineWidth = px(2.2); ctx.stroke();
+      }
+      ctx.restore();
+    }
     window.HubSimPcb2d = {
       desenha(ctx, px) {
+        try { window.HubSimPcb2d.camada(ctx, px); } finally { if (naAba) marcaAlvo2d(ctx, px); }
+      },
+      camada(ctx, px) {
         if (!naAba || !st.ligado || !st.res || !st.dados) return;
         let vm = 1; for (const x of Object.values(st.dados.nets || {})) if (isFinite(x)) vm = Math.max(vm, Math.abs(x)); st.vmax = vm;
         ctx.save();
@@ -595,8 +654,6 @@
           let d = (((fase.get(s.id) || 0) * px(1)) % passo + passo) % passo;
           for (; d < L; d += passo) { ctx.beginPath(); ctx.arc(s.x1 + ux * d, s.y1 + uy * d, raio, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
         }
-        /* o pad sob o mouse */
-        if (hoverPad) { ctx.strokeStyle = '#facc15'; ctx.lineWidth = px(2); ctx.beginPath(); ctx.arc(hoverPad.x, hoverPad.y, Math.max(hoverPad.r * 1.3, px(8)), 0, Math.PI * 2); ctx.stroke(); }
         ctx.restore();
       },
     };
@@ -614,31 +671,103 @@
     function padsDaPlaca() {
       const pl = H.placa(); const out = [];
       if (!pl) return out;
-      for (const c of pl.components || []) for (const p of c.pads || []) out.push({ ref: c.ref, nome: String(p.name), net: p.net || '', x: p.x, y: p.y, r: Math.max(p.w || 0.5, p.h || 0.5) / 2, camada: p.layer, comp: c });
+      for (const c of pl.components || []) for (const p of c.pads || []) out.push({ ref: c.ref, nome: String(p.name), net: p.net || '', x: p.x, y: p.y, r: Math.max(p.w || 0.5, p.h || 0.5) / 2, camada: p.layer, comp: c, pad: p });
       return out;
     }
-    function padEm(ev) {
-      const host = H.em3d() ? H.host3d() : H.canvas();
-      if (!host) return null;
-      const r = host.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
-      let melhor = null, dm = 14;
+    /* O ALVO SOB O MOUSE (1.110.0, o dono: "na visão 3D, antes de eu clicar em cima dos pinos, trilhas, quero poder
+       passar o mouse e ver marcando o que eu vou clicar; to mirando uma coisa e clicando outra, às vezes eu clico e não
+       vai"): UM teste so, o mesmo ao passar o mouse e no clique (o que esta marcado e o que o clique pega). O ponto da
+       placa sob o mouse (no 3D, o raio do mouse no plano da face que a camera ve) e cada coisa pela forma de verdade:
+       o pad pelo retangulo dele (girado), a trilha pela largura, o MCU pela caixa dos pads. Dentro de algo ganha; senao
+       o mais perto ate 7 px da borda. Antes: o pad pelo CENTRO (ate 14 px: a borda do pad grande com zoom nao pegava e o
+       pad vizinho roubava o clique da trilha) e a trilha pela linha do meio (ate 8 px: a trilha larga nao pegava). */
+    const TOL_PX = 7;
+    function pontoNaPlaca(ev) {
       if (H.em3d()) {
-        const V = H.vista3d(); if (!V || !V.projeta) return null;
-        const e = V.espessura();
-        for (const p of padsDaPlaca()) {
-          const q = V.projeta(p.x, p.y, /bottom/i.test(p.camada) ? -e : 0.05);
-          if (q.atras) continue;
-          const d = Math.hypot(q.x - mx, q.y - my);
-          if (d < dm) { dm = d; melhor = p; }
-        }
-      } else {
-        const w = H.telaParaMundo(mx, my), esc = H.escala();
-        for (const p of padsDaPlaca()) { const d = Math.hypot(p.x - w.x, p.y - w.y) * esc; if (d < Math.max(dm, p.r * esc)) { if (!melhor || d < dm) { dm = d; melhor = p; } } }
+        const V = H.vista3d(); if (!V || !V.noPlano || !V.projeta) return null;
+        const e = V.espessura(), est = V.estado ? V.estado() : null, topo = !est || !(est.el < 0);
+        const z = topo ? 0.08 : -e - 0.08;
+        const w = V.noPlano(ev, z); if (!w) return null;
+        const a = V.projeta(w.x, w.y, z), b = V.projeta(w.x + 1, w.y, z), c = V.projeta(w.x, w.y + 1, z);
+        if (a.atras) return null;
+        const esc = Math.max(1e-3, (Math.hypot(b.x - a.x, b.y - a.y) + Math.hypot(c.x - a.x, c.y - a.y)) / 2);   // px por mm ali
+        return { x: w.x, y: w.y, esc, lado: topo ? 'top' : 'bottom' };
       }
-      return melhor;
+      const cv = H.canvas(); if (!cv || !H.telaParaMundo) return null;
+      const r = cv.getBoundingClientRect(), w = H.telaParaMundo(ev.clientX - r.left, ev.clientY - r.top);
+      return { x: w.x, y: w.y, esc: H.escala() || 1, lado: '' };
     }
+    /* no 3D so o que esta na face que a camera ve (o pad furado esta nas duas) */
+    function naFace(camada, lado) {
+      if (!lado || !camada || /multi/i.test(camada)) return true;
+      return lado === 'top' ? /top/i.test(camada) : /bottom/i.test(camada);
+    }
+    /* a distancia (mm) do ponto ate a borda do pad (0 = dentro) */
+    function dPad(p, x, y) {
+      const pd = p.pad || {}, w = (+pd.w || 2 * p.r || 1) / 2, h = (+pd.h || 2 * p.r || 1) / 2, a = -(+pd.rot || 0) * Math.PI / 180;
+      const dx = x - p.x, dy = y - p.y, u = dx * Math.cos(a) - dy * Math.sin(a), v = dx * Math.sin(a) + dy * Math.cos(a);
+      if (/round|circ|ellip/i.test(pd.shape || '') && Math.abs(w - h) < 1e-6) return Math.max(0, Math.hypot(u, v) - w);
+      return Math.hypot(Math.max(0, Math.abs(u) - w), Math.max(0, Math.abs(v) - h));
+    }
+    function padNoPonto(q) {
+      const tol = TOL_PX / q.esc;
+      let melhor = null, dm = Infinity, dc = Infinity;
+      for (const p of padsDaPlaca()) {
+        if (!naFace(p.camada, q.lado)) continue;
+        const lim = p.r * 1.5 + tol + 0.2;
+        if (Math.abs(p.x - q.x) > lim || Math.abs(p.y - q.y) > lim) continue;
+        const d = dPad(p, q.x, q.y), c = Math.hypot(p.x - q.x, p.y - q.y);
+        if (d < dm - 1e-9 || (Math.abs(d - dm) <= 1e-9 && c < dc)) { dm = d; dc = c; melhor = p; }
+      }
+      return melhor && dm <= tol ? { p: melhor, d: dm } : null;
+    }
+    function trilhaNoPonto(q) {
+      if (!st.res || !st.res.segs) return null;
+      const tol = TOL_PX / q.esc;
+      let melhor = null, dm = Infinity, tm = 0;
+      for (const s of st.res.segs) {
+        if (!naFace(s.layer, q.lado)) continue;
+        const vx = s.x2 - s.x1, vy = s.y2 - s.y1, L2 = vx * vx + vy * vy || 1e-12;
+        const t = Math.max(0, Math.min(1, ((q.x - s.x1) * vx + (q.y - s.y1) * vy) / L2));
+        const d = Math.max(0, Math.hypot(q.x - s.x1 - t * vx, q.y - s.y1 - t * vy) - (s.w || 0.25) / 2);
+        if (d < dm) { dm = d; melhor = s; tm = t; }
+      }
+      if (!melhor || dm > tol) return null;
+      /* a ancora do balao: o ponto da trilha mais perto do mouse */
+      return { s: melhor, ax: melhor.x1 + tm * (melhor.x2 - melhor.x1), ay: melhor.y1 + tm * (melhor.y2 - melhor.y1), d: dm };
+    }
+    function mcuNoPonto(q) {
+      const d = dadosDoTopo(), mcus = d && d.mcus, pl = H.placa();
+      if (!mcus || !pl) return null;
+      for (const c of pl.components || []) {
+        if (!mcus[c.ref] || !(c.pads || []).length) continue;
+        const bottom = /bottom/i.test(c.layer || '');
+        if (q.lado && (q.lado === 'bottom') !== bottom) continue;
+        let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+        for (const p of c.pads) { x1 = Math.min(x1, p.x); x2 = Math.max(x2, p.x); y1 = Math.min(y1, p.y); y2 = Math.max(y2, p.y); }
+        if (q.x >= x1 - 1 && q.x <= x2 + 1 && q.y >= y1 - 1 && q.y <= y2 + 1) return { ref: c.ref, ax: (x1 + x2) / 2, ay: (y1 + y2) / 2, bottom, caixa: { x1, y1, x2, y2 } };
+      }
+      return null;
+    }
+    /** o que o clique pega neste ponto: {tipo:'mcu', mcu} | {tipo:'pad', pad} | {tipo:'trilha', trilha} | null */
+    function alvoEm(ev) {
+      const q = pontoNaPlaca(ev); if (!q) return null;
+      const pd = padNoPonto(q), mc = mcuNoPonto(q);
+      /* o corpo do MCU ganha do pad de DENTRO dele (o pad termico/GND embaixo do modulo ESP32); os pinos da borda
+         continuam abrindo o cartao do pad */
+      if (pd && pd.d === 0) {
+        const p = pd.p, dentro = mc && p.ref === mc.ref && Math.min(p.x - mc.caixa.x1, mc.caixa.x2 - p.x, p.y - mc.caixa.y1, mc.caixa.y2 - p.y) > 1.5;
+        return dentro ? { tipo: 'mcu', mcu: mc } : { tipo: 'pad', pad: p };
+      }
+      if (mc) return { tipo: 'mcu', mcu: mc };
+      const tr = trilhaNoPonto(q);
+      if (tr && (tr.d === 0 || !pd || tr.d < pd.d)) return { tipo: 'trilha', trilha: tr };
+      if (pd) return { tipo: 'pad', pad: pd.p };
+      return null;
+    }
+    function padEm(ev) { const q = pontoNaPlaca(ev), r = q && padNoPonto(q); return r ? r.p : null; }
     let cartao = null;
-    let modoCartao = 'lista', cartaoPad = null, netSerie = null;
+    let modoCartao = 'lista', cartaoPad = null, netSerie = null, ultMouse = null;
     function serieApi() { try { return topo.__nexoSimSerie || null; } catch (_e) { return null; } }
     function assinaSerie(net) { const S = serieApi(); if (!S || !net) return; if (netSerie && netSerie !== net) S.solta(netSerie); netSerie = net; S.assina(net); }
     function soltaSerie() { const S = serieApi(); if (S && netSerie) S.solta(netSerie); netSerie = null; }
@@ -716,7 +845,8 @@
         if (modoCartao === 'osc') { assinaSerie(p.net); desenhaOsc(); }
       }
       cartao.classList.toggle('fixo', !!fixo);
-      if (fixo) soltaAnel();   /* o cartao fixo ja marca o pad (a linha ate ele): o anel do mouse nao fica grudado */
+      /* 1.110.0: a marca segue o mouse (some ao sair do alvo); antes o cartao fixo a apagava — e, refeito a cada quadro
+         da simulacao, apagava a marca do mouse o tempo todo enquanto um cartao estava aberto */
       cartao.hidden = false;
       cartao.style.left = Math.min(ev.clientX + 16, window.innerWidth - 330) + 'px';
       cartao.style.top = Math.min(ev.clientY + 14, window.innerHeight - cartao.offsetHeight - 8) + 'px';
@@ -808,35 +938,7 @@
       rafB = requestAnimationFrame(passo);
     }
     const chaveSeg = s => s.trilha + '|' + s.x1.toFixed(3) + ',' + s.y1.toFixed(3) + '|' + s.x2.toFixed(3) + ',' + s.y2.toFixed(3);
-    function trilhaEm(ev) {
-      if (!st.res || !st.res.segs) return null;
-      let melhor = null, dm = 1e9;
-      const dSeg = (px, py, ax, ay, bx, by) => { const vx = bx - ax, vy = by - ay, L2 = vx * vx + vy * vy || 1e-12; const t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / L2)); return Math.hypot(px - ax - t * vx, py - ay - t * vy); };
-      if (H.em3d()) {
-        const V = H.vista3d(), host = H.host3d(); if (!V || !V.projeta || !host) return null;
-        const r = host.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top, e = V.espessura();
-        for (const s of st.res.segs) {
-          const z = /bottom/i.test(s.layer) ? -e - 0.05 : 0.05;
-          const a = V.projeta(s.x1, s.y1, z), b = V.projeta(s.x2, s.y2, z);
-          if (a.atras || b.atras) continue;
-          const d = dSeg(mx, my, a.x, a.y, b.x, b.y);
-          if (d < 8 && d < dm) { dm = d; melhor = s; }
-        }
-        if (!melhor) return null;
-        return { s: melhor, ax: (melhor.x1 + melhor.x2) / 2, ay: (melhor.y1 + melhor.y2) / 2 };
-      }
-      const cv = H.canvas(); if (!cv) return null;
-      const r = cv.getBoundingClientRect(), w = H.telaParaMundo(ev.clientX - r.left, ev.clientY - r.top), esc = H.escala();
-      for (const s of st.res.segs) {
-        const d = dSeg(w.x, w.y, s.x1, s.y1, s.x2, s.y2) * esc;
-        if (d < Math.max(7, s.w / 2 * esc + 3) && d < dm) { dm = d; melhor = s; }
-      }
-      if (!melhor) return null;
-      /* a ancora do balao: o ponto da trilha mais perto do clique */
-      const vx = melhor.x2 - melhor.x1, vy = melhor.y2 - melhor.y1, L2 = vx * vx + vy * vy || 1e-12;
-      const t = Math.max(0, Math.min(1, ((w.x - melhor.x1) * vx + (w.y - melhor.y1) * vy) / L2));
-      return { s: melhor, ax: melhor.x1 + t * vx, ay: melhor.y1 + t * vy };
-    }
+    function trilhaEm(ev) { const q = pontoNaPlaca(ev); return q ? trilhaNoPonto(q) : null; }
     function htmlTrilha(b) {
       const s = b.s, n = v => (+v || 0).toFixed(2).replace('.', ',');
       const v = st.dados && st.dados.nets ? st.dados.nets[s.net] : null;
@@ -883,31 +985,12 @@
        ele tá desconectado, sobe um balãozinho mostrando que ele tá desconectado"): o clique no corpo do MCU (a caixa dos
        pads dele, na tela) abre o balao com a linha ate ele — desconectado (nenhum codigo do NexoCode ligado) ou
        conectado (firmware rodando/parado). O estado vem do Esquema (__nexoSim.mcus) e o balao acompanha */
-    function mcuEm(ev) {
-      const d = dadosDoTopo(), mcus = d && d.mcus, pl = H.placa();
-      if (!mcus || !pl) return null;
-      for (const c of pl.components || []) {
-        if (!mcus[c.ref] || !(c.pads || []).length) continue;
-        let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
-        for (const p of c.pads) { x1 = Math.min(x1, p.x); x2 = Math.max(x2, p.x); y1 = Math.min(y1, p.y); y2 = Math.max(y2, p.y); }
-        x1 -= 1; y1 -= 1; x2 += 1; y2 += 1;
-        const bottom = /bottom/i.test(c.layer || '');
-        const q = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]].map(([x, y]) => telaDe({ ax: x, ay: y, bottom }));
-        if (q.some(p => !p || p.atras)) continue;
-        /* o ponto dentro do quadrilatero projetado (a soma dos sinais dos produtos vetoriais) */
-        let pos = 0, neg = 0;
-        for (let i = 0; i < 4; i++) {
-          const a = q[i], b = q[(i + 1) % 4], cr = (b.x - a.x) * (ev.clientY - a.y) - (b.y - a.y) * (ev.clientX - a.x);
-          if (cr > 0) pos++; else if (cr < 0) neg++;
-        }
-        if (!(pos && neg)) return { ref: c.ref, ax: (x1 + x2) / 2, ay: (y1 + y2) / 2, bottom, caixa: { x1: x1 + 1, y1: y1 + 1, x2: x2 - 1, y2: y2 - 1 } };
-      }
-      return null;
-    }
+    function mcuEm(ev) { const q = pontoNaPlaca(ev); return q ? mcuNoPonto(q) : null; }
     function pintaBalaoMcu(b) {
       const d = dadosDoTopo(), m = d && d.mcus && d.mcus[b.mcu];
       const con = !!(m && m.conectado), est = !d ? 'sem' : con ? (m.rodando ? 'rod' : 'par') : 'desc';
-      if (con) { b.msg = ''; b.abrindo = false; }
+      if (con && !b.eraCon) { b.msg = ''; b.abrindo = false; }   // acabou de conectar: a mensagem do "abrindo" sai
+      b.eraCon = con;
       const sig = est + '|' + (b.msg || '') + (b.abrindo ? '|a' : '');
       if (b.sig === sig) return;
       b.sig = sig;
@@ -921,22 +1004,26 @@
           linhas: [['Corrente', scm && scm.vdd > 0.05 && scm.p != null ? fmt(Math.abs(scm.p / scm.vdd), 'A') + ' (consumo)' : '0 A']],
           lib: (scm && scm.lib) || (m && m.titulo) || '', acoes: '<button data-x title="Fechar">×</button>' }).replace(/<\/div>$/, '')
         + (est === 'sem' ? '<div class="st">a simulação do esquema está desligada</div>'
-          : con ? '<div class="st">● Conectado ao NexoCode</div><div class="f">firmware ' + (est === 'rod' ? 'rodando' : 'parado') + '</div>'
+          /* 1.110.0 (o dono: "mesmo com ele já conectado, eu consigo clicar em cima do conectado pra abrir o código no
+             NexoCode"): o "Conectado" tambem e botao — traz o NexoCode para a frente com o codigo deste projeto (sem
+             rodar de novo) */
+          : con ? '<button class="conectado" data-abre' + (b.abrindo ? ' disabled' : '') + ' title="Abre no NexoCode o código ligado a este projeto">● Conectado ao NexoCode · abrir o código ▸</button><div class="f">' + esc(b.msg || 'firmware ' + (est === 'rod' ? 'rodando' : 'parado')) + '</div>'
           : '<button class="conectar" data-con' + (b.abrindo ? ' disabled' : '') + ' title="Abre no NexoCode o firmware ligado a este projeto, conecta a este microcontrolador e roda">✕ Desconectado · conectar e rodar ▸</button>'
             + '<div class="f">' + esc(b.msg || 'clique para abrir no NexoCode o firmware ligado a ' + proj + ': ele conecta a este microcontrolador e roda a simulação') + '</div>') + '</div>';
       b.el.querySelector('[data-x]').onclick = () => fechaBalao(b);
       /* 1.106.0 (o dono: "quero clicar em cima de 'desconectado' e ele conecta sozinho, pega o código vinculado ao projeto
          e abre, direto na simulação no NexoCode"): POST /api/nexocode/conectar acha a pasta ligada e abre o NexoCode
          com --rodar; o balao vira "Conectado" sozinho quando o batimento chega */
-      const bc = b.el.querySelector('[data-con]');
+      const bc = b.el.querySelector('[data-con]') || b.el.querySelector('[data-abre]');
+      const soAbre = !!b.el.querySelector('[data-abre]');
       if (bc) bc.onclick = async () => {
-        b.abrindo = true; b.msg = 'abrindo o NexoCode…'; pintaBalaoMcu(b);
+        b.abrindo = true; b.msg = 'abrindo o NexoCode…'; b.sig = ''; pintaBalaoMcu(b);
         try {
-          const r = await fetch('/api/nexocode/conectar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projeto: proj, mcu: b.mcu }) });
+          const r = await fetch('/api/nexocode/conectar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projeto: proj, mcu: b.mcu, rodar: !soAbre }) });
           const j = await r.json().catch(() => ({}));
-          b.msg = j.ok ? 'abrindo ' + String(j.pasta || '').split(/[\\/]/).pop() + ' no NexoCode — conecta em alguns segundos' : (j.erro || 'não consegui abrir o NexoCode');
+          b.msg = j.ok ? (soAbre ? String(j.pasta || '').split(/[\\/]/).pop() + ' aberto no NexoCode' : 'abrindo ' + String(j.pasta || '').split(/[\\/]/).pop() + ' no NexoCode — conecta em alguns segundos') : (j.erro || 'não consegui abrir o NexoCode');
         } catch (e) { b.msg = 'não consegui falar com o hub: ' + (e && e.message || e); }
-        b.abrindo = false; pintaBalaoMcu(b);
+        b.abrindo = false; b.sig = ''; pintaBalaoMcu(b);
       };
     }
     /* O MCU MARCADO (1.105.2, o dono: "tem uma seta enorme, e o microcontrolador perdeu o efeito de seleção; era pra
@@ -967,7 +1054,7 @@
     }
     try { topo.addEventListener('nexo-sim', () => { for (const b of baloes) if (b.mcu) pintaBalaoMcu(b); }); } catch (_e) { /* ok */ }
     /* o que os testes e a IA usam daqui */
-    window.HubSimPcbBaloes = { lista: () => baloes.map(b => ({ chave: b.chave || null, cartao: !!b.cartao, mcu: b.mcu || null, estado: b.sig || null, i: b.s ? b.s.i : null })), trilhaEm, alternaBalaoTrilha, mcuEm, alternaBalaoMcu,
+    window.HubSimPcbBaloes = { lista: () => baloes.map(b => ({ chave: b.chave || null, cartao: !!b.cartao, mcu: b.mcu || null, estado: b.sig || null, i: b.s ? b.s.i : null })), trilhaEm, alternaBalaoTrilha, mcuEm, alternaBalaoMcu, alvoEm, mira: () => chaveAlvo(hoverAlvo),
       setas: () => [...setasMcu].map(([ref, a]) => ({ ref, conectado: a.con, bottom: a.bottom })) };
     /* o que a bancada (hub-bancada.js) usa daqui */
     window.HubSimPcbInt = { padEm, padsDaPlaca, H, dados: () => st.dados, mostraCartao };
@@ -1003,6 +1090,9 @@
 .simpcb-mcu.con{border-color:#22c55e} .simpcb-mcu.con .hd b{color:#4ade80} .simpcb-mcu.con .st{color:#4ade80; font-weight:700; margin-top:4px}
 .simpcb-mcu button.conectar{display:block; width:100%; height:auto; margin-top:5px; padding:5px 8px; text-align:left; font:700 12px system-ui, sans-serif;
   color:#fca5a5; border-color:rgba(252,165,165,.45); background:rgba(239,68,68,.12)}
+.simpcb-mcu button.conectado{display:block; width:100%; height:auto; margin-top:5px; padding:5px 8px; text-align:left; font:700 12px system-ui, sans-serif;
+  color:#86efac; border-color:rgba(74,222,128,.5); background:rgba(34,197,94,.12); cursor:pointer}
+.simpcb-mcu button.conectado:hover{background:rgba(34,197,94,.26); color:#dcfce7} .simpcb-mcu button.conectado[disabled]{opacity:.6; cursor:progress}
 .simpcb-mcu button.conectar:hover{background:rgba(239,68,68,.25); color:#fee2e2} .simpcb-mcu button.conectar[disabled]{opacity:.6; cursor:progress}
 .simpcb-balao.simpcb-mcu .f{max-width:300px; white-space:normal; font:11px system-ui, sans-serif; color:#cbd5e1}
 .simpcb-balao .f{margin-top:5px; color:#93c5fd; font:10.5px ui-monospace, monospace; line-height:1.45}
@@ -1024,19 +1114,17 @@
       const trataClique = e => {
         /* a bancada (mover item, ligar fio) pega o clique primeiro */
         if (window.HubBancada && window.HubBancada.consome && window.HubBancada.consome(e)) return true;
-        const p = padEm(e);
-        /* o corpo do MCU ganha do pad de DENTRO dele (o pad termico/GND embaixo do modulo ESP32); os pinos da borda
-           continuam abrindo o cartao do pad */
-        const mc = mcuEm(e);
-        const padDeDentro = p && mc && p.ref === mc.ref && Math.min(p.x - mc.caixa.x1, mc.caixa.x2 - p.x, p.y - mc.caixa.y1, mc.caixa.y2 - p.y) > 1.5;
-        if (mc && (!p || padDeDentro)) { alternaBalaoMcu(mc); return true; }
-        if (p) { mostraCartao(p, e, true); return true; }
-        const sg = trilhaEm(e);
-        if (sg) { alternaBalaoTrilha(sg); return true; }
-        return false;
+        /* 1.110.0: o MESMO alvo que esta marcado sob o mouse (alvoEm) */
+        const a = alvoEm(e);
+        if (!a) return false;
+        if (a.tipo === 'mcu') alternaBalaoMcu(a.mcu);
+        else if (a.tipo === 'pad') mostraCartao(a.pad, e, true);
+        else alternaBalaoTrilha(a.trilha);
+        return true;
       };
       let baixo3d = null;
       const guarda = alvo => {
+        { const sm = document.createElement('style'); sm.textContent = '.simpcb-mira, .simpcb-mira *{cursor:pointer !important}'; document.head.append(sm); }
         alvo.addEventListener('mousedown', e => {
           if (e.button !== 0) return;
           e.stopPropagation(); e.preventDefault();
@@ -1059,15 +1147,22 @@
           baixo3d = null;
           if (!andou) mostraCartao(null);   /* a vista nao seleciona nada no Simulador (pcbframe: aoClicar sem efeito nos modos sim) */
         }, true);
-        alvo.addEventListener('mousemove', e => {
-          if (cartao && cartao.classList.contains('fixo') && !cartao.hidden) return;
-          const p = padEm(e);
-          const mudou = (p && p.ref + p.nome) !== (hoverPad && hoverPad.ref + hoverPad.nome);
-          /* so o anel no pad (pedido do dono: nada de balao ao passar o mouse); o clique abre o cartao (Analisar) */
-          hoverPad = p;
-          if (mudou && !H.em3d()) H.redesenha();
-        }, { passive: true });
-        alvo.addEventListener('mouseleave', () => { soltaAnel(); if (cartao && !cartao.classList.contains('fixo')) cartao.hidden = true; }, { passive: true });
+        /* 1.110.0: ao passar o mouse, o que o clique vai pegar fica MARCADO (contorno ciano no pad, na trilha inteira ou
+           no MCU) e o cursor vira a mãozinha; so a marca (pedido do dono: nada de balao ao passar o mouse). Calculado uma
+           vez por quadro; girando a vista (botao apertado) nao marca */
+        let pedeMira = 0;
+        const mira = () => {
+          pedeMira = 0;
+          const e = ultMouse; if (!e) return;
+          const a = e.buttons ? null : alvoEm(e);
+          alvo.classList.toggle('simpcb-mira', !!a);
+          if (chaveAlvo(a) === chaveAlvo(hoverAlvo)) { hoverAlvo = a; return; }
+          hoverAlvo = a;
+          if (H.em3d()) marcaAlvo3d(); else H.redesenha();
+        };
+        alvo.addEventListener('mousemove', e => { ultMouse = { clientX: e.clientX, clientY: e.clientY, buttons: e.buttons }; if (!pedeMira) pedeMira = requestAnimationFrame(mira); }, { passive: true });
+        alvo.addEventListener('wheel', e => { ultMouse = { clientX: e.clientX, clientY: e.clientY, buttons: 0 }; if (!pedeMira) pedeMira = requestAnimationFrame(() => requestAnimationFrame(mira)); }, { passive: true });
+        alvo.addEventListener('mouseleave', () => { ultMouse = null; alvo.classList.remove('simpcb-mira'); soltaAnel(); if (cartao && !cartao.classList.contains('fixo')) cartao.hidden = true; }, { passive: true });
         alvo.addEventListener('dblclick', e => e.stopPropagation(), true);
         alvo.addEventListener('contextmenu', e => { e.stopPropagation(); e.preventDefault(); }, true);
       };

@@ -55,7 +55,7 @@ caso('1.105.1: o clique no 3D chega ao Simulador (pointerdown) e não seleciona 
   assert.ok(/alvo\.addEventListener\('pointerdown', e => \{[\s\S]{0,200}if \(trataClique\(e\)\) \{ e\.stopPropagation\(\); return; \}/.test(pcb), 'o 3D trata o clique no pointerdown');
   assert.ok(/if \(H\.em3d\(\)\) return;   \/\* o 3D trata no pointerdown/.test(pcb), 'o mousedown não trata de novo no 3D');
   assert.ok(/if \(AREA_SIM\) return;/.test(pf) && (pf.match(/if \(AREA_SIM\) return;/g) || []).length >= 2, 'aoClicar/aoMenu sem efeito na área do Simulador');
-  assert.ok(/function soltaAnel\(\)/.test(pcb) && /if \(fixo\) soltaAnel\(\);/.test(pcb), 'o anel do pad não gruda');
+  assert.ok(/function soltaAnel\(\)/.test(pcb) && /a marca segue o mouse/.test(pcb) && !/if \(fixo\) soltaAnel\(\);/.test(pcb), 'o anel do pad não gruda');
 });
 caso('1.105.2: o MCU marcado fica SELECIONADO (o destaque do editor) enquanto o balão está aberto — sem a seta 3D', () => {
   assert.ok(!/ConeGeometry\(2\.6, 4\.5/.test(pcb) && /V\.extra\('nexocode-mcu', null\)/.test(pcb), 'sem a seta enorme');

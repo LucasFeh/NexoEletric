@@ -472,7 +472,7 @@ caso('1.105.0: o clique no microcontrolador na PCB 2D/3D mostra se o NexoCode es
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
   const sim = ler('hub-simulador.js'), pcb = ler('hub-simulador-pcb.js');
   assert.ok(/mcus: Object\.fromEntries\(/.test(sim) && /conectado: !!n, rodando: !!\(n && n\.rodando\)/.test(sim), 'o Esquema publica os MCUs e a conexão do NexoCode');
-  assert.ok(/function mcuEm\(ev\)/.test(pcb) && /function alternaBalaoMcu\(hit\)/.test(pcb) && /if \(mc && \(!p \|\| padDeDentro\)\) \{ alternaBalaoMcu\(mc\); return true; \}/.test(pcb), 'o clique no corpo do MCU (e no pad de dentro dele) abre o balão');
+  assert.ok(/function mcuEm\(ev\)/.test(pcb) && /function alternaBalaoMcu\(hit\)/.test(pcb) && /return dentro \? \{ tipo: 'mcu', mcu: mc \} : \{ tipo: 'pad', pad: p \};/.test(pcb) && /if \(a\.tipo === 'mcu'\) alternaBalaoMcu\(a\.mcu\);/.test(pcb), 'o clique no corpo do MCU (e no pad de dentro dele) abre o balão');
   assert.ok(/✕ Desconectado/.test(pcb) && /● Conectado ao NexoCode/.test(pcb) && /if \(b\.mcu\) pintaBalaoMcu\(b\)/.test(pcb), 'desconectado/conectado, atualizado com a simulação');
 });
 caso('1.104.0: só 2D e 3D — o 3D é a bancada, e as peças do NexoCode (Wokwi) ficam sobre a mesa', () => {
@@ -509,6 +509,25 @@ caso('1.103.0: as peças vivas do Wokwi (NexoCode → gpio_lote.pecas) no Simula
     const e = await win.HubSimulador.mcp({ acao: 'pecas' });
     assert.ok(e.pecas['net:K'] && !('png' in e.pecas['net:K']));
   })();
+});
+
+caso('1.110.0: no 2D/3D o que o clique vai pegar fica marcado ao passar o mouse (o mesmo teste), pela forma de verdade', () => {
+  const pcb = fs.readFileSync(path.join(RAIZ, 'hub-simulador-pcb.js'), 'utf8');
+  const fn = nome => { const i = pcb.indexOf('    function ' + nome + '('); const j = pcb.indexOf('\n    }\n', i); assert.ok(i >= 0 && j > i, nome); return pcb.slice(i, j + 6); };
+  const ctx = new Function('st', 'padsDaPlaca', 'const TOL_PX = 7;\n' + fn('naFace') + fn('dPad') + fn('padNoPonto') + fn('trilhaNoPonto') + '\nreturn { naFace, dPad, padNoPonto, trilhaNoPonto };');
+  const pads = [{ ref: 'U1', nome: '1', x: 0, y: 0, r: 1, camada: 'Top', pad: { w: 2, h: 0.6, rot: 0 } }, { ref: 'U1', nome: '2', x: 0, y: 1.27, r: 1, camada: 'Top', pad: { w: 2, h: 0.6, rot: 0 } }];
+  const st = { res: { segs: [{ trilha: 't1', layer: 'Top', x1: -10, y1: 5, x2: 10, y2: 5, w: 2 }] } };
+  const G = ctx(st, () => pads);
+  assert.strictEqual(G.dPad(pads[0], 0.95, 0.25), 0, 'a ponta do pad comprido está dentro (antes contava só o centro)');
+  assert.ok(Math.abs(G.dPad({ x: 0, y: 0, r: 1, pad: { w: 2, h: 0.6, rot: 90 } }, 0, 0.95)) < 1e-9, 'o pad girado');
+  assert.strictEqual(G.padNoPonto({ x: 0.9, y: 0.2, esc: 40, lado: 'top' }).p.nome, '1');
+  assert.strictEqual(G.padNoPonto({ x: 0.9, y: 0.2, esc: 40, lado: 'bottom' }), null, 'no 3D só a face que a câmera vê');
+  assert.ok(G.trilhaNoPonto({ x: 3, y: 5.9, esc: 40, lado: 'top' }).d === 0, 'a borda da trilha larga pega (antes só a linha do meio, 8 px)');
+  assert.strictEqual(G.trilhaNoPonto({ x: 3, y: 7, esc: 40, lado: 'top' }), null, 'longe da trilha não pega');
+  assert.ok(G.naFace('Multi', 'bottom') && !G.naFace('MidLayer1', 'top') && G.naFace('Bottom', ''), 'as faces');
+  assert.ok(/const a = e\.buttons \? null : alvoEm\(e\);/.test(pcb) && /const a = alvoEm\(e\);\n\s+if \(!a\) return false;/.test(pcb), 'o passar do mouse e o clique usam o mesmo alvoEm');
+  assert.ok(/V\.extra\('simAlvo', g\)/.test(pcb) && /function marcaAlvo2d\(ctx, px\)/.test(pcb) && /\.simpcb-mira, \.simpcb-mira \*\{cursor:pointer/.test(pcb), 'a marca no 3D e no 2D e a mãozinha');
+  assert.ok(/<button class="conectado" data-abre/.test(pcb) && /rodar: !soAbre/.test(pcb), 'o MCU conectado: clicar em Conectado abre o código no NexoCode');
 });
 
 (async () => { for (const f of fila) await f();

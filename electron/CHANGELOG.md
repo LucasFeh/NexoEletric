@@ -4,6 +4,23 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.110.0
+
+A mira no 2D e no 3D do Simulador (o dono: "na visão 3D, antes de eu clicar em cima dos pinos, trilhas, quero poder
+passar o mouse e ver marcando o que eu vou clicar; tô mirando uma coisa e clicando outra, às vezes eu clico e não vai").
+
+- Ao passar o mouse, o que o clique vai pegar fica marcado em ciano (o pad com o contorno girado dele, a trilha
+  inteira, a caixa do microcontrolador) e o cursor vira a mãozinha. A marca e o clique usam o MESMO teste: o que está
+  marcado é o que abre.
+- O teste pela forma de verdade: o ponto da placa sob o mouse (no 3D, o raio no plano da face que a câmera vê) contra
+  o retângulo do pad e a largura da trilha; dentro ganha, senão o mais perto até 7 px. Antes o pad contava só pelo
+  centro (até 14 px: a borda de um pad grande com zoom não pegava e o pad vizinho roubava o clique da trilha) e a trilha
+  pela linha do meio (até 8 px: a trilha larga não pegava). No 3D só conta o que está na face visível.
+- A marca não some mais enquanto um cartão de pino está aberto (o cartão refeito a cada quadro a apagava).
+- Microcontrolador conectado: o "● Conectado ao NexoCode" do balão agora é botão: abre no NexoCode o código ligado ao
+  projeto (sem rodar de novo) — o dono: "mesmo com ele já conectado, eu consigo clicar em cima do conectado pra abrir o
+  código no NexoCode".
+
 ## 1.109.0
 
 Alterar valores na simulação e ver o efeito, até queimar (o dono: "quero adicionar modificação de valor de resistência,
