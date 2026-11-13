@@ -4,6 +4,13 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.108.1
+
+- Balão do LED: quando o nome na biblioteca é a própria cor ("VERDE"), ele não aparece duas vezes — fica só a cor
+  escrita na cor do LED (o dono: "o verde não precisa aparecer duas vezes").
+- A corrente aparece sempre no balão do pino (0 A também) e o do microcontrolador mostra o consumo (o dono: "a corrente
+  precisa aparecer no balão também").
+
 ## 1.108.0
 
 O LED aceso no 3D e o balão padrão (o dono: "quando o LED for devidamente alimentado, tenha efeito de iluminado no 3D";

@@ -408,6 +408,7 @@ caso('1.108.0: o LED aceso brilha no 3D e no 2D; o balão padrão (tipo, net, te
   assert.ok(/function caixaBalao\(o\)/.test(pcb) && /\.bx \.vv\.off\{color:#4b5563\} \.bx \.vv\.on\{color:#ff2d2d/.test(pcb), 'a tensão no meio: cinza em 0 V, vermelho energizado');
   assert.ok((pcb.match(/caixaBalao\(\{/g) || []).length >= 3, 'o mesmo padrão no pino, na trilha e no MCU');
   assert.ok(/\['#34c759', 'verde'\]/.test(pcb) && /'<div class="cr" style="color:'/.test(pcb), 'a cor do LED escrita na cor dele');
+  assert.ok(/if \(o\.lib && !libRepete\)/.test(pcb) && /: '0 A'\]\] : \[\],/.test(pcb) && /' \(consumo\)'/.test(pcb), '1.108.1: a cor não repete e a corrente sempre aparece');
 });
 caso('1.107.0: o + sai do conector e o GND volta para ele (sentido certo); cores; nada do simulador no esquema principal', () => {
   /* a fonte da simulacao e ideal (sem pad): o que os pinos nao fecham entra/sai pelo pad do CONECTOR da net */

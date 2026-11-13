@@ -232,7 +232,9 @@
       const ls = (o.linhas || []).filter(x => x && x[1] != null && x[1] !== '');
       if (ls.length) h += '<div class="ls">' + ls.map(([k, v]) => '<span>' + escB(k) + '</span><b>' + escB(v) + '</b>').join('') + '</div>';
       if (o.extra) h += o.extra;
-      if (o.lib) h += '<div class="lib">' + escB(o.lib) + '</div>';
+      /* 1.108.1: a lib que e so a cor (o LED "VERDE") nao repete — fica a cor escrita na cor dele */
+      const libRepete = o.lib && o.cor && o.cor.nome && String(o.lib).trim().toLowerCase().replace(/[^a-zà-ú]/g, '') === String(o.cor.nome).toLowerCase().replace(/[^a-zà-ú]/g, '');
+      if (o.lib && !libRepete) h += '<div class="lib">' + escB(o.lib) + '</div>';
       if (o.cor && o.cor.nome) h += '<div class="cr" style="color:' + escB(o.cor.hex || '#e5e7eb') + '">' + escB(o.cor.nome) + '</div>';
       return h + '</div>';
     }
@@ -624,7 +626,8 @@
       let h = caixaBalao({
         tipo: sc ? sc.tipo : '', nome: p.ref, sub: 'pino ' + p.nome + (ds && ds.pino && ds.pino.nome && ds.pino.nome !== p.nome ? ' (' + ds.pino.nome + ')' : ''),
         net: p.net || 'sem net', v: pin ? pin.v : null, nota: pin ? '' : 'sem simulação neste pino',
-        linhas: pin && Math.abs(pin.i) > 1e-10 ? [['Corrente', fmt(Math.abs(pin.i), 'A') + (pin.i > 0 ? ' entrando' : ' saindo')]] : [],
+        /* 1.108.1: a corrente sempre (0 A tambem) */
+        linhas: pin ? [['Corrente', Math.abs(pin.i) > 1e-10 ? fmt(Math.abs(pin.i), 'A') + (pin.i > 0 ? ' entrando' : ' saindo') : '0 A']] : [],
         extra, lib: (sc && sc.lib) || (p.comp && p.comp.comment) || '', cor: corDoComp(sc),
       });
       /* ANALISAR: a lista (o que esta acima) ou o osciloscopio da net do pad (o sinal passo a passo, do esquema) */
@@ -844,7 +847,8 @@
       b.el.classList.toggle('desc', est !== 'rod' && est !== 'par'); b.el.classList.toggle('con', con);
       const scm = compSim(b.mcu);
       b.el.innerHTML = caixaBalao({ tipo: 'mcu', nome: b.mcu, net: con ? 'NexoCode ●' : 'sem NexoCode', v: scm && scm.vdd != null ? scm.vdd : null,
-          linhas: [], lib: (scm && scm.lib) || (m && m.titulo) || '', acoes: '<button data-x title="Fechar">×</button>' }).replace(/<\/div>$/, '')
+          linhas: [['Corrente', scm && scm.vdd > 0.05 && scm.p != null ? fmt(Math.abs(scm.p / scm.vdd), 'A') + ' (consumo)' : '0 A']],
+          lib: (scm && scm.lib) || (m && m.titulo) || '', acoes: '<button data-x title="Fechar">×</button>' }).replace(/<\/div>$/, '')
         + (est === 'sem' ? '<div class="st">a simulação do esquema está desligada</div>'
           : con ? '<div class="st">● Conectado ao NexoCode</div><div class="f">firmware ' + (est === 'rod' ? 'rodando' : 'parado') + '</div>'
           : '<button class="conectar" data-con' + (b.abrindo ? ' disabled' : '') + ' title="Abre no NexoCode o firmware ligado a este projeto, conecta a este microcontrolador e roda">✕ Desconectado · conectar e rodar ▸</button>'
