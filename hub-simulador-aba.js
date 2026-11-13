@@ -77,8 +77,16 @@
     };
     vp.append(fSch, linha);
     let atual = 'esquema';
-    function poe(m) {
-      atual = m; grava(PREF, m);
+    /* 1.118.1: projeto sem placa (sem board.js): o 2D/3D lembrado abria a tela vazia "board.js nao encontrado" e a aba
+       parecia nao abrir — sem placa a aba fica no Esquema e o 2D/3D avisa por que nao da */
+    let semPlaca = false;
+    const avisoSemPlaca = 'este projeto ainda não tem PCB (board.js): o 2D e o 3D mostram a placa — simule pelo Esquema';
+    function marcaSemPlaca() {
+      for (const k of ['sim2d', 'sim3d']) { const b = bts[k]; b.style.opacity = semPlaca ? '.45' : ''; b.title = semPlaca ? avisoSemPlaca : DICA[k]; }
+    }
+    function poe(m, auto) {
+      if (m !== 'esquema' && semPlaca) { meta.textContent = avisoSemPlaca + ' — ' + projeto; if (!auto) return; m = 'esquema'; }
+      atual = m; if (!auto) grava(PREF, m);
       const placa = m !== 'esquema';
       if (placa) pcb(m).hidden = false; else if (fPcb) fPcb.hidden = true;
       fSch.hidden = placa && !chk.checked;
@@ -93,7 +101,13 @@
     abrir.onclick = () => { const f = fSch.hidden && fPcb ? fPcb : fSch; window.open(f.src); };
     raiz.append(bar, vp);
     const salvo0 = le(PREF, 'esquema'), salvo = salvo0 === 'bancada' ? 'sim3d' : salvo0;
-    poe(MODOS.some(([k]) => k === salvo) ? salvo : 'esquema');
+    const inicial = MODOS.some(([k]) => k === salvo) ? salvo : 'esquema';
+    /* abre no Esquema enquanto confere se ha placa; com placa vai para o modo lembrado */
+    poe('esquema', true);
+    fetch('Projects/' + q + '/board.js', { method: 'HEAD', cache: 'no-store' }).then(r => r.ok, () => true).then(tem => {
+      semPlaca = !tem; marcaSemPlaca();
+      if (inicial !== 'esquema' && tem && atual === 'esquema') poe(inicial, true);
+    });
     return raiz;
   }
   window.HubSimAba = { pane };

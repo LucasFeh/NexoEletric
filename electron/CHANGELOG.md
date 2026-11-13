@@ -4,6 +4,15 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.118.1
+
+- A aba Simulador num projeto SEM PCB abria no modo 2D/3D lembrado de outro projeto e mostrava só "board.js não
+  encontrado" (parecia não abrir). Agora ela confere se o projeto tem placa: sem placa abre no Esquema (que é quem
+  simula) e o 2D/3D avisa por que não dá; com placa vai para o modo lembrado.
+- Portas lógicas (74HC00, 4011...): o painel do componente mostra cada porta — "Porta A: 1, 2 → 3 · NAND(1,1) = 0 ·
+  12 mV (0)" —, a porta sem uso, a entrada solta (alerta: na lógica CMOS o nível fica indefinido) e a alimentação.
+- Microcontrolador: o MCLR/RESET solto (sem fio, ou numa net só dele) dá o alerta "ligue um pull-up (~10 kΩ ao VDD)".
+
 ## 1.118.0
 
 Simulador — lote 6 (o último) da lib Almox e as correções do lote 5 (testado ao vivo no SIM-TIPOS pela outra sessão).

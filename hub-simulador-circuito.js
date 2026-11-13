@@ -1779,6 +1779,10 @@
         if (porta && c.pinos.length >= 14) {
           const vcc = achaPino(info, [/^(VCC|VDD)$/i], 14), gnd = achaPino(info, [/^(GND|VSS)$/i], 7);
           info.tipo = 'logica'; info.rotulo = 'Portas lógicas ' + porta.f.toUpperCase() + ' ' + (c.comment || '');
+          /* 1.118.1: cada porta (entradas → saida) para o painel mostrar como os canais do amp-op */
+          info.funcao = porta.f; info.vccP = vcc; info.gndP = gnd;
+          info.portas = porta.g.map(g => ({ ins: g.slice(0, -1).map(n => achaPino(info, [], n)), out: achaPino(info, [], g[g.length - 1]) }));
+          info.vmaxL = /74(?:LS|F|S|ALS)\d|SN74LS/.test(desc) ? 5.25 : /CD40|HEF40|MC140/.test(desc) ? 18 : 6;
           const fn = { nand: (a, b) => 1 - a * b, and: (a, b) => a * b, or: (a, b) => a + b - a * b, nor: (a, b) => 1 - (a + b - a * b), xor: (a, b) => a + b - 2 * a * b, not: a => 1 - a }[porta.f];
           for (const g of porta.g) {
             const ins = g.slice(0, -1).map(n => achaPino(info, [], n)), out = achaPino(info, [], g[g.length - 1]);
@@ -2383,6 +2387,29 @@
           lim(io, info.imax, 1.5, 'corrente de saída', 'A', 'saída sobrecarregada: ' + fmt(io, 'A') + ' (máx ' + fmt(info.imax, 'A') + ' = ' + fmt(info.pout, 'W') + '; queima acima de 1,5×)');
           break;
         }
+        case 'logica': {
+          const vg = info.gndP && info.gndP.net ? v(info.gndP.net) : 0, vc = info.vccP && info.vccP.net ? v(info.vccP.net) - vg : NaN;
+          out.linhas.push(L('Alimentação', 'VCC (pino ' + (info.vccP ? info.vccP.num : '14') + ') − GND (pino ' + (info.gndP ? info.gndP.num : '7') + '); máx ' + fmt(info.vmaxL, 'V'), isFinite(vc) ? fmt(vc, 'V') : 'sem VCC'));
+          if (!(vc > 1)) { out.alertas.push('sem alimentação no VCC: as portas não funcionam'); break; }
+          const F = { nand: 'NAND', and: 'AND', or: 'OR', nor: 'NOR', xor: 'XOR', not: 'NOT' }[info.funcao] || info.funcao.toUpperCase();
+          const calc = { nand: a => 1 - a[0] * a[1], and: a => a[0] * a[1], or: a => Math.max(a[0], a[1]), nor: a => 1 - Math.max(a[0], a[1]), xor: a => a[0] ^ a[1], not: a => 1 - a[0] }[info.funcao];
+          info.portas.forEach((g, k) => {
+            const letra = String.fromCharCode(65 + k);
+            const usadas = g.ins.filter(p => p && p.net), saida = g.out && g.out.net;
+            const rot = 'Porta ' + letra + ': ' + g.ins.map(p => p ? p.num : '?').join(', ') + ' → ' + (g.out ? g.out.num : '?');
+            if (!usadas.length && !saida) { out.linhas.push(L(rot, 'sem uso', '—')); return; }
+            const soltas = g.ins.filter(p => !p || !p.net || flut.has(p.net));
+            const niveis = g.ins.map(p => p && p.net && !flut.has(p.net) ? (v(p.net) - vg > vc / 2 ? 1 : 0) : null);
+            const dom = { nand: [0, 1], and: [0, 0], or: [1, 1], nor: [1, 0] }[info.funcao];
+            const esperado = !niveis.some(x => x == null) ? calc(niveis) : dom && niveis.includes(dom[0]) ? dom[1] : null;
+            const vo = saida ? v(g.out.net) - vg : NaN;
+            out.linhas.push(L(rot, F + '(' + niveis.map(x => x == null ? '?' : x).join(',') + ') = ' + (esperado == null ? '?' : esperado),
+              saida ? fmt(vo, 'V') + (vo > vc / 2 ? ' (1)' : ' (0)') : 'saída solta'));
+            if (soltas.length) out.alertas.push('porta ' + letra + ': entrada ' + soltas.map(p => p ? p.num : '?').join(', ') + ' solta — na lógica CMOS o nível fica indefinido (ligue a VCC ou GND)');
+          });
+          lim(vc, info.vmaxL, info.vmaxL === 18 ? 20 / 18 : 7 / info.vmaxL, 'alimentação', 'V', 'alimentação de ' + fmt(vc, 'V') + ' (máx ' + fmt(info.vmaxL, 'V') + ')');
+          break;
+        }
         case 'sensor': {
           const r = elRes.get(info.el); if (!r) break;
           if (info.sub === 'corrente') {
@@ -2708,11 +2735,15 @@
             const pr = info.pinos.find(p => /^(?:~|\/|!|N_?)?(?:MCLR|RESET|RST|CHIP_PU)\b/i.test(String(p.name || '').trim()) || /ESP/.test(info.fam && info.fam.nome || '') && /^EN$/i.test(String(p.name || '').trim()))
               || (info.pinoReset ? info.pinos.find(p => +p.num === info.pinoReset) : null);
             const vdd = info.alim && info.alim[0] ? v(info.alim[0].net) - (info.gnd ? v(info.gnd.net) : 0) : NaN;
-            if (pr && pr.net && isFinite(vdd) && vdd > 1) {
-              const vr = v(pr.net) - (info.gnd ? v(info.gnd.net) : 0);
+            const vr = pr && pr.net ? v(pr.net) - (info.gnd ? v(info.gnd.net) : 0) : NaN;
+            if (pr && pr.net && isFinite(vdd) && vdd > 1 && !flut.has(pr.net) && isFinite(vr)) {
               out.linhas.push(L('Reset (' + (pr.name || pr.num) + ')', 'em nível baixo o microcontrolador fica parado', fmt(vr, 'V') + (vr < 0.3 * vdd ? ' (EM RESET)' : ' (rodando)')));
               if (vr < 0.3 * vdd) out.alertas.push('o pino ' + (pr.name || pr.num) + ' está em ' + fmt(vr, 'V') + ': o microcontrolador está EM RESET (não roda)');
-            } else if (pr && !pr.net) out.linhas.push(L('Reset (' + (pr.name || pr.num) + ')', 'solto: sem o pull-up (~10 kΩ ao VDD) pode resetar sozinho', 'solto'));
+            } else if (pr && isFinite(vdd) && vdd > 1) {
+              const nm = /^\d+$/.test(String(pr.name || '')) || !pr.name ? 'pino ' + pr.num : pr.name;
+              out.linhas.push(L('Reset (' + nm + ')', 'solto: sem o pull-up o ruído reseta o microcontrolador', 'SOLTO'));
+              out.alertas.push((/PIC/.test(info.fam && info.fam.nome || '') ? 'MCLR' : 'o reset') + ' (' + nm + ') solto: ligue um pull-up (~10 kΩ ao VDD) — solto, o ruído reseta o microcontrolador');
+            }
           }
           break;
         }

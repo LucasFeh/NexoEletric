@@ -985,6 +985,19 @@ caso('1.118.0 (lote 6 da lib Almox): MCU, sensores, CIs, módulos, AC/DC; e as c
   assert.ok(vmin > 4.7, 'HLK-5M05 na senoide de 220 V RMS: a saída fica em 5 V no ciclo todo (mín ' + vmin + ')');
 });
 
+caso('1.118.1: o painel das portas lógicas (cada porta: entradas → saída) e o MCLR solto', () => {
+  const roda = cs => { const mt = C.monta(cs, {}); return C.analisa(mt, M.cria(mt.elementos, { terra: mt.terra }).dc()).comps; };
+  const P = (n, nm, net) => pin(n, nm || '', net);
+  const a = roda([{ ref: 'U3', comment: '74HC00N', sym: 'CIRCUITO INTEGRADO [14P]', pinos: Array.from({ length: 14 }, (_, i) => P(i + 1, String(i + 1), { 0: '+5V', 1: '+5V', 2: 'Y', 3: 'GND', 4: 'SOLTA', 5: 'Y2', 6: 'GND', 13: '+5V' }[i] || null)) }, { ref: 'R1', valor: '10k', pinos: [P(1, '1', 'Y'), P(2, '2', '+5V')] }]).U3;
+  const l = t => a.linhas.find(x => x.t.startsWith(t)) || {};
+  assert.ok(/NAND\(1,1\) = 0/.test(l('Porta A').f) && /\(0\)/.test(l('Porta A').r), 'porta A: NAND(1,1) = 0 e a saída baixa');
+  assert.ok(/= 1/.test(l('Porta B').f) && a.alertas.some(x => /entrada 5 solta/.test(x)), 'porta B: um 0 decide (=1) e a entrada solta avisa');
+  assert.strictEqual(l('Porta C').f, 'sem uso');
+  const pic = mclr => roda([{ ref: 'U2', comment: 'PIC16F877A-I/P', sym: 'MICROCONTROLADOR [40P]', pinos: Array.from({ length: 40 }, (_, i) => P(i + 1, String(i + 1), { 1: mclr, 11: '+5V', 32: '+5V', 12: 'GND', 31: 'GND' }[i + 1] || null)) }]).U2;
+  assert.ok(pic('MCLR').alertas.some(x => /MCLR \(pino 1\) solto/.test(x)) && pic(null).alertas.some(x => /solto/.test(x)), 'o MCLR solto (net só dele ou sem net): o alerta do pull-up');
+  assert.ok(!pic('+5V').alertas.some(x => /solto|RESET/.test(x)), 'com o pull-up: nada');
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();
