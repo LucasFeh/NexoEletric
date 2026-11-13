@@ -4,6 +4,32 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.113.0
+
+Simulador — lote 1 da lib Almox (pedido do dono: conferir cada TIPO de componente: funcionamento, a QUEIMA com o
+motivo e a alteração de valor com os campos que importam). Projeto de teste: SIM-TIPOS.
+
+- Campos por tipo: cada componente traz os seus campos editáveis (no menu do esquema do Simulador, no balão da placa
+  e no MCP `parametros {ref}` — sem campo devolve a lista) e a regra de queima está na análise.
+- Resistor: potência pelo footprint (0402 1/16 … 2512 1 W; THT pelo corpo 0207/0309/0411 ou pelo passo do AXIAL);
+  "PR03 12K 3W" lido certo. Rede de resistores (4114R/4116R DIP isolados 1-14, 2-13…; SIP em pares; barramento com o
+  pino 1 comum): cada resistor simulado, a potência de cada um e a queima do que passar de 2×.
+- Capacitor: a leitura do nome corrigida (47PF, "100 nF" com espaço, "0.01F/10nF", o código 472, kV); supercapacitor
+  em F (2,7/5,5 V); a polaridade pela categoria (eletrolítico, tântalo, supercap: o pino +, senão o 1); campo
+  Tensão nominal. Queima acima de 1,2× a nominal e o polarizado com mais de 1 V ao contrário.
+- LED: a cor pelo nome sem os falsos ("Amarelo REDondo" era vermelho, "INFRAVERMELHO" era vermelho), ultra verde/InGaN
+  ≈ 3 V, o Vf e a corrente do nome ("3V 200mA"); LED RGB/bicolor de 3-4 pinos (um LED por cor, o comum, a cor
+  misturada); o endereçável (WS2812) fica de fora. Queima também com mais de 5 V ao contrário.
+- Diodo: zener e TVS pela categoria da lib (Vz/Vbr do nome: "10V 0.5W", SMBJ14A, SM712, SM24); o "Potência" do nome
+  não vira mais potenciômetro; If máx e VRRM pela família (1N400x, 1N540x, UF/FR, 1N58xx, SSxx, M1-M7, S1A-S1M,
+  1N4148) ou pelo nome ("6A 800V", "1.2kV 8A"). Campos If máx/VRRM (retificador/Schottky), Vz/potência (zener), Vbr
+  (TVS). Queima: If > 1,5× a máxima, o retificador com reverso acima do VRRM, o zener acima de 1,5× a potência.
+- Transistor: BD676/678/680/682, BDX54 e TIP125-127 agora PNP; "PNP"/"NPN" do nome manda; famílias novas (BC846,
+  BC237, BD237/238, FZT, FMMT, MJD44H11, MMBTA92, BCP56); Ic máx/Vceo/Pd por família ou pelo nome ("160V 600mA",
+  "100V 2W 3A"; o "A" do BC546A não é mais corrente); a pinagem do encapsulamento quando os pinos não têm nome
+  (2N2222/3904 E-B-C, BC5xx C-B-E, TIP B-C-E, BD13x E-C-B, SOT-23 B-E-C). Campos β, Ic máx, Pd e Vceo (o β muda a
+  simulação). Queima: Ic > 1,5× a máxima, Vce·Ic > 1,5× a Pd, Vce acima da Vceo.
+
 ## 1.112.0
 
 A barra de ferramentas da vista PCB ficou bem menor, sem perder nenhuma função (o dono: "essa barra de ferramenta eu quero

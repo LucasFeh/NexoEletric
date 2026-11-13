@@ -247,17 +247,20 @@
       const rot = { resistor: 'Resistência', capacitor: 'Capacitância', indutor: 'Indutância' }[sc.tipo];
       const lin = (k, r, v, dica) => '<div class="ed"><span>' + escB(r) + '</span><input data-ed-in="' + k + '" value="' + escB(v == null ? '' : v) + '" placeholder="' + escB(dica) + '"><button data-ed="' + k + '">aplicar</button></div>';
       if (rot) h += lin('valor', rot, sc.valor, '330, 4k7, 100n');
-      /* 1.111.0: a potencia nominal e a tolerancia do resistor */
-      if (sc.tipo === 'resistor') {
-        const pot = p => { for (const d of [2, 4, 8, 16]) if (Math.abs(p * d - 1) < 1e-9) return '1/' + d; return String(+(+p).toFixed(3)).replace('.', ','); };
-        h += lin('potencia', 'Potência (W)', sc.potencia ? pot(sc.potencia) : '', '1/4, 0,5');
-        h += lin('tol', 'Tolerância (%)', sc.tol ? String(sc.tol).replace('.', ',') : '', '5, 1, 10');
-      }
-      if (sc.tipo === 'led') {
-        h += lin('vf', 'Tensão de ativação', sc.vf != null ? String(+(+sc.vf).toFixed(2)).replace('.', ',') : '', 'V, ex. 2,1');
-        h += lin('imax', 'Corrente máxima', sc.imax != null ? String(+(sc.imax * 1000).toFixed(1)).replace('.', ',') + 'm' : '', 'A, ex. 20m');
-      }
+      /* 1.111.0/1.113.0: os campos de cada tipo (vem do circuito: a potencia/tolerancia do resistor, a tensao do capacitor,
+         Vf/corrente do LED, If/VRRM/Vz do diodo, β/Ic/Pd/Vceo do transistor) */
+      for (const cp of sc.campos || []) h += lin(cp.k, cp.rot, txtCampo(cp), cp.dica || '');
       return h;
+    }
+    /* o valor de um campo como se digita: 1/4 (W), 20m (A), 2,1 (V), 250 (β), 5 (%) */
+    function txtCampo(cp) {
+      const v = cp && cp.v;
+      if (v == null || !isFinite(v)) return '';
+      if (cp.un === 'W') { for (const d of [2, 4, 8, 16]) if (Math.abs(v * d - 1) < 1e-9) return '1/' + d; return String(+(+v).toFixed(3)).replace('.', ','); }
+      if (cp.un === '%' || !cp.un) return String(+(+v).toPrecision(4)).replace('.', ',');
+      const a = Math.abs(v);
+      const [d, p] = a >= 1e3 ? [1e3, 'k'] : a >= 1 || a === 0 ? [1, ''] : a >= 1e-3 ? [1e-3, 'm'] : [1e-6, 'u'];
+      return String(+(v / d).toPrecision(4)).replace('.', ',') + p;
     }
     function ligaEdicao(raiz, ref) {
       raiz.querySelectorAll('[data-ed]').forEach(b => {
@@ -1209,7 +1212,7 @@
       const vs = pinos.map(p => p.v).filter(isFinite);
       const v = sc && sc.vdd != null ? sc.vdd : vs.length === 2 ? Math.abs(vs[0] - vs[1]) : vs.length ? Math.max(...vs.map(Math.abs)) : null;
       const i = sc && isFinite(sc.corrente) ? Math.abs(sc.corrente) : pinos.length ? Math.max(...pinos.map(p => Math.abs(p.i || 0))) : null;
-      const sig = JSON.stringify([v, i, sc && sc.p, sc && sc.queimado, sc && sc.valor, sc && sc.vf, sc && sc.imax, sc && sc.potencia, sc && sc.tol, sc && sc.brilho != null ? +sc.brilho.toFixed(2) : null]);
+      const sig = JSON.stringify([v, i, sc && sc.p, sc && sc.queimado, sc && sc.valor, sc && sc.vf, sc && sc.imax, sc && sc.potencia, sc && sc.tol, sc && sc.campos ? sc.campos.map(x => x.v) : null, sc && sc.brilho != null ? +sc.brilho.toFixed(2) : null]);
       if (b.sig === sig) return;
       b.sig = sig;
       let h = caixaBalao({

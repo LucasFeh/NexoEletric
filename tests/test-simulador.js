@@ -417,8 +417,9 @@ caso('1.109.0: alterar valor e parâmetros; o LED/resistor queima e abre (vermel
   perto(d.LD1.imax, 0.02, 1e-12, 'a corrente máxima editada');
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
   const sim = ler('hub-simulador.js'), pcb = ler('hub-simulador-pcb.js');
-  assert.ok(/function verificaQueima\(\)/.test(sim) && /\* 1\.5\) motivo = 'corrente de '/.test(sim) && /inf\.potencia \* 2\) motivo = 'dissipou '/.test(sim), 'a queima: LED > 1,5× a nominal, resistor > 2× a nominal');
-  assert.ok(/case 'parametros':/.test(sim) && /case 'trocar':/.test(sim) && /Tensão de ativação \(Vf\)/.test(sim), 'editar pelo menu e pelo MCP; trocar');
+  const cir = ler('hub-simulador-circuito.js');
+  assert.ok(/function verificaQueima\(\)/.test(sim) && /if \(a\.queima\) \{ st\.cfg\.queimados\[ref\] = a\.queima;/.test(sim) && /if \(i > out\.imax \* 1\.5\) queima\('corrente de '/.test(cir) && /vr \* vr \/ info\.r > info\.potencia \* 2\) queima\('dissipou '/.test(cir), 'a queima: LED > 1,5× a nominal, resistor > 2× a nominal (a regra na análise)');
+  assert.ok(/case 'parametros':/.test(sim) && /case 'trocar':/.test(sim) && /Tensão de ativação \(Vf\)/.test(cir) && /for \(const cp of \(inf && inf\.campos\) \|\| \[\]\) campo\(/.test(sim), 'editar pelo menu (os campos do tipo) e pelo MCP; trocar');
   assert.ok(/O QUEIMADO: vermelho com fumaca/.test(sim) && /O QUEIMADO NO 3D/.test(pcb) && /o QUEIMADO no 2D/.test(pcb), 'vermelho com fumaça no esquema, no 3D e no 2D');
   assert.ok(/function edicaoDoComp\(ref, sc, fixo\)/.test(pcb) && /acao: 'trocar', ref/.test(pcb), 'editar e trocar pelo balão da placa');
 });
@@ -563,8 +564,9 @@ caso('1.111.0: resistência, potência e tolerância do resistor editáveis, com
   perto(p.mt.comps.get('R1').potencia, 0.125, 1e-12, 'a potência nominal editada');
   perto(p.a.R1.potenciaNominal, 0.125, 1e-12, 'e vai para a análise (a queima usa > 2× ela)');
   const sim = fs.readFileSync(path.join(RAIZ, 'hub-simulador.js'), 'utf8'), pcb = fs.readFileSync(path.join(RAIZ, 'hub-simulador-pcb.js'), 'utf8');
-  assert.ok(/campo\('Potência \(nominal\)'/.test(sim) && /campo\('Tolerância \(%\)'/.test(sim) && /\['vf', 'imax', 'potencia', 'tol'\]/.test(sim), 'no menu do esquema e no MCP');
-  assert.ok(/lin\('potencia', 'Potência \(W\)'/.test(pcb) && /lin\('tol', 'Tolerância \(%\)'/.test(pcb) && /\['Valor real', /.test(pcb), 'no balão da placa');
+  assert.deepStrictEqual(p.mt.comps.get('R1').campos.map(x => x.k), ['potencia', 'tol'], 'os campos do resistor: potência e tolerância');
+  assert.ok(/for \(const cp of \(inf && inf\.campos\) \|\| \[\]\) campo\(/.test(sim) && /'vf', 'imax', 'potencia', 'tol', \.\.\./.test(sim), 'no menu do esquema e no MCP');
+  assert.ok(/for \(const cp of sc\.campos \|\| \[\]\) h \+= lin\(cp\.k, cp\.rot, txtCampo\(cp\)/.test(pcb) && /\['Valor real', /.test(pcb), 'no balão da placa');
   assert.ok(sim.includes('a fracao da potencia (1/4, 1/8 W)'), 'a potência em fração (1/4)');
 });
 
@@ -582,6 +584,74 @@ caso('1.111.3: o × fecha o balão mesmo com a simulação rodando (o balão nã
   assert.ok(/const sobMouse = el =>/.test(pcb) && /if \(!sobMouse\(b\.el\)\) pintaBalaoTrilha\(b\);/.test(pcb) && /if \(sobMouse\(b\.el\)\) continue; if \(b\.mcu\)/.test(pcb) && /!cartao\.hidden && !sobMouse\(cartao\)/.test(pcb), 'com o mouse em cima o balão não se refaz');
   assert.strictEqual((pcb.match(/fechaNoApertar\(el, \(\) => fechaBalao\(b\)\);/g) || []).length, 3, 'o × fecha no apertar: trilha, MCU e componente');
   assert.ok(/fechaNoApertar\(cartao, /.test(pcb), 'e no cartão do pino');
+});
+
+caso('1.113.0 (lote 1 da lib Almox): resistor, rede, capacitor, LED, diodo e transistor — leitura, campos e queima', () => {
+  const roda = (comps, cfg) => { const mt = C.monta(comps, cfg || {}); const s = M.cria(mt.elementos, { terra: mt.terra }); return { a: C.analisa(mt, s.dc()).comps, mt }; };
+  /* a leitura dos valores dos nomes da lib */
+  const lv = t => C.leValor(t);
+  perto(lv('47PF 50V').v, 47e-12, 1e-18, '47PF'); perto(lv('MLCC 100 nF 250 Vdc').v, 100e-9, 1e-15, '100 nF com espaço');
+  perto(lv('2200PF / 2.2nF').v, 2.2e-9, 1e-15, '2200PF'); perto(lv('0.01F/10nF 100V').v, 10e-9, 1e-15, 'o nF junto do 0.01F');
+  perto(lv('10nF 2kV').tensao, 2000, 1e-9, 'kV'); perto(lv('PR03 12K 750V 3W').v, 12e3, 1e-9, 'o PR03 não estraga');
+  assert.ok(!(lv('5.1V 500mW BZX55C5V1 / 1N751A').corrente > 0), 'o 1N751A não é corrente');
+  const cap = (nome, sym) => C.monta([{ ref: 'C1', comment: nome, sym, pinos: [pin(1, '+', 'A'), pin(2, '-', 'GND')] }], {}).comps.get('C1');
+  perto(cap('4.7F 4.7K 3000V 3KV 472', 'CAPACITOR CERAMICO [PTH]').c, 4.7e-9, 1e-15, 'o código 472');
+  const sc = cap('1F 5V 20% D18x16mm', 'SUPERCAPACITOR [PTH]');
+  assert.ok(sc.supercap && sc.c === 1 && sc.vmax === 5 && sc.polarizado, 'supercap em F, 5 V, polarizado');
+  /* resistor: a potência pelo footprint */
+  assert.strictEqual(C.potenciaDoFootprint('R0402'), 0.0625); assert.strictEqual(C.potenciaDoFootprint('AXIAL-0.4'), 0.25); assert.strictEqual(C.potenciaDoFootprint('AXIAL-0.6'), 0.5); assert.strictEqual(C.potenciaDoFootprint('R2512'), 1);
+  /* a rede de resistores 4114R: 7 isolados, 1-14, 2-13...; a queima de um deles */
+  const pinosRede = Array.from({ length: 14 }, (_, i) => pin(i + 1, String(i + 1), i === 0 ? '+5V' : i === 13 ? 'GND' : 'SAIDA_' + 'abcdefghijklmn'[i]));
+  const rede = roda([{ ref: 'RN1', comment: '2K2 14 vias 4114R', sym: 'RESISTOR REDE 14V [PTH]', pinos: pinosRede }]);
+  const ir = rede.mt.comps.get('RN1');
+  assert.ok(ir.tipo === 'rede' && ir.resistores.length === 7 && ir.resistores[0].a.num === '1' && ir.resistores[0].b.num === '14', 'a rede: 7 resistores, 1-14');
+  perto(rede.a.RN1.corrente, 5 / 2200, 1e-6, 'corrente no 1-14');
+  assert.ok(roda([{ ref: 'RN1', comment: '10R 14 vias 4114R', sym: 'RESISTOR REDE 14V [PTH]', pinos: pinosRede }]).a.RN1.queima, '5 V em 10 Ω (2,5 W) queima o resistor da rede');
+  /* capacitor: tensão acima da nominal e polaridade invertida */
+  const cAlto = roda([{ ref: 'C1', comment: '10uF 16V', sym: 'CAPACITOR ELETROLITICO [PTH]', pinos: [pin(1, '+', '+24V'), pin(2, '-', 'GND')] }]).a.C1;
+  assert.ok(/tensão de 24/.test(cAlto.queima || ''), '24 V num de 16 V queima: ' + cAlto.queima);
+  const cInv = roda([{ ref: 'C1', comment: '10uF 50V', sym: 'CAPACITOR ELETROLITICO [PTH]', pinos: [pin(1, '+', 'GND'), pin(2, '-', '+5V')] }]).a.C1;
+  assert.ok(/polaridade invertida/.test(cInv.queima || ''), 'o eletrolítico ao contrário queima');
+  assert.ok(!roda([{ ref: 'C1', comment: '10uF 50V', sym: 'CAPACITOR ELETROLITICO [PTH]', pinos: [pin(1, '+', '+12V'), pin(2, '-', 'GND')] }]).a.C1.queima, '12 V num de 50 V não queima');
+  assert.ok(roda([{ ref: 'C1', comment: '10uF 50V', sym: 'CAPACITOR ELETROLITICO [PTH]', pinos: [pin(1, '+', '+12V'), pin(2, '-', 'GND')] }], { params: { C1: { vmax: 6.3 } } }).a.C1.queima, 'a tensão nominal editada (6,3 V) queima com 12 V');
+  /* LED: a cor pelo nome, o reverso, o RGB */
+  const led = (nome, sym) => C.monta([{ ref: 'LD1', comment: nome, sym, pinos: [pin(1, 'A', 'A'), pin(2, 'K', 'GND')] }], {}).comps.get('LD1');
+  perto(led('Amarelo Redondo 5mm', 'LED').vf, 2.0, 1e-9, 'o amarelo "REDONDO" não é vermelho'); perto(led('Infravermelho 5mm', 'LED').vf, 1.2, 1e-9, 'IR');
+  perto(led('Única Ultra Verde', 'LED').vf, 3.0, 1e-9, 'ultra verde (InGaN)'); perto(led('Amarelo Redondo 3V 200mA D5mm', 'LED [PTH]').imax, 0.2, 1e-9, 'a corrente do nome');
+  const rev = roda([{ ref: 'LD1', comment: 'Vermelho', sym: 'LED', pinos: [pin(1, 'A', 'GND'), pin(2, 'K', '+12V')] }]).a.LD1;
+  assert.ok(/tensão reversa/.test(rev.queima || ''), 'LED com 12 V ao contrário queima');
+  const rgb = roda([{ ref: 'LD1', comment: 'RGB 5mm (Catodo Comum)', sym: 'LED', pinos: [pin(1, 'R', 'R'), pin(2, 'K', 'GND'), pin(3, 'G', 'G'), pin(4, 'B', 'B')] },
+    { ref: 'R1', valor: '150', pinos: [pin(1, '1', '+5V'), pin(2, '2', 'R')] }]);
+  const irgb = rgb.mt.comps.get('LD1');
+  assert.ok(irgb.canais.length === 3 && rgb.a.LD1.corrente > 0.01 && /^#/.test(rgb.a.LD1.cor), 'o RGB: 3 LEDs, o vermelho aceso: ' + rgb.a.LD1.corrente);
+  /* diodo: zener e TVS pela categoria, os limites pelo nome, a queima */
+  const di = (nome, sym) => C.monta([{ ref: 'D1', comment: nome, sym, pinos: [pin(1, 'A', 'A'), pin(2, 'K', 'K')] }], {}).comps.get('D1');
+  const z = di('12V 1W 5% ZMD12', 'DIODO ZENER [SMD]'); assert.ok(z.sub === 'zener' && z.bv === 12 && z.pz === 1, 'zener pelo nome');
+  const t = di('(TVS) SMBJ14A', 'DIODO TVS'); assert.ok(t.sub === 'TVS' && Math.abs(t.bv - 15.54) < 0.01, 'TVS');
+  const rt = di('de Alta Potência 6A 800V - 6A8 - R-6', 'DIODO RETIFICADOR [PTH]'); assert.ok(rt.tipo === 'diodo' && rt.ifmax === 6 && rt.vrrm === 800, 'o "Potência" não vira potenciômetro; If e VRRM do nome');
+  const d47 = di('1000V 1A 1N4007', 'DIODO RETIFICADOR [SMD]'); assert.ok(d47.ifmax === 1 && d47.vrrm === 1000);
+  const dRev = roda([{ ref: 'D1', comment: '1N4001', sym: 'DIODO RETIFICADOR [PTH]', pinos: [pin(1, 'A', 'GND'), pin(2, 'K', '+100V')] }]).a.D1;
+  assert.ok(/tensão reversa/.test(dRev.queima || ''), '100 V ao contrário num 1N4001 (50 V) queima');
+  const dFw = roda([{ ref: 'D1', comment: '1N4148', sym: 'DIODO RETIFICADOR [PTH]', pinos: [pin(1, 'A', '+5V'), pin(2, 'K', 'X')] }, { ref: 'R1', valor: '5', pinos: [pin(1, '1', 'X'), pin(2, '2', 'GND')] }]).a.D1;
+  assert.ok(/corrente direta/.test(dFw.queima || ''), '0,85 A num 1N4148 queima: ' + dFw.corrente);
+  const zq = roda([{ ref: 'D1', comment: '5.1V 0.5W', sym: 'DIODO ZENER [PTH]', pinos: [pin(1, 'A', 'GND'), pin(2, 'K', 'X')] }, { ref: 'R1', valor: '10', pinos: [pin(1, '1', '+12V'), pin(2, '2', 'X')] }]).a.D1;
+  assert.ok(/zener dissipou/.test(zq.queima || ''), 'o zener de 0,5 W com 0,7 A queima: ' + zq.queima);
+  assert.ok(!roda([{ ref: 'D1', comment: '5.1V 0.5W', sym: 'DIODO ZENER [PTH]', pinos: [pin(1, 'A', 'GND'), pin(2, 'K', 'X')] }, { ref: 'R1', valor: '1k', pinos: [pin(1, '1', '+12V'), pin(2, '2', 'X')] }]).a.D1.queima, 'o zener com 7 mA não queima');
+  /* transistor: PNP Darlington, os limites, a queima, o β editado */
+  const q = (nome, sym) => C.monta([{ ref: 'Q1', comment: nome, sym, pinos: [pin(1, 'B', 'B'), pin(2, 'C', 'C'), pin(3, 'E', 'E')] }], {}).comps.get('Q1');
+  assert.ok(q('BD678', 'TRANSISTOR').m.pol === -1 && q('BD677', 'TRANSISTOR').m.pol === 1 && q('Uso Geral PNP 80V 2A BD238', 'TRANSISTOR [PTH]').m.pol === -1, 'BD678/BD238 PNP, BD677 NPN');
+  const q546 = q('BC546A', 'TRANSISTOR'); assert.ok(q546.icmax === 0.1, 'o "A" do BC546A não é corrente');
+  const q31 = q('100V 2W 3A 511-TIP31C', 'TRANSISTOR [PTH]'); assert.ok(q31.vceo === 100 && q31.pd === 2 && q31.icmax === 3, 'os limites do nome');
+  const ckt = (rb, prm) => roda([{ ref: 'Q1', comment: 'BC547', sym: 'TRANSISTOR', pinos: [pin(1, 'B', 'B'), pin(2, 'C', 'C'), pin(3, 'E', 'GND')] },
+    { ref: 'R1', valor: rb, pinos: [pin(1, '1', '+5V'), pin(2, '2', 'B')] }, { ref: 'R2', valor: '10', pinos: [pin(1, '1', '+5V'), pin(2, '2', 'C')] }], { params: prm || {} }).a.Q1;
+  const qOk = ckt('1M');
+  assert.ok(!qOk.queima && qOk.corrente < 0.02, 'Ib pequena: o BC547 não queima: ' + qOk.corrente);
+  const qQ = ckt('1k');
+  assert.ok(/corrente de coletor|dissipou/.test(qQ.queima || ''), 'Ib grande: 0,5 A num BC547 (100 mA) queima: ' + qQ.queima);
+  const qB = ckt('1M', { Q1: { bf: 600 } });
+  assert.ok(qB.corrente > qOk.corrente * 1.5, 'o β editado muda a corrente: ' + qB.corrente + ' > ' + qOk.corrente);
+  const sim = fs.readFileSync(path.join(RAIZ, 'hub-simulador.js'), 'utf8');
+  assert.ok(/if \(a\.queima\) \{ st\.cfg\.queimados\[ref\] = a\.queima;/.test(sim) && /campos: inf\.campos \|\| null/.test(sim), 'o Simulador queima pela análise e publica os campos');
 });
 
 (async () => { for (const f of fila) await f();

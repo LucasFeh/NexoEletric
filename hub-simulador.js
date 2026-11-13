@@ -150,12 +150,11 @@
     let mudou = false;
     for (const [ref, a] of Object.entries(st.an.comps)) {
       if (a.queimado || st.cfg.queimados[ref]) continue;
-      const inf = info(ref); if (!inf) continue;
-      let motivo = '';
-      const i = Math.abs(a.corrente || 0), p = Math.abs(a.p || 0);
-      if (inf.tipo === 'led' && i > (inf.imax || 0.02) * 1.5) motivo = 'corrente de ' + fmt(i, 'A') + ' (a nominal é ' + fmt(inf.imax || 0.02, 'A') + '; queima acima de ' + fmt((inf.imax || 0.02) * 1.5, 'A') + ')';
-      else if (inf.tipo === 'resistor' && inf.potencia && p > inf.potencia * 2) motivo = 'dissipou ' + fmt(p, 'W') + ' (a nominal é ' + fmt(inf.potencia, 'W') + ')';
-      if (motivo) { st.cfg.queimados[ref] = motivo; mudou = true; }
+      /* 1.113.0 (lote 1 da lib): a regra de cada tipo esta na analise (out.queima) — o LED acima de 1,5x a corrente ou com
+         mais de 5 V ao contrario, o resistor acima de 2x a potencia, o capacitor acima de 1,2x a tensao ou polarizado ao
+         contrario, o diodo acima do If/VRRM, o zener acima da potencia, o transistor acima do Ic/Pd/Vceo */
+      if (!info(ref)) continue;
+      if (a.queima) { st.cfg.queimados[ref] = a.queima; mudou = true; }
     }
     if (mudou) { gravaCfg(); st.sujo = true; agenda(); }
   }
@@ -170,6 +169,16 @@
     if (v == null || !isFinite(+v) || +v <= 0) delete p[k]; else p[k] = +v;
     if (!Object.keys(p).length) delete st.cfg.params[ref];
     gravaCfg(); st.sujo = true; agenda();
+  }
+  /* o valor de um campo como se digita: 1/4 (W), 20m (A), 2,1 (V), 250 (β), 5 (%) */
+  function txtCampo(cp) {
+    const v = cp && cp.v;
+    if (v == null || !isFinite(v)) return '';
+    if (cp.un === 'W') return fmtPot(v);
+    if (cp.un === '%' || !cp.un) return String(+(+v).toPrecision(4)).replace('.', ',');
+    const a = Math.abs(v);
+    const [d, p] = a >= 1e3 ? [1e3, 'k'] : a >= 1 || a === 0 ? [1, ''] : a >= 1e-3 ? [1e-3, 'm'] : [1e-6, 'u'];
+    return String(+(v / d).toPrecision(4)).replace('.', ',') + p;
   }
   /* a potencia como se escreve: 1/4 W, 0,5 W, 2 W */
   function fmtPot(p) {
@@ -210,7 +219,7 @@
         return [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor, rpm: c.rpm, corrente: c.corrente,
           tipo: inf.tipo || '', lib: String(cp.comment || cp.valor || cp.sym || '').trim(), titulo: c.titulo || inf.rotulo || '', vdd,
           queimado: !!c.queimado, motivo: c.motivo || '', valor: inf.valorTxt || '', vf: inf.vf, imax: inf.imax, editado: st.cfg.valores[r] != null || !!st.cfg.params[r],
-          potencia: inf.potencia, tol: inf.tol, rReal: inf.r, rNominal: inf.rNominal }];
+          potencia: inf.potencia, tol: inf.tol, rReal: inf.r, rNominal: inf.rNominal, campos: inf.campos || null }];
       })),
       /* 1.105.0: os microcontroladores e a conexao com o NexoCode (o clique no MCU na PCB 2D/3D mostra o balao) */
       mcus: Object.fromEntries((st.comps || []).filter(c => { const inf = info(c.ref); return inf && inf.tipo === 'mcu'; }).map(c => {
@@ -1035,15 +1044,9 @@
           const rot = { resistor: 'Resistência', capacitor: 'Capacitância', indutor: 'Indutância' }[inf.tipo];
           campo(rot, inf.valorTxt, inf.tipo === 'resistor' ? '330, 4k7, 1M' : inf.tipo === 'capacitor' ? '100n, 10u' : '10u', v => defineValor(h.ref, v));
         }
-        /* 1.111.0: a potencia nominal (queima acima de 2x) e a tolerancia (o valor real dentro da faixa) do resistor */
-        if (inf && inf.tipo === 'resistor') {
-          campo('Potência (nominal)', inf.potencia ? fmtPot(inf.potencia) : '', 'em W, ex. 1/4, 0,5', v => defineParam(h.ref, 'potencia', numeroDe(v)));
-          campo('Tolerância (%)', inf.tol ? String(inf.tol).replace('.', ',') : '', 'ex. 5, 1, 10', v => defineParam(h.ref, 'tol', numeroDe(v)));
-        }
-        if (inf && inf.tipo === 'led') {
-          campo('Tensão de ativação (Vf)', inf.vf != null ? String(+inf.vf.toFixed(2)).replace('.', ',') : '', 'em V, ex. 2,1', v => defineParam(h.ref, 'vf', numeroDe(v)));
-          campo('Corrente máxima', inf.imax != null ? String(+(inf.imax * 1000).toFixed(1)).replace('.', ',') + 'm' : '', 'em A, ex. 20m', v => defineParam(h.ref, 'imax', numeroDe(v)));
-        }
+        /* 1.111.0/1.113.0: os campos de cada tipo (o circuito diz quais: a potencia e a tolerancia do resistor, a tensao do
+           capacitor, Vf e corrente do LED, If/VRRM/Vz do diodo, β/Ic/Pd/Vceo do transistor) */
+        for (const cp of (inf && inf.campos) || []) campo(cp.rot, txtCampo(cp), cp.dica ? 'ex. ' + cp.dica : '', v => defineParam(h.ref, cp.k, numeroDe(v)));
         if (st.cfg.valores[h.ref] != null || st.cfg.params[h.ref]) {
           const b = $c('button', null, '↺ Voltar ao valor do esquema'); b.onclick = () => { delete st.cfg.valores[h.ref]; delete st.cfg.params[h.ref]; gravaCfg(); st.sujo = true; agenda(); fecha(); };
           el.append(b);
@@ -1951,7 +1954,8 @@
       case 'gpio': garante(); defineGpio(a.ref + '-' + a.pino, a.modo ? { modo: a.modo, duty: a.duty, f: a.f } : null); monta(); return { pino: a.ref + '-' + a.pino, ...(st.an && st.an.pinos[a.ref + '-' + a.pino] || {}) };
       case 'terra': garante(); st.cfg.terra = (a.nets || []).slice(); gravaCfg(); monta(); return { terra: st.mt.terra };
       case 'parametros': garante(); if (!info(a.ref)) throw new Error('componente ' + a.ref + ' fora da simulação');
-        for (const k of ['vf', 'imax', 'potencia', 'tol']) if (a[k] !== undefined) defineParam(a.ref, k, a[k] == null ? null : (typeof a[k] === 'number' ? a[k] : numeroDe(a[k])));
+        if (!Object.keys(a).some(k => !/^(acao|ref|projeto)$/.test(k))) return { ref: a.ref, campos: info(a.ref).campos || [] };
+        for (const k of new Set(['vf', 'imax', 'potencia', 'tol', ...((info(a.ref) || {}).campos || []).map(x => x.k)])) if (a[k] !== undefined) defineParam(a.ref, k, a[k] == null ? null : (typeof a[k] === 'number' ? a[k] : numeroDe(a[k])));
         monta(); return st.an && st.an.comps[a.ref];
       case 'trocar': garante(); trocaComponente(a.ref); monta(); return st.an && st.an.comps[a.ref];
       case 'queimados': return { queimados: Object.assign({}, st.cfg.queimados) };
