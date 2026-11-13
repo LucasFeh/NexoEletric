@@ -136,7 +136,7 @@
       const [a, c] = e._n;
       switch (e.tipo) {
         case 'R': g2(a, c, 1 / Math.max(+e.r || 0, 1e-6)); break;
-        case 'SW': g2(a, c, e.fechada ? 1 / (e.ron || 0.01) : 1 / (e.roff || 1e9)); break;
+        case 'SW': g2(a, c, e.fechada ? 1 / (e.ron || 0.01) : 1 / (e.roff || 1e12)); break;   // 1.116.0: aberta = 1 TΩ (bem abaixo do GMIN)
         case 'C':
           if (s.modo === 'dc') { g2(a, c, 1e-12); break; }
           { const g = (+e.c || 0) / s.dt; g2(a, c, g); ii(a, c, -g * e._hv); }
@@ -377,7 +377,7 @@
       const [va, vc] = v;
       switch (e.tipo) {
         case 'R': { const i = (va - vc) / Math.max(+e.r || 0, 1e-6); return [i, -i]; }
-        case 'SW': { const i = (va - vc) * (e.fechada ? 1 / (e.ron || 0.01) : 1 / (e.roff || 1e9)); return [i, -i]; }
+        case 'SW': { const i = (va - vc) * (e.fechada ? 1 / (e.ron || 0.01) : 1 / (e.roff || 1e12)); return [i, -i]; }
         case 'C': { if (s.modo === 'dc') return [0, 0]; const i = e._i || 0; return [i, -i]; }
         case 'L': { const i = e._h; return [i, -i]; }
         case 'I': { const i = s.modo === 'dc' ? mediaDaOnda(e.onda != null ? e.onda : e.i) : valorDaOnda(e.onda != null ? e.onda : e.i, s.t); return [i, -i]; }

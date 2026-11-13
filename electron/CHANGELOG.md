@@ -4,6 +4,32 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.116.0
+
+Simulador — lote 4 da lib Almox e as correções do lote 3 (testado ao vivo no SIM-TIPOS pela outra sessão).
+
+- Optoacoplador: as famílias da lib (SFH618/620, VO618, TIL111/113/117, PS2801, ILD621, CNY74, H11L, HCPL, MOC30) e o
+  CTR pela família (SFH618A-2/-3/-4, CNY17-x, 4N25/28…); entrada AC (dois LEDs antiparalelos), saída Darlington, o
+  Schmitt do H11L1 (liga acima de 1,6 mA, com histerese) e o TRIAC do MOC30xx (dispara com If acima do IFT e conduz até
+  a corrente cair); vários canais (o símbolo da lib é de uma parte por canal: A/K/C/E repetidos, as saídas em ordem
+  inversa). Campos CTR, If máx, Ic máx, Vceo; alerta com If abaixo de 1 mA; queima do LED, reverso acima de 6 V, Ic e Vce.
+- Amplificador: as famílias que viravam CI (LM224, LM348, LF355/356, LM1458, 741s, LM301/307, LM318, CA3130, 4558,
+  MC33071/72, TL03x, TLE2021, AD706/711, ADA4522/4528, LTC2050, LT1490, TSX561 e TDA2030 com as pinagens de 5 pinos);
+  campos ganho em malha aberta, alimentação máxima (queima acima de 1,1×) e corrente de saída (o curto agora limita);
+  rail-to-rail onde é. LM386 (ganho 20, saída em Vs/2), amplificador de instrumentação INA114/121/188/AD620 (G = 1 +
+  50 kΩ/RG, com o RG achado entre os pinos 1 e 8) e AMP03, isolado AMC1200 (8×). LM217 = LM317; ADCMP392 comparador.
+- 555/556: o NE556 são dois 555 (pinagem de 14 pinos); campos Vcc máx (16 V; CMOS 15 V) e corrente de saída
+  (queimam acima de 1,1× e 1,5×).
+- Driver ULN2003/2803: campos corrente por canal, tensão máx e potência total (queima por canal e pelo total); alerta de
+  carga indutiva (relé, motor) sem o COM ligado ao +V dela. As placas da casa (DTN-DI…, DMPU-ATE…) ficam de fora.
+- Ponte retificadora: If máx e VRRM do nome ou do código (GBJ/GBL/KBP, DF410, B60C160, SKB1,5/08 = 800 V); a corrente
+  de saída, o reverso no pior diodo e a tensão de saída na análise; queima acima de 1,5× e 1,1× VRRM.
+- Correções do lote 3: o regulador limita de verdade (a rampa do limite deixava passar 611 mA num de 500 mA) e o
+  desligamento térmico corta a saída (no tempo religa depois de 0,5 s); o DC/DC abaixo da faixa não entrega nada e
+  avisa; LM1117MPX-50 = 5 V, 79L = 100 mA, 78008 = 7808, LM2575T-5.0 é de saída fixa; o campo do regulador negativo
+  diz "módulo"; o ITR0305S15 é DC/DC (não interruptor óptico); os campos sem ruído (26,4 e não 26,400000000000002); a
+  chave aberta é 1 TΩ (o pino solto ligado a uma DIP aberta mostrava 2,5 V).
+
 ## 1.115.1
 
 Bateria: a net do + de uma bateria (com o − no terra) não vira mais fonte pelo nome — a net "BAT"/"VBAT" virava uma

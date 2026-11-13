@@ -801,6 +801,73 @@ caso('1.115.0 (lote 3 da lib Almox): chave/DIP, relé/SSR, bateria, regulador/re
   assert.ok(ap.disparado && Math.abs(ap.corrente) < 0.15 && Math.abs(ap.corrente) > 0.05, 'o PPTC disparado em 12 V fica em ~P/V (1 W → ~85 mA): ' + ap.corrente);
 });
 
+caso('1.116.0 (lote 4 da lib Almox): opto, amplificador/comparador, 555/556, driver, ponte; e as correções do lote 3', () => {
+  const roda = (comps, cfg) => { const mt = C.monta(comps, cfg || {}); const s = M.cria(mt.elementos, { terra: mt.terra }); const r = s.dc(); return { a: C.analisa(mt, r).comps, mt, s, r }; };
+  const um = (c, cfg) => C.monta([c], cfg || {}).comps.get(c.ref);
+  const P = (n, nm, net) => pin(n, nm || '', net);
+  /* opto: CTR, a queima do LED, o Schmitt (H11L1), o TRIAC que trava (MOC3063), 4 canais */
+  const opto = (nome, rled, prm, rc) => roda([{ ref: 'U1', comment: nome, sym: 'OPTOACOPLADOR [4P]', pinos: [P(1, 'A', 'LA'), P(2, 'K', 'GND'), P(3, 'C', 'COL'), P(4, 'E', 'GND')] },
+    { ref: 'R1', valor: rled, pinos: [P(1, '1', '+5V'), P(2, '2', 'LA')] }, { ref: 'R2', valor: rc || '100', pinos: [P(1, '1', '+5V'), P(2, '2', 'COL')] }], { params: prm || {} });
+  const pc = opto('PC817', '390');
+  assert.ok(Math.abs(pc.a.R2.corrente) > 0.006 && Math.abs(pc.a.R2.corrente) < 0.012, 'PC817 com 10 mA no LED: ~10 mA na saída: ' + pc.a.R2.corrente);
+  const pc50 = opto('PC817', '390', { U1: { ctr: 50 } });
+  assert.ok(Math.abs(pc50.a.R2.corrente) < Math.abs(pc.a.R2.corrente) * 0.7, 'CTR 50 %: metade');
+  assert.ok(/LED queimou/.test(opto('PC817', '27').a.U1.queima || ''), '140 mA no LED (máx 60 mA) queima');
+  assert.ok(um({ ref: 'U1', comment: 'SFH618A-3', sym: 'OPTOACOPLADOR [4P]', pinos: [P(1, 'A', 'a'), P(2, 'K', 'GND'), P(3, 'C', 'c'), P(4, 'E', 'GND')] }).ctr === 1.5, 'SFH618A-3: CTR 150 %');
+  const h11 = (r) => { const mt = C.monta([{ ref: 'U1', comment: 'H11L1', sym: 'OPTOACOPLADOR [6P]', pinos: [P(1, 'A', 'LA'), P(2, 'K', 'GND'), P(3, 'C', 'COL'), P(4, 'E', 'GND')] },
+    { ref: 'R1', valor: r, pinos: [P(1, '1', '+5V'), P(2, '2', 'LA')] }, { ref: 'R2', valor: '1k', pinos: [P(1, '1', '+5V'), P(2, '2', 'COL')] }], {}); const s = M.cria(mt.elementos, { terra: mt.terra }); s.dc(); return s.passo(3).v.COL; };
+  assert.ok(h11('1k') < 0.5 && h11('10k') > 4.5, 'H11L1: 3,8 mA liga (saída baixa), 0,38 mA não liga: ' + h11('1k') + ' / ' + h11('10k'));
+  const tri = um({ ref: 'U1', comment: 'MOC3063', sym: 'OPTOACOPLADOR [6P]', pinos: [P(1, 'A', 'a'), P(2, 'K', 'GND'), P(3, 'C', 'c'), P(4, 'E', 'GND')] });
+  assert.ok(tri.triac && /TRIAC com zero-cross/.test(tri.rotulo), 'MOC3063: TRIAC com zero-cross');
+  const quatro = um({ ref: 'U2', comment: 'TLP521-4', sym: 'OPTOACOPLADOR [16P]', pinos: [1, 2, 3, 4, 5, 6, 7, 8].map(k => P(k, k % 2 ? 'A' : 'K', 'N' + k)).concat([9, 10, 11, 12, 13, 14, 15, 16].map(k => P(k, k % 2 ? 'E' : 'C', 'O' + k))) });
+  assert.ok(quatro.canais.length === 4 && quatro.canais[0].el.pinos[2] === 'U2-16', 'TLP521-4: 4 canais, o 1º sai no 16');
+  /* amplificador: alimentação acima do máximo, o limite da saída, LM386 (ganho 20), INA114 (RG) */
+  const lm358 = (vcc, rl) => roda([{ ref: 'U1', comment: 'LM358', sym: 'AMPLIFICADOR [8P]', pinos: [1, 2, 3, 4, 5, 6, 7, 8].map(k => P(k, '', { 1: 'OUT', 2: 'OUT', 3: 'VIN', 4: 'GND', 8: '+' + vcc + 'V' }[k] || 'X' + k)) },
+    { ref: 'R1', valor: rl, pinos: [P(1, '1', 'OUT'), P(2, '2', 'GND')] }, { ref: 'R2', valor: '1k', pinos: [P(1, '1', '+3V'), P(2, '2', 'VIN')] }]).a;
+  const seg = lm358(12, '10');
+  assert.ok(Math.abs(seg.R1.corrente) < 0.03 && seg.U1.alertas.some(a => /limite de corrente/.test(a)), 'seguidor em 10 Ω: a saída limita em ~25 mA: ' + seg.R1.corrente);
+  assert.ok(/alimentação de 40/.test(lm358(40, '10k').U1.queima || ''), '40 V no LM358 (32 V) queima');
+  const lm386 = roda([{ ref: 'U2', comment: 'LM386N-1', sym: 'AMPLIFICADOR [8P]', pinos: [1, 2, 3, 4, 5, 6, 7, 8].map(k => P(k, '', { 2: 'GND', 3: 'IN', 4: 'GND', 5: 'OUT', 6: '+9V' }[k] || 'Y' + k)) },
+    { ref: 'R1', valor: '10k', pinos: [P(1, '1', 'OUT'), P(2, '2', 'GND')] }, { ref: 'R2', valor: '100', pinos: [P(1, '1', '+0.05V'), P(2, '2', 'IN')] }]);
+  perto(lm386.r.v.OUT, 4.5 + 20 * 0.05, 0.05, 'LM386: Vs/2 + 20·Vin');
+  const ina = roda([{ ref: 'U3', comment: 'INA114', sym: 'AMPLIFICADOR [8P]', pinos: [1, 2, 3, 4, 5, 6, 7, 8].map(k => P(k, '', { 1: 'RG1', 2: 'GND', 3: 'INP', 4: '-12V', 5: 'GND', 6: 'OUT', 7: '+12V', 8: 'RG2' }[k])) },
+    { ref: 'R1', valor: '5k', pinos: [P(1, '1', 'RG1'), P(2, '2', 'RG2')] }, { ref: 'R2', valor: '10k', pinos: [P(1, '1', 'OUT'), P(2, '2', 'GND')] }, { ref: 'R3', valor: '10', pinos: [P(1, '1', '+0.1V'), P(2, '2', 'INP')] }]);
+  perto(ina.r.v.OUT, 1.1, 0.02, 'INA114 com RG 5 kΩ: G = 11');
+  /* 556: os dois núcleos; Vcc acima do máximo queima */
+  const n556 = um({ ref: 'U4', comment: 'NE556N', sym: 'TIMER [14P]', pinos: Array.from({ length: 14 }, (_, i) => P(i + 1, '', 'T' + (i + 1))) });
+  assert.ok(n556.tipo === '555' && n556.nucleos.length === 2, 'NE556: 2 núcleos');
+  const t555 = roda([{ ref: 'U5', comment: 'NE555', sym: 'TIMER [8P]', pinos: [1, 2, 3, 4, 5, 6, 7, 8].map(k => P(k, '', { 1: 'GND', 4: '+20V', 8: '+20V' }[k] || 'Z' + k)) }]).a.U5;
+  assert.ok(/Vcc de 20/.test(t555.queima || ''), '20 V no NE555 (16 V) queima');
+  /* ULN2003: canal acima de 1,5x queima; carga indutiva sem COM avisa */
+  const uln = (rc, extra) => roda([{ ref: 'U6', comment: 'ULN2003A', sym: 'DRIVER [16P]', pinos: Array.from({ length: 16 }, (_, i) => P(i + 1, '', i === 0 ? '+5V' : i === 7 ? 'GND' : i === 15 ? 'SAI1' : 'W' + (i + 1))) },
+    { ref: 'R1', valor: rc, pinos: [P(1, '1', '+12V'), P(2, '2', 'SAI1')] }].concat(extra || []));
+  assert.ok(!uln('100').a.U6.queima && /canal 1 queimou/.test(uln('10').a.U6.queima || ''), 'ULN: 120 mA ok, ~1 A no canal queima');
+  const ulnK = uln('100', [{ ref: 'K1', comment: 'G5LE-14-DC12', sym: 'RELE [PINAGEM A DEFINIR]', pinos: [P(1, '', '+12V'), P(2, '', 'SAI1'), P(3, '', 'Q1'), P(4, '', 'Q2')] }]).a.U6;
+  assert.ok(ulnK.alertas.some(a => /carga indutiva sem o COM/.test(a)), 'relé no ULN sem o COM: alerta');
+  /* ponte: os limites do nome, a retificação, a queima */
+  const ponte = (nome, rl) => roda([{ ref: 'BR1', comment: nome, sym: 'PONTE RETIFICADORA [PTH]', pinos: [P(1, '~', '+12V'), P(2, '~', 'GND'), P(3, '+', 'DCP'), P(4, '-', 'DCN')] },
+    { ref: 'R1', valor: rl, pinos: [P(1, '1', 'DCP'), P(2, '2', 'DCN')] }]);
+  const pt = ponte('GBJ 20a 1000v', '100');
+  assert.ok(pt.mt.comps.get('BR1').ifmax === 20 && pt.mt.comps.get('BR1').vrrm === 1000, 'GBJ: 20 A / 1000 V');
+  perto(pt.r.v.DCP - pt.r.v.DCN, 12 - 2 * 0.7, 0.5, 'ponte: 12 V − 2 diodos');
+  assert.ok(/corrente de/.test(ponte('60V 160mA B60C160', '10').a.BR1.queima || ''), '1 A na B60C160 (160 mA) queima');
+  assert.ok(um({ ref: 'BR1', comment: 'SKB1.5/08 310V 1.5A', sym: 'PONTE RETIFICADORA [PTH]', pinos: [P(1, '~', 'a'), P(2, '~', 'b'), P(3, '+', 'c'), P(4, '-', 'GND')] }).vrrm === 800, 'SKB1.5/08: 800 V');
+  assert.ok(um({ ref: 'X1', comment: 'DMPU-ATE220004', sym: 'DRIVER [PINAGEM A DEFINIR]', pinos: [P(1, '', 'a'), P(2, '', 'GND'), P(3, '', 'c'), P(4, '', 'd')] }).tipo === 'ignorado', 'a placa da casa');
+  /* correções do lote 3 */
+  const reg = r => roda([{ ref: 'U5', comment: 'LM2937ET-5.0', sym: 'REGULADOR [3P]', footprint: 'TO-220', pinos: [P(1, '', '+12V'), P(2, '', 'GND'), P(3, '', 'V5')] }, { ref: 'R1', valor: r, pinos: [P(1, '1', 'V5'), P(2, '2', 'GND')] }]);
+  const r8 = reg('8');
+  assert.ok(Math.abs(r8.a.R1.corrente) < 0.52, 'o LM2937 (0,5 A) limita de verdade com 8 Ω: ' + r8.a.R1.corrente);
+  const r1 = reg('1.5');
+  assert.ok(r1.mt.comps.get('U5').desligado && Math.abs(r1.a.R1.corrente) < 0.05, 'dissipando demais: o térmico desliga a saída: ' + r1.a.R1.corrente);
+  const dcb = roda([{ ref: 'U7', comment: '10.8~13.2/5 2W A1205S', sym: 'CONVERSOR DC/DC [PINAGEM A DEFINIR]', pinos: [P(1, '', 'GND'), P(2, '', '+10V'), P(3, '', 'GND'), P(4, '', 'V5I')] }, { ref: 'R1', valor: '25', pinos: [P(1, '1', 'V5I'), P(2, '2', 'GND')] }]);
+  assert.ok(dcb.r.v.V5I < 0.3 && dcb.a.U7.alertas.some(a => /abaixo da faixa/.test(a)), 'DC/DC com 10 V (faixa 10,8–13,2): sem saída e o alerta: ' + dcb.r.v.V5I);
+  const rl = n => um({ ref: 'U1', comment: n, sym: 'REGULADOR [3P]', pinos: [P(1, '', 'a'), P(2, '', 'GND'), P(3, '', 'c')] });
+  assert.ok(rl('LM1117MPX-50NOPB').modelo.vout === 5 && rl('MC79L05ABDR2G').modelo.ilim === 0.1 && rl('78008AP').modelo.vout === 8, 'LM1117MPX-50 = 5 V; 79L = 100 mA; 78008 = 8 V');
+  assert.ok(um({ ref: 'U1', comment: 'LM2575T-5.0/NOPB', sym: 'REGULADOR [5P]', pinos: [P(1, 'VIN', 'a'), P(2, 'OUT', 'b'), P(3, 'GND', 'GND'), P(4, 'FB', 'd'), P(5, 'ON', 'GND')] }).modelo.fixo, 'LM2575T-5.0 é de saída fixa');
+  assert.ok(um({ ref: 'U1', comment: '4.5~5.5/15 3W ITR0305S15', sym: 'CONVERSOR DC/DC [PINAGEM A DEFINIR]', pinos: [P(1, '', 'GND'), P(2, '', 'a'), P(3, '', 'GND'), P(4, '', 'd')] }).tipo === 'dcdc', 'o ITR0305S15 é DC/DC, não óptico');
+  assert.ok(um({ ref: 'U1', comment: 'E2415S-1WR3', sym: 'CONVERSOR DC/DC [PINAGEM A DEFINIR]', pinos: [P(1, '', 'GND'), P(2, '', 'a'), P(3, '', 'GND'), P(4, '', 'd')] }).campos.find(x => x.k === 'vinmax').v === 26.4, 'o campo sem ruído (26,4)');
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();
