@@ -26,6 +26,10 @@
   if (typeof window === 'undefined' || window.HubSimulador) return;
   const M = window.HubSimMotor, C = window.HubSimCircuito;
   const VISTA = () => window.__hubSimVista || null;
+  /* MCU com codigo do NexoCode ligado (1.103.2): o NexoCode manda um gpio_lote a cada 0,3 s rodando ou 1 s parado
+     (batimento); sem lote ha 3,5 s (ou com desconectar) o MCU volta a cinza com o X */
+  const NC_VALIDO = 3500;
+  function ncLigado(ref) { const n = st.nexoCode && st.nexoCode[ref]; return n && Date.now() - n.em < NC_VALIDO ? n : null; }
   const fmt = (v, u) => C.fmt(v, u);
   const $c = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
@@ -432,6 +436,31 @@
         pontosEm(p.x, p.y, q.x, q.y, st.fase.get('c:' + c.ref) || 0);
       }
     }
+    /* o MCU e o NexoCode (pedido do dono): sem codigo do NexoCode ligado o microcontrolador fica cinza com um X (sem
+       conexao de controle); com o NexoCode ligado, verde. Vai no quadro que o laco ja desenha (nenhum quadro a mais) */
+    const mcusNc = [];
+    for (const c of st.comps || []) {
+      if (c.folha !== si || c.pinos.length < 4) continue;
+      const nc = ncLigado(c.ref), inf = info(c.ref);
+      if (!nc && !(inf && inf.tipo === 'mcu')) continue;
+      let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+      for (const p of c.pinos) { x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y); x2 = Math.max(x2, p.x); y2 = Math.max(y2, p.y); }
+      const m = 60, rx = x1 - m, ry = y1 - m, rw = x2 - x1 + 2 * m, rh = y2 - y1 + 2 * m;
+      ctx.save();
+      if (nc) {
+        ctx.fillStyle = 'rgba(34,197,94,.10)'; ctx.fillRect(rx, ry, rw, rh);
+        ctx.shadowColor = '#22c55e'; ctx.shadowBlur = 16; ctx.strokeStyle = '#22c55e'; ctx.lineWidth = Math.max(3 * px, 8);
+        ctx.strokeRect(rx, ry, rw, rh);
+      } else {
+        ctx.fillStyle = 'rgba(55,65,81,.55)'; ctx.fillRect(rx, ry, rw, rh);
+        ctx.strokeStyle = 'rgba(156,163,175,.85)'; ctx.lineWidth = Math.max(2.5 * px, 7); ctx.strokeRect(rx, ry, rw, rh);
+        const d = Math.min(rw, rh) * 0.32, cx = rx + rw / 2, cy = ry + rh / 2;
+        ctx.lineCap = 'round'; ctx.lineWidth = Math.max(5 * px, 16); ctx.strokeStyle = 'rgba(209,213,219,.9)';
+        ctx.beginPath(); ctx.moveTo(cx - d, cy - d); ctx.lineTo(cx + d, cy + d); ctx.moveTo(cx - d, cy + d); ctx.lineTo(cx + d, cy - d); ctx.stroke();
+      }
+      ctx.restore();
+      mcusNc.push({ nc, x: (x1 + x2) / 2, y: y2 + m });
+    }
     /* textos em pixels de tela */
     const dpr = window.devicePixelRatio || 1;
     const cvs = ctx.canvas, W = cvs.width / dpr, H = cvs.height / dpr;
@@ -521,6 +550,11 @@
       ctx.fillStyle = '#f97316';
       ctx.beginPath(); ctx.moveTo(p.x + 8, p.y - 20); ctx.lineTo(p.x + 16, p.y - 6); ctx.lineTo(p.x, p.y - 6); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#111'; ctx.fillText('!', p.x + 6.5, p.y - 11);
+    }
+    for (const k of mcusNc) {
+      const p = tela(k.x, k.y);
+      const txt = k.nc ? 'NexoCode \u2713 ' + (k.nc.rodando ? 'firmware rodando' : 'firmware parado') : '\u2715 sem NexoCode (sem controle)';
+      pilula(ctx, p.x - ctx.measureText(txt).width / 2 - 6, p.y - 14, txt, k.nc ? '#22c55e' : '#9ca3af', !k.nc);
     }
     for (const c of st.comps || []) {
       const inf = info(c.ref);
@@ -1719,7 +1753,8 @@
   function estado(detalhe) {
     const a = st.an, r = st.res;
     const out = { ligado: st.ligado, rodando: st.rodando, modo: st.modo, velocidade: st.velocidade, t: r ? r.t : null, ok: r ? r.ok : null, aviso: r ? r.aviso : '', erro: st.erro,
-      mostrar: st.mostrar, calculos: st.calc, osciloscopio: st.osciloscopio.slice(), config: st.cfg };
+      mostrar: st.mostrar, calculos: st.calc, osciloscopio: st.osciloscopio.slice(), config: st.cfg,
+      nexocode: Object.fromEntries(Object.keys(st.nexoCode || {}).map(ref => [ref, ncLigado(ref)]).filter(([, n]) => n).map(([ref, n]) => [ref, { rodando: n.rodando, ha_ms: Date.now() - n.em }])) };
     if (!a) return out;
     out.fontes = a.fontes.map(f => ({ net: f.net, v: f.v, origem: f.origem, motivo: f.motivo, corrente: f.i, potencia: f.p, onda: f.onda || null }));
     out.potencia_total = a.resumo.potencia;
@@ -1815,6 +1850,10 @@
         if (!mcu) throw new Error('nenhum microcontrolador no esquema' + (a.mcu ? ' com o designador ' + a.mcu : ''));
         const porGpio = new Map();
         for (const p of mcu.pinos) { const g = C.gpioDe(p.name); if (g != null && !porGpio.has(g)) porGpio.set(g, p); }
+        /* a conexao do NexoCode com este MCU (verde na folha); desconectar = o NexoCode desligou: cinza na hora */
+        st.nexoCode = st.nexoCode || {};
+        if (a.desconectar) delete st.nexoCode[mcu.ref];
+        else if (a.origem === 'nexocode') st.nexoCode[mcu.ref] = { em: Date.now(), rodando: a.rodando !== false };
         let remonta = false;
         const aplicado = [], semPino = [];
         for (const [g, conf] of Object.entries(a.gpio || {})) {
@@ -1859,7 +1898,7 @@
           if (!c || /entrada|pullup|pulldown/.test(c.modo)) entradas[g] = { v: pin.v, nivel };
         }
         st.ultimoNexoCode = Date.now();
-        painel.atualiza();
+        if (remonta || aplicado.length || acionados.length) painel.atualiza();
         /* os MOTORES da bancada (e do esquema): o painel do motor do NexoCode mostra a rotacao e fecha a malha de rpm com ela */
         const motores = {};
         for (const [ref, c] of Object.entries((st.an && st.an.comps) || {})) if (c.tipo === 'motor' && c.rpm != null) motores[ref] = { rpm: Math.round(c.rpm), corrente: c.corrente, tensao: c.tensao, kv: c.kv, titulo: c.titulo };

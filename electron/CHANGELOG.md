@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.104.1
+
+O microcontrolador mostra se tem código do NexoCode ligado (o dono: "no modo simulação, se não tiver um código do
+nexocode ligado ao microcontrolador, ele fica cinzinha, com um x indicando que tá sem conexão de controle; depois de
+conectado, fica verdinho").
+
+- **No Simulador, o MCU do esquema fica cinza com um X** e a etiqueta "sem NexoCode (sem controle)" quando nenhum
+  NexoCode está ligado a ele. **Com o NexoCode ligado fica verde**, com "NexoCode ✓ firmware rodando" (ou "parado").
+- O NexoCode 0.5.0 manda um `gpio_lote` a cada 0,3 s com o firmware rodando e um batimento a cada 1 s parado. Sem lote há
+  3,5 s, ou com `desconectar`, o MCU volta a cinza.
+- O lote só de batimento não anda a simulação, não analisa e não repinta o painel. O desenho vai no quadro que o laço
+  já faz, sem quadro a mais.
+- `sim_controlar {acao:"estado"}` diz em `nexocode` qual MCU está ligado e se o firmware roda.
+
 ## 1.104.0
 
 O 3D é a bancada, e o Wokwi do NexoCode fica nela (o dono: "a visão 2D / 3D / bancada não deveria existir, é só 2D / 3D,
