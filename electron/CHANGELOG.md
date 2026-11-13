@@ -4,6 +4,23 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.109.0
+
+Alterar valores na simulação e ver o efeito, até queimar (o dono: "quero adicionar modificação de valor de resistência,
+corrente de ativação, essas coisas, poder alterar e ver o efeito disso; se eu diminuir muito a resistência a ponto de
+queimar um componente, o LED precisa ficar vermelho com fumacinha saindo dele").
+
+- **Alterar** (só na simulação; o esquema do projeto não muda):
+  - no Esquema do Simulador, no clique no componente: Resistência / Capacitância / Indutância; no LED, a tensão de
+    ativação (Vf) e a corrente máxima (nominal, padrão 20 mA); "Voltar ao valor do esquema";
+  - na placa 2D/3D, no balão do pino do componente, os mesmos campos;
+  - MCP: `sim_controlar {acao:"valor"}`, `{acao:"parametros", ref, vf?, imax?}`, `{acao:"trocar", ref}`, `{acao:"queimados"}`.
+- **Queimar.** O LED com corrente acima de 1,5× a nominal (20 mA → queima acima de 30 mA) e o resistor dissipando mais
+  que o dobro da nominal (pelo encapsulamento) QUEIMAM: abrem (saem do circuito, como o de verdade) e ficam vermelhos
+  com fumaça subindo — no Esquema do Simulador, no 2D e no 3D. O balão mostra "🔥 queimado", o motivo e o botão
+  "Trocar o componente (novo)". Fica gravado até trocar.
+- O alerta de corrente do LED passa a usar a corrente nominal editável.
+
 ## 1.108.1
 
 - Balão do LED: quando o nome na biblioteca é a própria cor ("VERDE"), ele não aparece duas vezes — fica só a cor

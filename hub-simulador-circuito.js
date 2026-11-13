@@ -396,7 +396,10 @@
       /* --- LED */
       if (/^(LD|LED|DL|D)$/.test(pre) && /LED|VERDE|VERMELH|AMAREL|AZUL|BRANC|GREEN|RED|YELLOW|BLUE|WHITE/.test(txt) && !/OPTO|PC817/.test(txt) || /^(LD|LED|DL)$/.test(pre)) {
         const cor = CORES_LED.find(([re]) => re.test(txt)) || [null, 2.0, '#ff3b30'];
-        const vf = cor[1], n = 2;
+        /* 1.109.0: a tensao de ativacao (Vf) e a corrente maxima editaveis na simulacao (cfg.params[ref] = {vf, imax}) */
+        const prm = (cfg.params && cfg.params[ref]) || {};
+        const vf = isFinite(+prm.vf) && +prm.vf > 0 ? +prm.vf : cor[1], n = 2;
+        info.imax = isFinite(+prm.imax) && +prm.imax > 0 ? +prm.imax : 0.02;   // a corrente nominal de um LED de indicacao
         const is = 0.01 / Math.exp((vf - 0.01 * 8) / (n * VT));
         const a = achaPino(info, ['A', 'ANODE', 'ANODO', '+'], 1), k = achaPino(info, ['K', 'C', 'CATHODE', 'CATODO', '-'], 2);
         info.tipo = 'led'; info.vf = vf; info.cor = cor[2]; info.rotulo = 'LED ' + (cor[0] ? norm(c.comment || '').toLowerCase() : '') + ' (Vf ≈ ' + fmt(vf, 'V') + ')';
@@ -902,6 +905,20 @@
     const porTensao = new Map();
     for (const f of fontes) if (f.origem === 'nome') { const k = f.v.toFixed(2); if (!porTensao.has(k)) porTensao.set(k, []); porTensao.get(k).push(f.net); }
     for (const [k, ns] of porTensao) if (ns.length > 1) avisos.push('as nets ' + ns.join(', ') + ' têm a mesma tensão pelo nome (' + fmt(+k, 'V') + ') mas não estão ligadas no esquema: cada uma ganhou uma fonte própria');
+    /* 1.109.0: o componente QUEIMADO (cfg.queimados[ref] = motivo): sai do circuito — abre, como o de verdade (o LED
+       queimado nao acende, o resistor queimado nao conduz) — ate a pessoa trocar */
+    const queimados = Object.keys(cfg.queimados || {}).filter(k => cfg.queimados[k]);
+    if (queimados.length) {
+      const fora = new Set();
+      for (const r of queimados) {
+        const inf = comps.get(r); if (!inf) continue;
+        inf.queimado = true; inf.motivoQueima = String(cfg.queimados[r] === true ? '' : cfg.queimados[r]);
+        for (const e of inf.elementos) fora.add(e);
+        inf.elementos = [];
+      }
+      for (let i = elementos.length - 1; i >= 0; i--) if (fora.has(elementos[i])) elementos.splice(i, 1);
+      for (const [k, lst] of porPino) porPino.set(k, lst.filter(x => !fora.has(x.el)));
+    }
     const terraRef = [...terra][0];
     for (const f of fontes) {
       if (!terraRef) break;
@@ -966,6 +983,14 @@
       let p = 0;
       for (const el of info.elementos) { const r = elRes.get(el); if (r) p += r.p; }
       out.p = p;
+      if (info.queimado) {
+        out.queimado = true; out.motivo = info.motivoQueima || 'passou do limite';
+        out.alertas.unshift('QUEIMADO: ' + out.motivo);
+        out.linhas.push(L('Estado', 'o componente queimou e abriu: não conduz mais (troque-o)', 'QUEIMADO'));
+        out.corrente = 0; out.p = 0;
+        if (info.tipo === 'led') { out.brilho = 0; out.cor = info.cor; out.imax = info.imax; out.vf = info.vf; }
+        continue;
+      }
       const pv = pino => pino && pino.net ? v(pino.net) : NaN;
       const doisPinos = () => { const a = info.pinos[0] || { num: '?' }, b = info.pinos[1] || { num: '?' }; return { a, b, va: pv(a), vb: pv(b), ia: correnteDoPino(info.ref + '-' + a.num) }; };
       switch (info.tipo) {
@@ -1042,7 +1067,8 @@
               const vfonte = outro ? v(outro.net) : NaN;
               if (isFinite(vfonte)) out.linhas.push(L('Resistor de limitação (' + rs.ref + ')', 'I = (V' + (outro.net || '') + ' − Vf − V(cat.)) / R = (' + fmt(vfonte, 'V') + ' − ' + fmt(vtot, 'V') + ') / ' + fmt(rs.r, 'Ω'), fmt((vfonte - vtot - (kNet ? 0 : 0)) / rs.r, 'A')));
             }
-            if (i > 0.03) out.alertas.push('corrente alta para LED comum (' + fmt(i, 'A') + ' > 30 mA)');
+            if (i > (info.imax || 0.02)) out.alertas.push('corrente acima da nominal do LED (' + fmt(i, 'A') + ' > ' + fmt(info.imax || 0.02, 'A') + ')');
+            out.imax = info.imax || 0.02; out.vf = info.vf;
             out.linhas.push(L('Estado', i < 1e-4 ? 'apagado: a tensão não chega ao Vf (' + fmt(info.vf, 'V') + ')' : 'aceso', i < 1e-4 ? 'apagado' : 'aceso'));
             if (vtot < -5) out.alertas.push('LED com tensão reversa de ' + fmt(-vtot, 'V') + ' (máx. ≈ 5 V)');
           } else if (info.bv && vtot < -info.bv * 0.9) out.linhas.push(L('Em ruptura', 'zener/TVS conduzindo ao contrário: Vz ≈ ' + fmt(info.bv, 'V'), fmt(-i, 'A')));

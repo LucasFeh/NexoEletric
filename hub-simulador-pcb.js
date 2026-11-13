@@ -225,7 +225,7 @@
     function caixaBalao(o) {
       const tp = TIPOS_SIM[o.tipo] || (o.tipo ? String(o.tipo) : 'Componente');
       const temV = o.v != null && isFinite(o.v), on = temV && Math.abs(o.v) >= 0.05;
-      let h = '<div class="bx"><div class="l1"><span class="tp">' + escB(tp) + '</span><b>' + escB(o.nome || '') + '</b>'
+      let h = '<div class="bx' + (o.queimado ? ' queimado' : '') + '"><div class="l1"><span class="tp">' + escB(tp) + '</span>' + (o.queimado ? '<span class="tq">🔥 queimado</span>' : '') + '<b>' + escB(o.nome || '') + '</b>'
         + (o.sub ? '<span class="sb">' + escB(o.sub) + '</span>' : '') + '<span class="nt">' + escB(o.net || '') + '</span>' + (o.acoes || '') + '</div>';
       h += '<div class="vv ' + (on ? 'on' : 'off') + '">' + (temV ? escB(fmt(o.v, 'V')) : '—') + '</div>';
       if (o.nota) h += '<div class="nota">' + escB(o.nota) + '</div>';
@@ -237,6 +237,39 @@
       if (o.lib && !libRepete) h += '<div class="lib">' + escB(o.lib) + '</div>';
       if (o.cor && o.cor.nome) h += '<div class="cr" style="color:' + escB(o.cor.hex || '#e5e7eb') + '">' + escB(o.cor.nome) + '</div>';
       return h + '</div>';
+    }
+    /* 1.109.0: alterar o valor/parametros pelo balao da placa — o pedido vai para a simulacao (a aba Simulador) */
+    function simDoProjeto() { try { const w = topo.__nexoSimAba && topo.__nexoSimAba[H.projeto()]; return w && w.HubSimulador ? w.HubSimulador : null; } catch (_e) { return null; } }
+    function edicaoDoComp(ref, sc, fixo) {
+      if (!fixo || !sc) return '';
+      let h = '';
+      if (sc.queimado) h += '<button class="trocar" data-ed="trocar">Trocar o componente (novo)</button>';
+      const rot = { resistor: 'Resistência', capacitor: 'Capacitância', indutor: 'Indutância' }[sc.tipo];
+      const lin = (k, r, v, dica) => '<div class="ed"><span>' + escB(r) + '</span><input data-ed-in="' + k + '" value="' + escB(v == null ? '' : v) + '" placeholder="' + escB(dica) + '"><button data-ed="' + k + '">aplicar</button></div>';
+      if (rot) h += lin('valor', rot, sc.valor, '330, 4k7, 100n');
+      if (sc.tipo === 'led') {
+        h += lin('vf', 'Tensão de ativação', sc.vf != null ? String(+(+sc.vf).toFixed(2)).replace('.', ',') : '', 'V, ex. 2,1');
+        h += lin('imax', 'Corrente máxima', sc.imax != null ? String(+(sc.imax * 1000).toFixed(1)).replace('.', ',') + 'm' : '', 'A, ex. 20m');
+      }
+      return h;
+    }
+    function ligaEdicao(raiz, ref) {
+      raiz.querySelectorAll('[data-ed]').forEach(b => {
+        b.onclick = async () => {
+          const S = simDoProjeto(); if (!S) return;
+          const k = b.dataset.ed, inp = raiz.querySelector('[data-ed-in="' + k + '"]');
+          try {
+            if (k === 'trocar') await S.mcp({ acao: 'trocar', ref });
+            else if (k === 'valor') await S.mcp({ acao: 'valor', ref, valor: inp && inp.value.trim() ? inp.value.trim() : null });
+            else await S.mcp(Object.assign({ acao: 'parametros', ref }, { [k]: inp && inp.value.trim() ? inp.value.trim() : null }));
+          } catch (e) { console.warn('editar', ref, e); }
+          if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        };
+      });
+      raiz.querySelectorAll('[data-ed-in]').forEach(i => {
+        i.onkeydown = ev => { ev.stopPropagation(); if (ev.key === 'Enter') { const b = raiz.querySelector('[data-ed="' + i.dataset.edIn + '"]'); if (b) b.click(); } };
+        for (const e of ['mousedown', 'pointerdown', 'keyup', 'keypress']) i.addEventListener(e, z => z.stopPropagation());
+      });
     }
     function compSim(ref) { return (st.dados && st.dados.comps && st.dados.comps[ref]) || null; }
     function corDoComp(c) { return c && c.tipo === 'led' && c.cor ? { nome: nomeDaCor(c.cor) || 'LED', hex: c.cor } : null; }
@@ -391,12 +424,31 @@
           g.add(sp);
         }
       }
+      /* O QUEIMADO NO 3D (1.109.0): um brilho vermelho sobre o corpo e a fumaca subindo */
+      const fumacas = [];
+      for (const c of H.placa().components || []) {
+        const sc = compSim(c.ref);
+        if (!sc || !sc.queimado) continue;
+        const [cx, cy] = centroComp(c), baixo = /bottom/i.test(c.layer || ''), z0 = baixo ? -esp - 1.2 : 1.2;
+        const verm = new T.Sprite(new T.SpriteMaterial({ map: texturaBrilho(T), color: new T.Color(0xff2a1a), transparent: true, opacity: 0.85, depthWrite: false, blending: T.AdditiveBlending, toneMapped: false }));
+        verm.scale.set(10, 10, 1); verm.position.set(cx, cy, z0); verm.renderOrder = 7; g.add(verm);
+        for (let k = 0; k < 8; k++) {
+          const sp = new T.Sprite(new T.SpriteMaterial({ map: texturaBrilho(T), color: new T.Color(0xd4d4dc), transparent: true, opacity: 0.75, depthWrite: false, toneMapped: false }));
+          sp.renderOrder = 8; g.add(sp);
+          fumacas.push({ sp, x: cx, y: cy, z: z0, sobe: baixo ? -1 : 1, fase: k / 8 });
+        }
+      }
       V.extra('simCorrente', g);
       rotulos(vivos);
       const M4 = st.setas ? new st.setas.T.Matrix4() : null, Q = st.setas ? new st.setas.T.Quaternion() : null, E = st.setas ? new st.setas.T.Euler() : null;
       const P = st.setas ? new st.setas.T.Vector3() : null, S = st.setas ? new st.setas.T.Vector3() : null;
       V.anima(dt => {
         st.fase += dt;
+        for (const f of fumacas) {
+          const u = (st.fase * 0.35 + f.fase) % 1;
+          f.sp.position.set(f.x + Math.sin((st.fase + f.fase * 7) * 1.3) * 1.5 * u, f.y + Math.cos((st.fase + f.fase * 5) * 1.1) * 1.2 * u, f.z + f.sobe * (0.5 + 24 * u));
+          const t = 3 + 13 * u; f.sp.scale.set(t, t, 1); f.sp.material.opacity = 0.8 * (1 - u);
+        }
         if (st.setas) {
           const { inst, usadas: us, esp: e } = st.setas;
           us.forEach((a, idx) => {
@@ -498,6 +550,20 @@
         ctx.save();
         ctx.lineCap = 'round';
         /* o cobre pela tensao da net */
+        /* 1.109.0: o QUEIMADO no 2D — vermelho com fumaca (o laco do 2D ja redesenha a cada quadro) */
+        { const agora = performance.now() / 1000;
+          for (const c of H.placa().components || []) {
+            const sc = compSim(c.ref); if (!sc || !sc.queimado) continue;
+            const [cx, cy] = centroComp(c);
+            const gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, 5);
+            gr.addColorStop(0, 'rgba(255,42,26,.85)'); gr.addColorStop(1, 'rgba(255,42,26,0)');
+            ctx.globalAlpha = 1; ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+            for (let k = 0; k < 7; k++) {
+              const u = (agora * 0.4 + k / 7) % 1;
+              ctx.fillStyle = 'rgba(170,170,178,' + (0.5 * (1 - u)).toFixed(3) + ')';
+              ctx.beginPath(); ctx.arc(cx + Math.sin(agora * 1.5 + k) * 1.2 * u, cy - u * 9, 0.6 + 2.6 * u, 0, Math.PI * 2); ctx.fill();
+            }
+          } }
         /* 1.108.0: o LED aceso tambem no 2D (um brilho na cor dele) */
         for (const c of H.placa().components || []) {
           const sc = compSim(c.ref);
@@ -628,14 +694,19 @@
         net: p.net || 'sem net', v: pin ? pin.v : null, nota: pin ? '' : 'sem simulação neste pino',
         /* 1.108.1: a corrente sempre (0 A tambem) */
         linhas: pin ? [['Corrente', Math.abs(pin.i) > 1e-10 ? fmt(Math.abs(pin.i), 'A') + (pin.i > 0 ? ' entrando' : ' saindo') : '0 A']] : [],
-        extra, lib: (sc && sc.lib) || (p.comp && p.comp.comment) || '', cor: corDoComp(sc),
-      });
+        extra: extra + edicaoDoComp(p.ref, sc, fixo), lib: (sc && sc.lib) || (p.comp && p.comp.comment) || '', cor: corDoComp(sc),
+        queimado: !!(sc && sc.queimado),
+      }).replace('<div class="nota"></div>', '');
+      if (sc && sc.queimado) h = h.replace('<div class="vv', '<div class="nota" style="color:#fca5a5">' + esc(sc.motivo || 'passou do limite') + '</div><div class="vv');
       /* ANALISAR: a lista (o que esta acima) ou o osciloscopio da net do pad (o sinal passo a passo, do esquema) */
       if (fixo) {
         h = '<div class="ab"><button data-m="lista"' + (modoCartao === 'lista' ? ' class="on"' : '') + '>📋 Lista</button><button data-m="osc"' + (modoCartao === 'osc' ? ' class="on"' : '') + '>📈 Osciloscópio</button><button data-m="x" title="Fechar">×</button></div>'
           + (modoCartao === 'osc' ? '<div class="t">' + esc(p.ref) + ' · pino ' + esc(p.nome) + ' <span>' + esc(p.net || 'sem net') + '</span></div><canvas></canvas><div class="lg"></div>' : h);
       }
+      /* digitando um valor: a simulacao que chega nao refaz o cartao (o campo perderia o foco) */
+      if (fixo && cartaoPad && cartao.contains(document.activeElement) && document.activeElement.tagName === 'INPUT' && !cartao.hidden) return;
       cartao.innerHTML = h;
+      ligaEdicao(cartao, p.ref);
       cartaoPad = fixo ? p : null;
       if (fixo) {
         cartao.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
@@ -920,6 +991,12 @@
 .bx .nota{text-align:center; color:#6b7280; font-size:11px; margin:-2px 0 4px}
 .bx .ls{display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:11.5px; color:#9ca3af} .bx .ls b{text-align:right; color:#e5e7eb; font-weight:600}
 .bx .ds{margin-top:6px; padding:5px 8px; border-radius:7px; background:rgba(59,130,246,.12); color:#dbeafe; font-size:11px} .bx .ds .dd{color:#93c5fd; font-size:10.5px}
+.bx .tq{padding:1px 6px; border-radius:5px; background:rgba(239,68,68,.22); color:#fca5a5; font:700 9.5px system-ui, sans-serif; text-transform:uppercase; letter-spacing:.05em}
+.bx .ed{display:grid; grid-template-columns:1fr 78px auto; gap:4px; align-items:center; margin-top:6px} .bx .ed span{font-size:11px; color:#9ca3af}
+.bx .ed input{width:100%; height:22px; padding:0 6px; border-radius:6px; border:1px solid rgba(255,255,255,.18); background:rgba(0,0,0,.3); color:#e5e7eb; font:11.5px system-ui, sans-serif}
+.bx .ed button, .bx button.trocar{height:22px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.06); color:#e5e7eb; cursor:pointer; font:11px system-ui}
+.bx button.trocar{width:100%; margin-top:6px; color:#fecaca; border-color:rgba(239,68,68,.5); background:rgba(239,68,68,.14)}
+.bx.queimado .vv{color:#7f1d1d; text-shadow:none}
 .bx .lib{margin-top:8px; color:#cbd5e1; font-size:11px} .bx .cr{margin-top:1px; font:700 11.5px system-ui, sans-serif}
 .bx a{display:inline-block; margin-top:5px; color:#93c5fd; font-size:11px}
 .simpcb-mcu.desc{border-color:#9ca3af} .simpcb-mcu.desc .hd b{color:#d1d5db} .simpcb-mcu.desc .st{color:#fca5a5; font-weight:700; margin-top:4px}

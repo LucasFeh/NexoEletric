@@ -399,10 +399,33 @@ caso('1.103.1: leve — PWM com motor sem a busca em linha travar, anda/soma/mé
   assert.ok(/analise\.tomaSerie\(\)/.test(sim) && /_ligado: \(\) => st\.ligado/.test(sim), 'o osciloscópio do pad lê a simulação ligada');
   assert.ok(/if \(chave === chaveB && svgB\.childNodes\.length\) return;/.test(pcb) && /if \(chave === chaveP\) return;/.test(pec), 'balões e peças só se mexem quando algo mudou');
 });
+caso('1.109.0: alterar valor e parâmetros; o LED/resistor queima e abre (vermelho com fumaça)', () => {
+  const comps = [
+    { ref: 'R1', valor: '330', footprint: 'R0603', pinos: [pin(1, '1', '+5V'), pin(2, '2', 'A')] },
+    { ref: 'LD1', comment: 'LED VERDE', pinos: [pin(1, 'A', 'A'), pin(2, 'K', 'GND')] }];
+  const roda2 = cfg => { const mt = C.monta(comps, cfg); const s = M.cria(mt.elementos, { terra: mt.terra }); return C.analisa(mt, s.dc()).comps; };
+  const a = roda2({});
+  assert.ok(a.LD1.corrente > 0.005 && a.LD1.corrente < 0.012, 'com 330 Ω o LED acende: ' + a.LD1.corrente);
+  perto(a.LD1.imax, 0.02, 1e-12, 'corrente nominal padrão');
+  const b = roda2({ valores: { R1: '10' } });
+  assert.ok(b.LD1.corrente > 0.045, 'com 10 Ω passa da máxima (queimaria): ' + b.LD1.corrente);
+  const c = roda2({ valores: { R1: '10' }, queimados: { LD1: 'corrente alta' } });
+  assert.ok(c.LD1.queimado && c.LD1.corrente === 0 && c.LD1.brilho === 0 && /QUEIMADO/.test(c.LD1.alertas[0]), 'queimado: abre, não acende');
+  assert.ok(Math.abs(c.R1.corrente || 0) < 1e-6, 'com o LED aberto não passa corrente no R1');
+  const d = roda2({ params: { LD1: { vf: 3.0, imax: 0.02 } } });
+  assert.ok(d.LD1.corrente < a.LD1.corrente, 'Vf maior, corrente menor: ' + d.LD1.corrente + ' < ' + a.LD1.corrente);
+  perto(d.LD1.imax, 0.02, 1e-12, 'a corrente máxima editada');
+  const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
+  const sim = ler('hub-simulador.js'), pcb = ler('hub-simulador-pcb.js');
+  assert.ok(/function verificaQueima\(\)/.test(sim) && /\* 1\.5\) motivo = 'corrente de '/.test(sim) && /inf\.potencia \* 2\) motivo = 'dissipou '/.test(sim), 'a queima: LED > 1,5× a nominal, resistor > 2× a nominal');
+  assert.ok(/case 'parametros':/.test(sim) && /case 'trocar':/.test(sim) && /Tensão de ativação \(Vf\)/.test(sim), 'editar pelo menu e pelo MCP; trocar');
+  assert.ok(/O QUEIMADO: vermelho com fumaca/.test(sim) && /O QUEIMADO NO 3D/.test(pcb) && /o QUEIMADO no 2D/.test(pcb), 'vermelho com fumaça no esquema, no 3D e no 2D');
+  assert.ok(/function edicaoDoComp\(ref, sc, fixo\)/.test(pcb) && /acao: 'trocar', ref/.test(pcb), 'editar e trocar pelo balão da placa');
+});
 caso('1.108.0: o LED aceso brilha no 3D e no 2D; o balão padrão (tipo, net, tensão no meio, lib, cor do LED)', () => {
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
   const pcb = ler('hub-simulador-pcb.js'), sim = ler('hub-simulador.js');
-  assert.ok(/tipo: inf\.tipo \|\| '', lib: String\(cp\.comment/.test(sim) && /vdd \}\];/.test(sim), 'o Esquema publica tipo, lib e Vdd');
+  assert.ok(/tipo: inf\.tipo \|\| '', lib: String\(cp\.comment/.test(sim) && /titulo: c\.titulo \|\| inf\.rotulo \|\| '', vdd,/.test(sim), 'o Esquema publica tipo, lib e Vdd');
   assert.ok(/new T\.Sprite\(new T\.SpriteMaterial\(\{ map: texturaBrilho\(T\)/.test(pcb) && /blending: T\.AdditiveBlending/.test(pcb), 'o brilho do LED no 3D');
   assert.ok(/o LED aceso tambem no 2D/i.test(pcb), 'o brilho do LED no 2D');
   assert.ok(/function caixaBalao\(o\)/.test(pcb) && /\.bx \.vv\.off\{color:#4b5563\} \.bx \.vv\.on\{color:#ff2d2d/.test(pcb), 'a tensão no meio: cinza em 0 V, vermelho energizado');

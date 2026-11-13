@@ -40,7 +40,7 @@
        ponto aparece no clique > Analisar; quem quiser liga em "Tensao nas nets" */
     mostrar: { pontos: true, cores: true, tensoes: false, valores: false, brilho: true },
     calc: true, osc: false, fixo: null,
-    cfg: { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [] },
+    cfg: { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [], params: {}, queimados: {} },
     comps: null, mt: null, sim: null, res: null, an: null,
     sujo: true, ultimaAnalise: 0, folhaFluxo: -1, fluxos: null, fase: new Map(), vmax: 5,
     hover: null, raf: 0, tUlt: 0, osciloscopio: [], amostras: [], erro: '', ultQuadro: 0,
@@ -54,6 +54,7 @@
       const j = JSON.parse(localStorage.getItem(chave()) || 'null');
       if (j && typeof j === 'object') {
         Object.assign(st.cfg, j.cfg || {});
+        st.cfg.params = st.cfg.params || {}; st.cfg.queimados = st.cfg.queimados || {};
         if (j.mostrar) Object.assign(st.mostrar, j.mostrar);
         if (!j.v2) st.mostrar.tensoes = false;   // o padrao novo vale tambem para quem ja tinha gravado
         if (j.modo) st.modo = j.modo;
@@ -126,6 +127,7 @@
     if (!forca && agora - st.ultimaAnalise < 90) return;
     st.ultimaAnalise = agora;
     st.an = C.analisa(st.mt, resParaMostrar());
+    verificaQueima();
     let vm = 1;
     for (const [n, x] of Object.entries(st.res.v)) if (!n.includes('#') && isFinite(x)) vm = Math.max(vm, Math.abs(x));
     st.vmax = vm;
@@ -139,6 +141,44 @@
     publica();
     painel.atualiza();
     analise.atualiza();
+  }
+  /* A QUEIMA (1.109.0, o dono: "se eu diminuir muito a resistencia a ponto de queimar um componente, o LED precisa ficar
+     vermelho com fumacinha saindo dele"): o LED com corrente acima de 1,5x a nominal (20 mA: queima acima de 30 mA) e o resistor dissipando mais que o
+     dobro da nominal QUEIMAM — saem do circuito (abrem) ate a pessoa trocar (cfg.queimados[ref] = o motivo) */
+  function verificaQueima() {
+    if (!st.an || !st.mt || st.res && st.res.modo !== 'dc' && !(st.res.t > 0.05)) return;
+    let mudou = false;
+    for (const [ref, a] of Object.entries(st.an.comps)) {
+      if (a.queimado || st.cfg.queimados[ref]) continue;
+      const inf = info(ref); if (!inf) continue;
+      let motivo = '';
+      const i = Math.abs(a.corrente || 0), p = Math.abs(a.p || 0);
+      if (inf.tipo === 'led' && i > (inf.imax || 0.02) * 1.5) motivo = 'corrente de ' + fmt(i, 'A') + ' (a nominal é ' + fmt(inf.imax || 0.02, 'A') + '; queima acima de ' + fmt((inf.imax || 0.02) * 1.5, 'A') + ')';
+      else if (inf.tipo === 'resistor' && inf.potencia && p > inf.potencia * 2) motivo = 'dissipou ' + fmt(p, 'W') + ' (a nominal é ' + fmt(inf.potencia, 'W') + ')';
+      if (motivo) { st.cfg.queimados[ref] = motivo; mudou = true; }
+    }
+    if (mudou) { gravaCfg(); st.sujo = true; agenda(); }
+  }
+  /** troca o valor (resistencia, capacitancia...) de um componente na simulacao (o esquema nao muda) */
+  function defineValor(ref, v) {
+    if (v == null || String(v).trim() === '') delete st.cfg.valores[ref]; else st.cfg.valores[ref] = String(v).trim();
+    gravaCfg(); st.sujo = true; agenda();
+  }
+  /** parametros do modelo (o LED: vf, imax) */
+  function defineParam(ref, k, v) {
+    const p = st.cfg.params[ref] || (st.cfg.params[ref] = {});
+    if (v == null || !isFinite(+v) || +v <= 0) delete p[k]; else p[k] = +v;
+    if (!Object.keys(p).length) delete st.cfg.params[ref];
+    gravaCfg(); st.sujo = true; agenda();
+  }
+  /** troca o componente queimado por um novo */
+  function trocaComponente(ref) { delete st.cfg.queimados[ref]; gravaCfg(); st.sujo = true; agenda(); }
+  /* o valor digitado: 4k7, 330R, 1,5 mA, 100n — numero com prefixo (para os parametros do LED) */
+  function numeroDe(txt) {
+    const m = /^\s*([-+]?\d+(?:[.,]\d+)?)\s*([pnuµmkKM]?)/.exec(String(txt || ''));
+    if (!m) return NaN;
+    const k = { p: 1e-12, n: 1e-9, u: 1e-6, 'µ': 1e-6, m: 1e-3, k: 1e3, K: 1e3, M: 1e6 }[m[2]] || 1;
+    return parseFloat(m[1].replace(',', '.')) * k;
   }
   /* o resultado vai para o topo da janela: a vista PCB (3D) mostra a corrente nas trilhas */
   /* a aba Simulador aberta para este projeto (outra janela que nao esta): ela manda */
@@ -160,7 +200,8 @@
         const inf = info(r) || {}, cp = inf.comp || {};
         const vdd = Array.isArray(inf.alim) && inf.alim[0] && inf.alim[0].net ? vMostra(inf.alim[0].net) : undefined;
         return [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor, rpm: c.rpm, corrente: c.corrente,
-          tipo: inf.tipo || '', lib: String(cp.comment || cp.valor || cp.sym || '').trim(), titulo: c.titulo || inf.rotulo || '', vdd }];
+          tipo: inf.tipo || '', lib: String(cp.comment || cp.valor || cp.sym || '').trim(), titulo: c.titulo || inf.rotulo || '', vdd,
+          queimado: !!c.queimado, motivo: c.motivo || '', valor: inf.valorTxt || '', vf: inf.vf, imax: inf.imax, editado: st.cfg.valores[r] != null || !!st.cfg.params[r] }];
       })),
       /* 1.105.0: os microcontroladores e a conexao com o NexoCode (o clique no MCU na PCB 2D/3D mostra o balao) */
       mcus: Object.fromEntries((st.comps || []).filter(c => { const inf = info(c.ref); return inf && inf.tipo === 'mcu'; }).map(c => {
@@ -432,6 +473,28 @@
       ctx.restore();
       inf._marca = { x: (x1 + x2) / 2, y: y2 + m };
     }
+    /* O QUEIMADO: vermelho com fumaca saindo (1.109.0) — o laco ja redesenha a cada quadro */
+    { const agora = performance.now() / 1000;
+      for (const c of st.comps || []) {
+        if (c.folha !== si || !c.pinos.length) continue;
+        const a = st.an.comps[c.ref]; if (!a || !a.queimado) continue;
+        let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+        for (const p of c.pinos) { x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y); x2 = Math.max(x2, p.x); y2 = Math.max(y2, p.y); }
+        const m = 90, cx = (x1 + x2) / 2, top = y2 + m;
+        ctx.save();
+        ctx.fillStyle = 'rgba(239,68,68,.28)'; ctx.fillRect(x1 - m, y1 - m, x2 - x1 + 2 * m, y2 - y1 + 2 * m);
+        ctx.shadowColor = '#ef4444'; ctx.shadowBlur = 20; ctx.strokeStyle = '#ef4444'; ctx.lineWidth = Math.max(3 * px, 9);
+        ctx.strokeRect(x1 - m, y1 - m, x2 - x1 + 2 * m, y2 - y1 + 2 * m);
+        ctx.shadowBlur = 0;
+        /* a fumaca: bolinhas cinza subindo (y cresce para cima na folha), crescendo e sumindo */
+        for (let k = 0; k < 7; k++) {
+          const f = ((agora * 0.45 + k / 7) % 1), dx = Math.sin((agora + k) * 1.7) * 60 * f;
+          const r = (40 + 160 * f), al = 0.55 * (1 - f);
+          ctx.fillStyle = 'rgba(160,160,170,' + al.toFixed(3) + ')';
+          ctx.beginPath(); ctx.arc(cx + dx + (k % 3 - 1) * 40, top + f * 700, r, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
+      } }
     /* os pontos da corrente */
     if (st.mostrar.pontos) {
       const passo = Math.max(22 * px, 60), raio = Math.max(2.6 * px, 6);
@@ -816,6 +879,11 @@
 .sim-menu .an{display:flex; gap:4px; align-items:center; padding:2px 6px 8px; border-bottom:1px solid var(--border, #333); margin-bottom:4px}
 .sim-menu .an b{font-size:11px; color:var(--fg-dim, #9ca3af); margin-right:4px}
 .sim-menu .an button{width:auto; flex:1; text-align:center; border:1px solid var(--border, #333); padding:5px 6px}
+.sim-menu .ed{display:grid; grid-template-columns:1fr 86px auto; gap:4px; align-items:center; padding:3px 6px}
+.sim-menu .ed span{font-size:11px; color:var(--fg-dim, #9ca3af)} .sim-menu .ed input{width:100%; height:24px; padding:0 6px; border-radius:6px; border:1px solid var(--border, #333); background:rgba(0,0,0,.25); color:inherit; font:inherit}
+.sim-menu .ed button{width:auto; padding:3px 8px; border:1px solid var(--border, #333)}
+.sim-menu .qm{margin:4px 6px; padding:6px 8px; border-radius:8px; background:rgba(239,68,68,.16); color:#fca5a5; font-weight:700}
+.sim-menu button.trocar{color:#fecaca}
 .sim-an{position:fixed; z-index:58; width:360px; border-radius:12px; background:rgba(12,15,20,.96); color:#e5e7eb; border:1px solid rgba(250,204,21,.45);
   box-shadow:0 14px 40px rgba(0,0,0,.55); font:12px var(--font, system-ui); overflow:hidden}
 .sim-an .hd{display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid rgba(255,255,255,.08); cursor:move; user-select:none}
@@ -942,6 +1010,30 @@
       if (h.tipo === 'comp') {
         const inf = info(h.ref), c = st.an.comps[h.ref];
         el.append($c('div', 't', (c && c.titulo) || h.ref), an);
+        /* 1.109.0: alterar o valor e os parametros e ver o efeito (o esquema do projeto nao muda) */
+        const campo = (rot, valor, dica, aplica) => {
+          const lin = $c('div', 'ed'), lb = $c('span', null, rot), inp = $c('input'); inp.value = valor == null ? '' : valor; inp.placeholder = dica || '';
+          const ok = $c('button', null, 'aplicar'); ok.onclick = () => { aplica(inp.value); fecha(); };
+          inp.onkeydown = ev => { if (ev.key === 'Enter') ok.onclick(); if (ev.key === 'Escape') fecha(); ev.stopPropagation(); };
+          lin.append(lb, inp, ok); el.append(lin); return inp;
+        };
+        if (c && c.queimado) {
+          const q = $c('div', 'qm', '🔥 QUEIMADO — ' + (c.motivo || 'passou do limite'));
+          const b = $c('button', 'trocar', 'Trocar o componente (novo)'); b.onclick = () => { trocaComponente(h.ref); fecha(); };
+          el.append(q, b);
+        }
+        if (inf && /^(resistor|capacitor|indutor)$/.test(inf.tipo)) {
+          const rot = { resistor: 'Resistência', capacitor: 'Capacitância', indutor: 'Indutância' }[inf.tipo];
+          campo(rot, inf.valorTxt, inf.tipo === 'resistor' ? '330, 4k7, 1M' : inf.tipo === 'capacitor' ? '100n, 10u' : '10u', v => defineValor(h.ref, v));
+        }
+        if (inf && inf.tipo === 'led') {
+          campo('Tensão de ativação (Vf)', inf.vf != null ? String(+inf.vf.toFixed(2)).replace('.', ',') : '', 'em V, ex. 2,1', v => defineParam(h.ref, 'vf', numeroDe(v)));
+          campo('Corrente máxima', inf.imax != null ? String(+(inf.imax * 1000).toFixed(1)).replace('.', ',') + 'm' : '', 'em A, ex. 20m', v => defineParam(h.ref, 'imax', numeroDe(v)));
+        }
+        if (st.cfg.valores[h.ref] != null || st.cfg.params[h.ref]) {
+          const b = $c('button', null, '↺ Voltar ao valor do esquema'); b.onclick = () => { delete st.cfg.valores[h.ref]; delete st.cfg.params[h.ref]; gravaCfg(); st.sujo = true; agenda(); fecha(); };
+          el.append(b);
+        }
         document.body.append(el);
         el.style.left = Math.min(e.clientX + 6, window.innerWidth - 240) + 'px';
         el.style.top = Math.min(e.clientY + 6, window.innerHeight - el.offsetHeight - 8) + 'px';
@@ -1844,6 +1936,11 @@
       case 'fonte': garante(); defineFonte(a.net, a.remover ? null : { v: a.v != null ? +a.v : undefined, onda: a.onda || null, desligada: !!a.desligada }); monta(); return estado(false).fontes;
       case 'gpio': garante(); defineGpio(a.ref + '-' + a.pino, a.modo ? { modo: a.modo, duty: a.duty, f: a.f } : null); monta(); return { pino: a.ref + '-' + a.pino, ...(st.an && st.an.pinos[a.ref + '-' + a.pino] || {}) };
       case 'terra': garante(); st.cfg.terra = (a.nets || []).slice(); gravaCfg(); monta(); return { terra: st.mt.terra };
+      case 'parametros': garante(); if (!info(a.ref)) throw new Error('componente ' + a.ref + ' fora da simulação');
+        for (const k of ['vf', 'imax']) if (a[k] !== undefined) defineParam(a.ref, k, a[k] == null ? null : (typeof a[k] === 'number' ? a[k] : numeroDe(a[k])));
+        monta(); return st.an && st.an.comps[a.ref];
+      case 'trocar': garante(); trocaComponente(a.ref); monta(); return st.an && st.an.comps[a.ref];
+      case 'queimados': return { queimados: Object.assign({}, st.cfg.queimados) };
       case 'valor': garante(); if (a.valor == null) delete st.cfg.valores[a.ref]; else st.cfg.valores[a.ref] = String(a.valor); gravaCfg(); monta(); return st.an && st.an.comps[a.ref];
       case 'desligar_componente': garante(); { const s = new Set(st.cfg.desligados || []); if (a.desligado === false) s.delete(a.ref); else s.add(a.ref); st.cfg.desligados = [...s]; } gravaCfg(); monta(); return estado(false);
       case 'osciloscopio': garante(); for (const n of a.nets || []) osciloscopio(n, a.remover ? false : true); st.osc = st.osciloscopio.length > 0; painel.atualiza(true);
@@ -1944,7 +2041,7 @@
       }
       case 'recolher': return recolher();
       case 'dados': await carregaDados(); painel.atualiza(true); return { componentes: Object.keys((st.dados && st.dados.componentes) || {}).length };
-      case 'limpar': st.cfg = { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [] }; st.osciloscopio = []; gravaCfg(); st.sujo = true; agenda(); return { limpo: true };
+      case 'limpar': st.cfg = { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [], params: {}, queimados: {} }; st.osciloscopio = []; gravaCfg(); st.sujo = true; agenda(); return { limpo: true };
     }
     throw new Error('ação do simulador desconhecida: ' + acao);
   }
