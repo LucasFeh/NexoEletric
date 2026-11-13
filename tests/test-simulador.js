@@ -328,7 +328,8 @@ caso('ganchos nas vistas, <script> nas cascas, ação "simulador" nos dois hubs'
   assert.ok(/\{ id:'sim', key:'tab\.sim' \}/.test(hub) && /data-pane="sim"/.test(hub) && /HubSimAba\.pane/.test(hub) && /hub-simulador-aba\.js/.test(hub), 'a aba Simulador no hub.html');
   assert.ok((ler('hub-i18n.js').match(/'tab\.sim':/g) || []).length === 2, 'tab.sim em pt e en');
   const aba = ler('hub-simulador-aba.js');
-  assert.ok(/modo=sim'/.test(aba) && /\['sim2d', 'PCB 2D'\]/.test(aba) && /\['sim3d', 'PCB 3D'\]/.test(aba) && /\['bancada', 'Bancada'\]/.test(aba), 'os modos da aba: Esquema, PCB 2D, PCB 3D, Bancada');
+  assert.ok(/modo=sim'/.test(aba) && /\['sim2d', '2D'\]/.test(aba) && /\['sim3d', '3D'\]/.test(aba) && !/\['bancada', 'Bancada'\]/.test(aba), 'os modos da aba: Esquema, 2D, 3D (o 3D é a bancada)');
+  assert.ok(/ativa\(m === 'bancada' \|\| m === 'sim3d'\)/.test(ler('hub-simulador-pcb.js')) && /salvo0 === 'bancada' \? 'sim3d'/.test(aba), 'o 3D liga a bancada; o modo Bancada gravado vira o 3D');
   assert.ok(/window\.__simVisual/.test(sch) && /window\.__simVisual/.test(ler('hub-simulador.js')), 'a folha escura sem template/textos');
   assert.ok(/HubSimPcb2d/.test(ler('pcbframe.js')), 'a camada elétrica no 2D');
   assert.ok(/hub-bancada\.js/.test(ler('pcbframe.html')) && /animaExtra/.test(ler('hub-pcb3d-vista.js')) && /modeloStep/.test(ler('hub-pcb3d-vista.js')), 'a bancada no 3D');
@@ -397,6 +398,15 @@ caso('1.103.1: leve — PWM com motor sem a busca em linha travar, anda/soma/mé
   assert.ok(/if \(andou\) st\.res = st\.sim\.resultado\(\);/.test(sim), 'um resultado por quadro');
   assert.ok(/analise\.tomaSerie\(\)/.test(sim) && /_ligado: \(\) => st\.ligado/.test(sim), 'o osciloscópio do pad lê a simulação ligada');
   assert.ok(/if \(chave === chaveB && svgB\.childNodes\.length\) return;/.test(pcb) && /if \(chave === chaveP\) return;/.test(pec), 'balões e peças só se mexem quando algo mudou');
+});
+caso('1.104.0: só 2D e 3D — o 3D é a bancada, e as peças do NexoCode (Wokwi) ficam sobre a mesa', () => {
+  const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
+  const pec = ler('hub-simulador-pecas.js'), banc = ler('hub-bancada.js');
+  assert.ok(/ativo: \(\) => st\.ativo && !!st\.raiz, mesaZ: \(\) => st\.mesaZ/.test(banc), 'a bancada diz se está ligada e a altura da mesa');
+  assert.ok(/function bancadaLigada\(\)/.test(pec) && /function ancoraMesa\(id\)/.test(pec) && /return ancoraMesa\(id\);/.test(pec), 'a peça sem componente na placa vai para a mesa no 3D');
+  assert.ok(/'nexoPecas\.mesa\.' \+ PROJ/.test(pec) && /function arrastoNaMesa/.test(pec) && /if \(hd\.dataset\.arrastou\) return;/.test(pec), 'arrastar pela mesa grava o lugar; o clique sem arrastar recolhe');
+  assert.ok(/p\.net === net/.test(pec) && /'stroke-dasharray': '7 4'/.test(pec), 'o fio até o pad da net da peça');
+  assert.ok(/document\.querySelectorAll\('\.banc'\)/.test(pec), 'o cartão não fica atrás do painel da Bancada');
 });
 caso('1.103.0: as peças vivas do Wokwi (NexoCode → gpio_lote.pecas) no Simulador, e as entradas de volta', () => {
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');

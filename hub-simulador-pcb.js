@@ -763,7 +763,7 @@
         const t = e.target;
         if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
         if (H.em3d() && /^[089]$/.test(e.key)) return;
-        if (modoAtual === 'bancada' && /^(Delete|Backspace|r|R|Escape)$/.test(e.key)) { e.preventDefault(); return; }   // a bancada trata (hub-bancada.js)
+        if ((modoAtual === 'bancada' || modoAtual === 'sim3d') && /^(Delete|Backspace|r|R|Escape)$/.test(e.key)) { e.preventDefault(); return; }   // a bancada trata (hub-bancada.js)
         if (e.key === 'Escape' && cartao) cartao.hidden = true;
         e.stopPropagation(); e.preventDefault();
       }, true);
@@ -781,7 +781,8 @@
           if (m === 'sim2d') { if (H.em3d()) H.sai3d(); }
           else if (!H.em3d()) H.entra3d();
         } catch (_e) { if (++tentativas < 60) setTimeout(vai, 400); return; }
-        if (window.HubBancada && typeof window.HubBancada.ativa === 'function') window.HubBancada.ativa(m === 'bancada');
+        /* 1.104.0: o 3D da aba Simulador E a bancada (o modo 'bancada' antigo continua aceito: e o mesmo 3D) */
+        if (window.HubBancada && typeof window.HubBancada.ativa === 'function') window.HubBancada.ativa(m === 'bancada' || m === 'sim3d');
         agenda();
       };
       vai();

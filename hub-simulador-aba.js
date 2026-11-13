@@ -4,7 +4,8 @@
    "a PCB na visão 2D também mostra o funcionamento elétrico" e a "Bancada".
    Modos: Esquema (schframe.html?modo=sim: a folha escura so com simbolos, pinos e fios, simulando), PCB 2D e PCB 3D
    (pcbframe.html?modo=sim2d|sim3d: o cobre pela tensao e a corrente andando; o mouse no pad/perna mostra a tensao e o
-   datasheet) e Bancada (o 3D com a placa e os itens da biblioteca ligados por fios). "Dividir" mostra o Esquema ao lado.
+   datasheet). Desde a 1.104.0 o 3D E a bancada (a placa sobre a mesa, os itens da biblioteca e as pecas do NexoCode
+   ligados por fios) — nao ha mais um modo Bancada separado. "Esquema ao lado" mostra o Esquema junto.
    As vistas conversam pelo topo da janela (window.__nexoSim / __nexoBancada).
 
    API (a casca, hub.html » renderPanes): HubSimAba.pane(nomeDoProjeto) -> o elemento da aba. */
@@ -33,12 +34,13 @@
   const $c = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const le = (k, p) => { try { return localStorage.getItem(k) || p; } catch (_e) { return p; } };
   const grava = (k, v) => { try { localStorage.setItem(k, v); } catch (_e) { /* sem storage */ } };
-  const MODOS = [['esquema', 'Esquema'], ['sim2d', 'PCB 2D'], ['sim3d', 'PCB 3D'], ['bancada', 'Bancada']];
+  /* 1.104.0: so 2D e 3D — o 3D E a bancada (pedido do dono: "a visao 2D / 3D / bancada nao deveria existir, e so 2D /
+     3D, o 3D ja e a visao"; "o 3D deveria ser a bancada"). O modo antigo 'bancada' gravado vira o 3D */
+  const MODOS = [['esquema', 'Esquema'], ['sim2d', '2D'], ['sim3d', '3D']];
   const DICA = {
     esquema: 'o circuito simulando — clique num pino, fio ou componente › Analisar (lista ou osciloscópio); clique no botão, roda no potenciômetro',
     sim2d: 'a placa em 2D com o funcionamento elétrico — cobre pela tensão, a corrente andando; clique na trilha ou no pino: o balão (as contas abrem no botão)',
-    sim3d: 'a placa em 3D com a corrente nas trilhas — clique na trilha ou na perna do CI: o balão (lista, osciloscópio, contas)',
-    bancada: 'a bancada: a placa e os itens da biblioteca ligados por fios, funcionando como de verdade; clique num item ou fio para mover, girar ou apagar',
+    sim3d: 'a bancada em 3D: a placa sobre a mesa com a corrente nas trilhas, os itens da biblioteca (motor, fonte) e as peças do NexoCode ligados por fios — clique na trilha ou no pino: o balão; num item ou fio: mover, girar, apagar',
   };
 
   function pane(projeto) {
@@ -90,7 +92,7 @@
     chk.onchange = () => { grava(PREF_DIV, chk.checked ? '1' : '0'); poe(atual); };
     abrir.onclick = () => { const f = fSch.hidden && fPcb ? fPcb : fSch; window.open(f.src); };
     raiz.append(bar, vp);
-    const salvo = le(PREF, 'esquema');
+    const salvo0 = le(PREF, 'esquema'), salvo = salvo0 === 'bancada' ? 'sim3d' : salvo0;
     poe(MODOS.some(([k]) => k === salvo) ? salvo : 'esquema');
     return raiz;
   }

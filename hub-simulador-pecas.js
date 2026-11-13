@@ -9,7 +9,10 @@
      DHT...) montados a partir do ESQUEMA deste projeto, e manda no gpio_lote o campo "pecas": {"<id>": {tipo, ref,
      attrs, pinos, ...propriedades}} — só o que mudou. O id é o DESIGNADOR do componente (U3, DS1...) ou "net:<NET>".
    - Aqui cada peça vira o elemento do Wokwi ao lado do componente: no Esquema do Simulador (ao lado do símbolo) e na
-     PCB 2D/3D/Bancada (preso ao componente por uma linha). Peça sem componente vai para a doca "Peças do NexoCode".
+     PCB 2D/3D (preso ao componente por uma linha). Peça sem componente na placa (OLED, sensor, servo — as "net:...")
+     fica SOBRE A MESA da bancada no 3D (1.104.0, pedido do dono: "na bancada é onde vai ficar a simulação do Wokwi"),
+     ao lado da placa, com o fio até o pad da net dela; arrastar pelo título muda o lugar na mesa (gravado por projeto).
+     No Esquema e no 2D ela vai para a doca "Peças do NexoCode".
    - O que a pessoa faz na peça (botão, teclado, potenciômetro, encoder, PIR) e os controles dos sensores (DHT, sonar,
      LDR, NTC, MPU6050) entram na fila "pecas_entrada", que volta na resposta do próximo gpio_lote; o NexoCode aplica.
    - Estado por projeto no topo da janela (as vistas Esquema e PCB veem o mesmo): window.top.__nexoPecas[projeto],
@@ -151,7 +154,8 @@
     hd.querySelector('b').textContent = /^net:/.test(id) ? id.slice(4) : id;
     hd.querySelector('span').textContent = NOMES[tipo] || tipo;
     hd.title = 'Clique para recolher/abrir';
-    hd.onclick = () => { el.classList.toggle('min'); if (el.classList.contains('min')) minimizados.add(id); else minimizados.delete(id); gravaMin(); };
+    hd.addEventListener('mousedown', ev => arrastoNaMesa(id, hd, ev));
+    hd.onclick = () => { if (hd.dataset.arrastou) return; el.classList.toggle('min'); if (el.classList.contains('min')) minimizados.add(id); else minimizados.delete(id); gravaMin(); };
     const bd = document.createElement('div'); bd.className = 'bd';
     const caixa = document.createElement('div'); caixa.className = 'el';
     let elem = null;
@@ -253,8 +257,71 @@
     c.inf.textContent = [ext, pin].filter(Boolean).join(' · ');
   }
 
+  /* ------------------------------------------------------------------ a mesa da bancada (o 3D da aba Simulador) */
+  const MESA_KEY = 'nexoPecas.mesa.' + PROJ;
+  const naMesaPos = (() => { try { return JSON.parse(localStorage.getItem(MESA_KEY) || '{}') || {}; } catch (_e) { return {}; } })();
+  const gravaMesa = () => { try { localStorage.setItem(MESA_KEY, JSON.stringify(naMesaPos)); } catch (_e) { /* ok */ } };
+  function bancadaLigada() {
+    const H = window.__hubPcbSim, B = window.HubBancada;
+    return !!(ehPcb && H && H.em3d && H.em3d() && B && B.ativo && B.ativo());
+  }
+  function caixaPlaca(pl) {
+    let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+    for (const c of (pl && pl.components) || []) for (const p of c.pads || []) { x1 = Math.min(x1, p.x); x2 = Math.max(x2, p.x); y1 = Math.min(y1, p.y); y2 = Math.max(y2, p.y); }
+    return x1 > x2 ? { x1: -25, y1: -25, x2: 25, y2: 25 } : { x1, y1, x2, y2 };
+  }
+  /* o lugar da peca na mesa (mm): o gravado, ou o proximo da fileira ATRAS da placa (o cartao fica em pe acima do ponto
+     e nao cobre a placa; os itens da bancada, como o motor, ficam ao lado) */
+  function lugarNaMesa(id, pl) {
+    if (Array.isArray(naMesaPos[id])) return naMesaPos[id];
+    const bb = caixaPlaca(pl);
+    const ids = [...cartoes.keys()].filter(k => !Array.isArray(naMesaPos[k]) && !(pl.components || []).some(c => c.ref === k));
+    const i = Math.max(0, ids.indexOf(id)), larg = Math.max(bb.x2 - bb.x1, 40), porLinha = Math.max(2, Math.round(larg / 45));
+    return [bb.x1 + (i % porLinha) * (larg / Math.max(1, porLinha - 1)), bb.y2 + 28 + Math.floor(i / porLinha) * 45];
+  }
+  function ancoraMesa(id) {
+    const H = window.__hubPcbSim, B = window.HubBancada;
+    const V = H.vista3d(), host = H.host3d(), pl = H.placa && H.placa();
+    if (!V || !V.projeta || !host || !pl) return null;
+    const z = B.mesaZ(), [mx, my] = lugarNaMesa(id, pl), r = host.getBoundingClientRect();
+    const q = V.projeta(mx, my, z);
+    if (q.atras) return { fora: true };
+    /* o fio: ate o pad mais perto da net da peca (net:SDA -> um pad da net SDA na placa) */
+    let fio = null;
+    const net = /^net:/.test(id) ? id.slice(4) : '';
+    if (net) {
+      let dm = Infinity, alvo = null;
+      for (const c of pl.components || []) for (const p of c.pads || []) if (p.net === net) { const d = Math.hypot(p.x - mx, p.y - my); if (d < dm) { dm = d; alvo = p; } }
+      if (alvo) { const w = V.projeta(alvo.x, alvo.y, /bottom/i.test(alvo.layer || '') ? -V.espessura() : 0.05); if (!w.atras) fio = { x: r.left + w.x, y: r.top + w.y }; }
+    }
+    return { x: r.left + q.x, y: r.top + q.y, mesa: true, fio };
+  }
+  /* arrastar a peca pela mesa (pelo titulo); o clique sem arrastar recolhe/abre */
+  function arrastoNaMesa(id, hd, ev) {
+    if (!bancadaLigada() || ev.button !== 0) return;
+    const H = window.__hubPcbSim, V = H.vista3d(), z = window.HubBancada.mesaZ();
+    const p0 = V.noPlano(ev, z); if (!p0) return;
+    const pl = H.placa(), [x0, y0] = lugarNaMesa(id, pl);
+    let moveu = false;
+    const mv = e => {
+      const p = V.noPlano(e, z); if (!p) return;
+      if (!moveu && Math.hypot(e.clientX - ev.clientX, e.clientY - ev.clientY) < 4) return;
+      moveu = true;
+      naMesaPos[id] = [Math.round(x0 + p.x - p0.x), Math.round(y0 + p.y - p0.y)];
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', mv, true); window.removeEventListener('mouseup', up, true);
+      if (moveu) { gravaMesa(); hd.dataset.arrastou = '1'; setTimeout(() => { delete hd.dataset.arrastou; }, 0); }
+    };
+    window.addEventListener('mousemove', mv, true); window.addEventListener('mouseup', up, true);
+  }
+
   /* onde fica o componente na tela (o ponto da linha) */
   function ancora(id) {
+    if (bancadaLigada()) {
+      const pl = window.__hubPcbSim.placa && window.__hubPcbSim.placa();
+      if (/^net:/.test(id) || !(pl && (pl.components || []).some(k => k.ref === id))) return ancoraMesa(id);
+    }
     if (/^net:/.test(id)) return null;
     if (ehSch) {
       const V = window.__hubSimVista; if (!V) return null;
@@ -287,11 +354,13 @@
   let chaveP = '';
   function posiciona() {
     const lidos = [...cartoes].map(([id, c]) => ({ id, c, a: ancora(id), w: c.el.offsetWidth || 160, h: c.el.offsetHeight || 80 }));
-    const chave = lidos.map(o => o.id + ':' + (!o.a ? 'd' : o.a.fora ? 'f' : Math.round(o.a.x) + ',' + Math.round(o.a.y)) + ':' + o.w + 'x' + o.h).join('|') + '|' + window.innerWidth + 'x' + window.innerHeight;
+    const chave = lidos.map(o => o.id + ':' + (!o.a ? 'd' : o.a.fora ? 'f' : Math.round(o.a.x) + ',' + Math.round(o.a.y) + (o.a.fio ? '>' + Math.round(o.a.fio.x) + ',' + Math.round(o.a.fio.y) : '')) + ':' + o.w + 'x' + o.h).join('|') + '|' + window.innerWidth + 'x' + window.innerHeight;
     if (chave === chaveP) return;
     chaveP = chave;
     svg.textContent = '';
     const postos = [];
+    /* os paineis por cima da vista (o da Bancada) tambem sao obstaculo: o cartao nao fica atras deles */
+    for (const pn of document.querySelectorAll('.banc')) { if (pn.hidden || pn.offsetParent === null) continue; const r = pn.getBoundingClientRect(); if (r.width) postos.push({ x1: r.left, y1: r.top, x2: r.right, y2: r.bottom }); }
     let naDoca = 0;
     const NS = 'http://www.w3.org/2000/svg', mk = (t, at) => { const e = document.createElementNS(NS, t); for (const k in at) e.setAttribute(k, at[k]); return e; };
     for (const { id, c, a, w: w0, h: h0 } of lidos) {
@@ -305,6 +374,26 @@
       if (c.el.parentElement !== camada) camada.append(c.el);
       c.el.style.display = '';
       const w = w0, h = h0;
+      if (a.mesa) {
+        /* em pe sobre a mesa: o cartao acima do ponto, uma haste ate ele e o fio ate o pad da net na placa */
+        /* o primeiro lugar livre (um cartao nao cobre o outro): acima do ponto, depois ao lado, depois mais acima */
+        const cl = (l, t) => [Math.max(4, Math.min(l, window.innerWidth - w - 4)), Math.max(4, Math.min(t, window.innerHeight - h - 4))];
+        let L = 0, T = 0;
+        for (const [dx, dy] of [[0, 0], [w * 0.55, 0], [-w * 0.55, 0], [0, -(h + 8)], [w + 8, 0], [-(w + 8), 0], [w * 0.55, -(h + 8)], [-w * 0.55, -(h + 8)], [0, -2 * (h + 8)], [2 * (w + 8), 0], [2 * (w + 8), -(h + 8)], [3 * (w + 8), 0]]) {
+          [L, T] = cl(a.x - w / 2 + dx, a.y - h - 14 + dy);
+          if (Array.isArray(naMesaPos[id])) break;   // posta pela pessoa (arrastada): fica exatamente ali
+          if (!postos.some(o => L < o.x2 + 6 && L + w > o.x1 - 6 && T < o.y2 + 6 && T + h > o.y1 - 6)) break;
+        }
+        postos.push({ x1: L, y1: T, x2: L + w, y2: T + h });
+        c.el.style.left = L + 'px'; c.el.style.top = T + 'px';
+        if (a.fio) svg.append(mk('line', { x1: a.x, y1: a.y, x2: a.fio.x, y2: a.fio.y, stroke: 'rgba(0,0,0,.85)', 'stroke-width': 4.5, 'stroke-linecap': 'round' }),
+          mk('line', { x1: a.x, y1: a.y, x2: a.fio.x, y2: a.fio.y, stroke: '#22d3ee', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-dasharray': '7 4' }),
+          mk('circle', { cx: a.fio.x, cy: a.fio.y, r: 3.5, fill: '#22d3ee', stroke: '#fff', 'stroke-width': 1.2 }));
+        const hx = Math.max(L + 8, Math.min(a.x, L + w - 8));
+        svg.append(mk('line', { x1: hx, y1: T + h, x2: a.x, y2: a.y, stroke: '#22d3ee', 'stroke-width': 1.6 }),
+          mk('ellipse', { cx: a.x, cy: a.y, rx: 9, ry: 3.5, fill: 'rgba(34,211,238,.35)', stroke: '#22d3ee', 'stroke-width': 1.2 }));
+        continue;
+      }
       if (a.caixa) postos.push(a.caixa);
       let L = 0, T = 0;
       for (const d of [24, 60, 110, 170, 240]) {

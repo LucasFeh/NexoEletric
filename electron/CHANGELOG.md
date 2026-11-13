@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.104.0
+
+O 3D é a bancada, e o Wokwi do NexoCode fica nela (o dono: "a visão 2D / 3D / bancada não deveria existir, é só 2D / 3D,
+o 3D já é a visão", "o 3D deveria ser a bancada", "na bancada é onde vai ficar a simulação do Wokwi").
+
+- **Aba Simulador: Esquema | 2D | 3D.** Sai o modo Bancada separado: o 3D liga a bancada (a placa sobre a mesa, o
+  motor, a fonte e os fios, com a corrente nas trilhas). O clique pega primeiro o item ou fio da bancada e, no resto, o
+  balão da trilha/pino como antes. O modo "Bancada" gravado abre no 3D; `pcb_modo {modo:"bancada"}` continua aceito.
+- **As peças do Wokwi sobre a mesa.** No 3D, as peças do NexoCode que não são um componente da placa (OLED, DHT22,
+  servo, sensores — as `net:...`) ficam em pé sobre a mesa, numa fileira atrás da placa, com o fio tracejado até o pad
+  da net delas. Não cobrem umas às outras nem o painel da Bancada. Arraste pelo título para mudar o lugar na mesa
+  (gravado por projeto); o clique sem arrastar recolhe/abre. As que são componente da placa continuam presas a ele;
+  no Esquema e no 2D as de fora seguem na doca "Peças do NexoCode".
+
 ## 1.103.1
 
 Simulador leve de novo e o osciloscópio abrindo (o dono: "o osciloscópio nem abre agora, tá tudo muito bugado, não tá rodando leve").

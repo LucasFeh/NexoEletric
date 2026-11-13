@@ -563,5 +563,6 @@
     throw new Error('ação da bancada desconhecida: ' + a.acao);
   }
 
-  window.HubBancada = { ativa, consome, mcp, estado };
+  /* ativo()/mesaZ(): as pecas do NexoCode (hub-simulador-pecas.js) ficam sobre a mesa quando a bancada esta ligada */
+  window.HubBancada = { ativa, consome, mcp, estado, ativo: () => st.ativo && !!st.raiz, mesaZ: () => st.mesaZ };
 })();

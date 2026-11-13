@@ -94,7 +94,7 @@ datasheet com medidas), diga ao usuário qual é e o que faltou. Não esconda co
   esquema.
   - O "Sincronizar com o esquema" manda os pinos por `gpio_lote`.
   - O botão e o potenciômetro da tela do NexoCode acionam a chave e o pot do esquema.
-- **Bancada:** `sim_bancada`.
+- **Bancada** (o 3D da aba Simulador: a placa sobre a mesa; as peças do NexoCode também ficam nela): `sim_bancada`.
   - Ponha os itens da biblioteca com `atributos.bancada` (motor, fonte, hélice) e ligue os fios dos pads da placa aos
     terminais deles.
   - Esses itens também são 3D de verdade, feitos no NexoCAD e salvos na biblioteca (categoria Bancada).
