@@ -543,7 +543,7 @@
     /* 1.105.1 ("cliquei em um componente na placa e a reticula ficou grudada nela"): a marca sob o mouse some ao
        fixar/fechar o cartao e ao sair da vista; 1.110.0: volta no proximo movimento do mouse */
     function soltaAnel() { if (!hoverAlvo) return; hoverAlvo = null; marcaAlvo3d(); if (!H.em3d()) H.redesenha(); }
-    const chaveAlvo = a => !a ? '' : a.tipo === 'pad' ? 'p|' + a.pad.ref + '|' + a.pad.nome : a.tipo === 'mcu' ? 'm|' + a.mcu.ref : 't|' + a.trilha.s.trilha + '|' + a.trilha.s.layer;
+    const chaveAlvo = a => !a ? '' : a.tipo === 'pad' ? 'p|' + a.pad.ref + '|' + a.pad.nome : a.tipo === 'mcu' ? 'm|' + a.mcu.ref : a.tipo === 'comp' ? 'c|' + a.comp.ref : 't|' + a.trilha.s.trilha + '|' + a.trilha.s.layer;
     /* o contorno do alvo em mm (no plano da placa): o pad girado, a caixa do MCU; a trilha = os trechos dela */
     function contornoDoAlvo(a, folga) {
       if (a.tipo === 'pad') {
@@ -552,6 +552,12 @@
         return [[-w, -h], [w, -h], [w, h], [-w, h]].map(([u, v]) => [p.x + u * c - v * sn, p.y + u * sn + v * c]);
       }
       if (a.tipo === 'mcu') { const k = a.mcu.caixa, f = 1 + folga; return [[k.x1 - f, k.y1 - f], [k.x2 + f, k.y1 - f], [k.x2 + f, k.y2 + f], [k.x1 - f, k.y2 + f]]; }
+      if (a.tipo === 'comp') {
+        /* no 3D a caixa do corpo; no 2D a dos pads */
+        const V = H.em3d() && H.vista3d && H.vista3d(), cx = V && V.caixaDe ? V.caixaDe(a.comp.ref) : null;
+        const k = cx || a.comp.caixa, f = (cx ? 0.15 : 0.5) + folga;
+        return [[k.x1 - f, k.y1 - f], [k.x2 + f, k.y1 - f], [k.x2 + f, k.y2 + f], [k.x1 - f, k.y2 + f]];
+      }
       return null;
     }
     const trechosDoAlvo = a => (st.res && st.res.segs || []).filter(s => s.trilha === a.trilha.s.trilha && s.layer === a.trilha.s.layer);
@@ -564,7 +570,9 @@
       if (!a) { V.extra('simAlvo', null); return; }
       const T = V.T(), esp = V.espessura(), g = new T.Group(); g.name = 'simAlvo';
       const baixo = !!(V.estado && V.estado().el < 0);   // o alvo e sempre da face que a camera ve
-      const z = baixo ? -esp - 0.12 : 0.12;
+      let z = baixo ? -esp - 0.12 : 0.12;
+      /* o componente: o contorno no TOPO do corpo (em volta do que a pessoa ve) */
+      if (a.tipo === 'comp') { const cx = V.caixaDe && V.caixaDe(a.comp.ref); if (cx) z = a.comp.bottom ? cx.z1 - 0.08 : cx.z2 + 0.08; }
       const mat = op => new T.MeshBasicMaterial({ color: new T.Color(COR_ALVO), transparent: true, opacity: op, depthTest: false, depthWrite: false, toneMapped: false, side: T.DoubleSide });
       const barra = (x1, y1, x2, y2, larg, op) => {
         const L = Math.hypot(x2 - x1, y2 - y1); if (L < 1e-6) return;
@@ -736,6 +744,40 @@
       /* a ancora do balao: o ponto da trilha mais perto do mouse */
       return { s: melhor, ax: melhor.x1 + tm * (melhor.x2 - melhor.x1), ay: melhor.y1 + tm * (melhor.y2 - melhor.y1), d: dm };
     }
+    function caixaPads(c) {
+      let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+      for (const p of c.pads || []) { x1 = Math.min(x1, p.x); x2 = Math.max(x2, p.x); y1 = Math.min(y1, p.y); y2 = Math.max(y2, p.y); }
+      return x1 > x2 ? null : { x1, y1, x2, y2 };
+    }
+    /* o componente como alvo: no 3D o corpo sob o mouse (o raio no modelo 3D); no 2D o ponto dentro da caixa dos pads */
+    function compAlvo(c) {
+      const k = caixaPads(c) || { x1: c.x || 0, y1: c.y || 0, x2: c.x || 0, y2: c.y || 0 };
+      return { ref: c.ref, c, caixa: k, ax: (k.x1 + k.x2) / 2, ay: (k.y1 + k.y2) / 2, bottom: /bottom/i.test(c.layer || '') };
+    }
+    function compNoPonto(q, ev) {
+      const pl = H.placa(); if (!pl) return null;
+      if (H.em3d()) {
+        const V = H.vista3d(), h = V && V.corpoSob ? V.corpoSob(ev) : null;
+        if (!h || !h.ref) return null;
+        const c = (pl.components || []).find(x => x.ref === h.ref);
+        if (!c) return null;
+        /* a altura do ponto do corpo acertado (acima da face) e a altura do corpo: a perna/terminal fica baixo */
+        const o = compAlvo(c), cx = V.caixaDe ? V.caixaDe(c.ref) : null, esp = V.espessura();
+        o.alturaHit = o.bottom ? -esp - h.z : h.z;
+        o.alturaCorpo = cx ? (o.bottom ? -esp - cx.z1 : cx.z2) : 1;
+        return o;
+      }
+      if (!q) return null;
+      let melhor = null, am = Infinity;
+      for (const c of pl.components || []) {
+        const k = caixaPads(c); if (!k) continue;
+        const m = (c.pads || []).length < 2 ? 0.6 : 0.3;
+        if (q.x < k.x1 - m || q.x > k.x2 + m || q.y < k.y1 - m || q.y > k.y2 + m) continue;
+        const a = (k.x2 - k.x1 + 2 * m) * (k.y2 - k.y1 + 2 * m);
+        if (a < am) { am = a; melhor = c; }   // o menor que contem o ponto
+      }
+      return melhor ? compAlvo(melhor) : null;
+    }
     function mcuNoPonto(q) {
       const d = dadosDoTopo(), mcus = d && d.mcus, pl = H.placa();
       if (!mcus || !pl) return null;
@@ -751,19 +793,40 @@
     }
     /** o que o clique pega neste ponto: {tipo:'mcu', mcu} | {tipo:'pad', pad} | {tipo:'trilha', trilha} | null */
     function alvoEm(ev) {
-      const q = pontoNaPlaca(ev); if (!q) return null;
+      const q = pontoNaPlaca(ev);
+      const em3d = H.em3d(), cp = compNoPonto(q, ev);
+      if (!q) return cp ? alvoDoComp(cp, q) : null;
       const pd = padNoPonto(q), mc = mcuNoPonto(q);
       /* o corpo do MCU ganha do pad de DENTRO dele (o pad termico/GND embaixo do modulo ESP32); os pinos da borda
          continuam abrindo o cartao do pad */
       if (pd && pd.d === 0) {
         const p = pd.p, dentro = mc && p.ref === mc.ref && Math.min(p.x - mc.caixa.x1, mc.caixa.x2 - p.x, p.y - mc.caixa.y1, mc.caixa.y2 - p.y) > 1.5;
-        return dentro ? { tipo: 'mcu', mcu: mc } : { tipo: 'pad', pad: p };
+        if (dentro) return { tipo: 'mcu', mcu: mc };
+        /* 1.110.1: no 3D o corpo de OUTRO componente na frente do pad ganha (esta na frente na tela); o do mesmo
+           componente so ganha no pad de dentro (o termico embaixo do CI) — as pernas continuam abrindo o pad */
+        if (em3d && cp && (cp.ref !== p.ref || Math.min(p.x - cp.caixa.x1, cp.caixa.x2 - p.x, p.y - cp.caixa.y1, cp.caixa.y2 - p.y) > 1.5
+          /* o mouse no ALTO do corpo (a camera de lado: o raio passa pelo corpo e cai no pad dele) e o componente; na
+             altura da perna/terminal (baixo) continua o pad */
+          || cp.alturaHit > Math.min(0.6, 0.45 * cp.alturaCorpo))) return alvoDoComp(cp, q);
+        return { tipo: 'pad', pad: p };
       }
+      if (em3d && cp) return alvoDoComp(cp, q);
       if (mc) return { tipo: 'mcu', mcu: mc };
       const tr = trilhaNoPonto(q);
-      if (tr && (tr.d === 0 || !pd || tr.d < pd.d)) return { tipo: 'trilha', trilha: tr };
+      if (tr && tr.d === 0) return { tipo: 'trilha', trilha: tr };
+      if (cp) return alvoDoComp(cp, q);
+      if (tr && (!pd || tr.d < pd.d)) return { tipo: 'trilha', trilha: tr };
       if (pd) return { tipo: 'pad', pad: pd.p };
       return null;
+    }
+    /* o corpo do MCU abre o balao do NexoCode; o dos outros, o balao do componente */
+    function alvoDoComp(cp, q) {
+      const d = dadosDoTopo();
+      if (d && d.mcus && d.mcus[cp.ref] && (cp.c.pads || []).length) {
+        const k = cp.caixa;
+        return { tipo: 'mcu', mcu: { ref: cp.ref, ax: cp.ax, ay: cp.ay, bottom: cp.bottom, caixa: { x1: k.x1, y1: k.y1, x2: k.x2, y2: k.y2 } } };
+      }
+      return { tipo: 'comp', comp: cp };
     }
     function padEm(ev) { const q = pontoNaPlaca(ev), r = q && padNoPonto(q); return r ? r.p : null; }
     let cartao = null;
@@ -959,6 +1022,7 @@
     function fechaBalao(b) {
       const i = baloes.indexOf(b); if (i >= 0) baloes.splice(i, 1); b.el.remove(); if (!baloes.length && svgB) svgB.textContent = '';
       if (b.mcu && setasMcu.delete(b.mcu)) montaSetas();
+      if (b.comp) montaSetas();
     }
     function alternaBalaoTrilha(hit) {
       const k = chaveSeg(hit.s), ja = baloes.find(b => b.chave === k);
@@ -1033,7 +1097,7 @@
     function montaSetas() {
       const V = H.vista3d && H.vista3d();
       if (V && V.extra) { V.extra('nexocode-mcu', null); if (V.animaExtra) V.animaExtra('nexocode-mcu', null); }
-      try { if (window.HubMcpVista && window.HubMcpVista.selecionar) window.HubMcpVista.selecionar({ refs: [...setasMcu.keys()] }); } catch (_e) { /* ok */ }
+      try { if (window.HubMcpVista && window.HubMcpVista.selecionar) window.HubMcpVista.selecionar({ refs: [...setasMcu.keys(), ...baloes.filter(b => b.comp).map(b => b.comp)] }); } catch (_e) { /* ok */ }
     }
     function marcaSetaMcu(hit, con) {
       if (hit) setasMcu.set(hit.ref, { x: hit.ax, y: hit.ay, bottom: !!hit.bottom, con: !!con });
@@ -1052,9 +1116,47 @@
       marcaSetaMcu(hit, /^(rod|par)\|/.test(b.sig || ''));
       rodaBaloes();
     }
-    try { topo.addEventListener('nexo-sim', () => { for (const b of baloes) if (b.mcu) pintaBalaoMcu(b); }); } catch (_e) { /* ok */ }
+    /* O BALAO DO COMPONENTE (1.110.1, o dono: "tô tentando clicar em cima do componente no 3D e ele não tá
+       selecionando"): o clique no corpo SELECIONA o componente (o destaque do editor, como o MCU) e abre o balao padrao
+       dele — tensao sobre ele, corrente, potencia, o valor editavel (resistor, capacitor, LED) e o queimado. Clicar de
+       novo no corpo (ou no x) fecha e tira a selecao */
+    function pintaBalaoComp(b) {
+      const ref = b.comp, sc = compSim(ref), d = dadosDoTopo(), pl = H.placa(), c = pl && (pl.components || []).find(x => x.ref === ref);
+      if (b.el.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;   // digitando: nao refaz
+      const pinos = c && d && d.pinos ? (c.pads || []).map(p => d.pinos[ref + '-' + p.name]).filter(Boolean) : [];
+      const vs = pinos.map(p => p.v).filter(isFinite);
+      const v = sc && sc.vdd != null ? sc.vdd : vs.length === 2 ? Math.abs(vs[0] - vs[1]) : vs.length ? Math.max(...vs.map(Math.abs)) : null;
+      const i = sc && isFinite(sc.corrente) ? Math.abs(sc.corrente) : pinos.length ? Math.max(...pinos.map(p => Math.abs(p.i || 0))) : null;
+      const sig = JSON.stringify([v, i, sc && sc.p, sc && sc.queimado, sc && sc.valor, sc && sc.vf, sc && sc.imax, sc && sc.brilho != null ? +sc.brilho.toFixed(2) : null]);
+      if (b.sig === sig) return;
+      b.sig = sig;
+      let h = caixaBalao({
+        tipo: sc ? sc.tipo : '', nome: ref, sub: sc && sc.valor ? sc.valor : '', net: vs.length === 2 ? 'tensão sobre ele' : '',
+        v, nota: sc ? '' : 'fora da simulação', acoes: '<button data-x title="Fechar">×</button>',
+        linhas: sc ? [['Corrente', i != null && i > 1e-10 ? fmt(i, 'A') : '0 A'], ['Potência', sc.p != null ? fmt(Math.abs(sc.p), 'W') : ''], sc.tipo === 'led' ? ['Brilho', Math.round(Math.min(1, sc.brilho || 0) * 100) + ' %'] : null] : [],
+        extra: edicaoDoComp(ref, sc, true), lib: (sc && sc.lib) || (c && c.comment) || '', cor: corDoComp(sc), queimado: !!(sc && sc.queimado),
+      }).replace('<div class="nota"></div>', '');
+      if (sc && sc.queimado) h = h.replace('<div class="vv', '<div class="nota" style="color:#fca5a5">' + escB(sc.motivo || 'passou do limite') + '</div><div class="vv');
+      b.el.innerHTML = h;
+      b.el.querySelector('[data-x]').onclick = () => fechaBalao(b);
+      ligaEdicao(b.el, ref);
+    }
+    function alternaBalaoComp(cp) {
+      const ja = baloes.find(b => b.comp === cp.ref);
+      if (ja) { fechaBalao(ja); return; }
+      camadaBaloes();
+      const el = document.createElement('div'); el.className = 'simpcb-balao simpcb-comp';
+      for (const x of ['mousedown', 'wheel', 'contextmenu', 'dblclick', 'keydown']) el.addEventListener(x, z => z.stopPropagation());
+      camadaB.append(el);
+      const b = { el, comp: cp.ref, ax: cp.ax, ay: cp.ay, bottom: cp.bottom, dx: 30, dy: -26 };
+      baloes.push(b);
+      pintaBalaoComp(b);
+      montaSetas();
+      rodaBaloes();
+    }
+    try { topo.addEventListener('nexo-sim', () => { for (const b of baloes) { if (b.mcu) pintaBalaoMcu(b); else if (b.comp) pintaBalaoComp(b); } }); } catch (_e) { /* ok */ }
     /* o que os testes e a IA usam daqui */
-    window.HubSimPcbBaloes = { lista: () => baloes.map(b => ({ chave: b.chave || null, cartao: !!b.cartao, mcu: b.mcu || null, estado: b.sig || null, i: b.s ? b.s.i : null })), trilhaEm, alternaBalaoTrilha, mcuEm, alternaBalaoMcu, alvoEm, mira: () => chaveAlvo(hoverAlvo),
+    window.HubSimPcbBaloes = { lista: () => baloes.map(b => ({ chave: b.chave || null, cartao: !!b.cartao, mcu: b.mcu || null, comp: b.comp || null, estado: b.sig || null, i: b.s ? b.s.i : null })), trilhaEm, alternaBalaoTrilha, mcuEm, alternaBalaoMcu, alvoEm, alternaBalaoComp, mira: () => chaveAlvo(hoverAlvo),
       setas: () => [...setasMcu].map(([ref, a]) => ({ ref, conectado: a.con, bottom: a.bottom })) };
     /* o que a bancada (hub-bancada.js) usa daqui */
     window.HubSimPcbInt = { padEm, padsDaPlaca, H, dados: () => st.dados, mostraCartao };
@@ -1118,6 +1220,7 @@
         const a = alvoEm(e);
         if (!a) return false;
         if (a.tipo === 'mcu') alternaBalaoMcu(a.mcu);
+        else if (a.tipo === 'comp') alternaBalaoComp(a.comp);
         else if (a.tipo === 'pad') mostraCartao(a.pad, e, true);
         else alternaBalaoTrilha(a.trilha);
         return true;

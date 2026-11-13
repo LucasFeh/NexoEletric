@@ -1014,6 +1014,25 @@ async function cria(host, opcoes){
     },
     espessura(){ return ESP; },
     T(){ return T; },
+    /* 1.110.1 (simulador, o dono: "tô tentando clicar em cima do componente no 3D e ele não tá selecionando"): o CORPO
+       sob o mouse ({ref, corpo, dist} | null; a solda nao conta: e o pad) e a caixa no mundo do corpo de um componente */
+    corpoSob(ev){
+      posiciona(); ray.setFromCamera(ndc(ev), cam);
+      for (const hit of ray.intersectObjects([gCorpos], true)) {
+        let ob = hit.object;
+        while (ob && !(ob.userData && ob.userData.ref)) ob = ob.parent;
+        if (!ob) continue;
+        const c = ob.userData.corpo || null;
+        if (c && c.kind === 'solda') return null;
+        return { ref:ob.userData.ref, corpo:c, dist:hit.distance, z:hit.point.z };
+      }
+      return null;
+    },
+    caixaDe(ref){
+      const bx = new T.Box3();
+      for (const c of gCorpos.children) if (c.userData.ref === ref && !(c.userData.corpo && c.userData.corpo.kind === 'solda')) bx.expandByObject(c);
+      return bx.isEmpty() ? null : { x1:bx.min.x, y1:bx.min.y, z1:bx.min.z, x2:bx.max.x, y2:bx.max.y, z2:bx.max.z };
+    },
     /* 1.102.0 (bancada): um STEP da biblioteca vira um Object3D (mesmo leitor, malha e materiais da vista); o ponto do
        plano Z = z sob o mouse; aplicar os materiais do modo (Padrao/Real View) num objeto de fora */
     async modeloStep(url, chave){

@@ -472,7 +472,7 @@ caso('1.105.0: o clique no microcontrolador na PCB 2D/3D mostra se o NexoCode es
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
   const sim = ler('hub-simulador.js'), pcb = ler('hub-simulador-pcb.js');
   assert.ok(/mcus: Object\.fromEntries\(/.test(sim) && /conectado: !!n, rodando: !!\(n && n\.rodando\)/.test(sim), 'o Esquema publica os MCUs e a conexão do NexoCode');
-  assert.ok(/function mcuEm\(ev\)/.test(pcb) && /function alternaBalaoMcu\(hit\)/.test(pcb) && /return dentro \? \{ tipo: 'mcu', mcu: mc \} : \{ tipo: 'pad', pad: p \};/.test(pcb) && /if \(a\.tipo === 'mcu'\) alternaBalaoMcu\(a\.mcu\);/.test(pcb), 'o clique no corpo do MCU (e no pad de dentro dele) abre o balão');
+  assert.ok(/function mcuEm\(ev\)/.test(pcb) && /function alternaBalaoMcu\(hit\)/.test(pcb) && /if \(dentro\) return \{ tipo: 'mcu', mcu: mc \};/.test(pcb) && /if \(a\.tipo === 'mcu'\) alternaBalaoMcu\(a\.mcu\);/.test(pcb), 'o clique no corpo do MCU (e no pad de dentro dele) abre o balão');
   assert.ok(/✕ Desconectado/.test(pcb) && /● Conectado ao NexoCode/.test(pcb) && /if \(b\.mcu\) pintaBalaoMcu\(b\)/.test(pcb), 'desconectado/conectado, atualizado com a simulação');
 });
 caso('1.104.0: só 2D e 3D — o 3D é a bancada, e as peças do NexoCode (Wokwi) ficam sobre a mesa', () => {
@@ -528,6 +528,15 @@ caso('1.110.0: no 2D/3D o que o clique vai pegar fica marcado ao passar o mouse 
   assert.ok(/const a = e\.buttons \? null : alvoEm\(e\);/.test(pcb) && /const a = alvoEm\(e\);\n\s+if \(!a\) return false;/.test(pcb), 'o passar do mouse e o clique usam o mesmo alvoEm');
   assert.ok(/V\.extra\('simAlvo', g\)/.test(pcb) && /function marcaAlvo2d\(ctx, px\)/.test(pcb) && /\.simpcb-mira, \.simpcb-mira \*\{cursor:pointer/.test(pcb), 'a marca no 3D e no 2D e a mãozinha');
   assert.ok(/<button class="conectado" data-abre/.test(pcb) && /rodar: !soAbre/.test(pcb), 'o MCU conectado: clicar em Conectado abre o código no NexoCode');
+});
+
+caso('1.110.1: no 3D o clique no CORPO do componente seleciona e abre o balão dele (a perna/terminal baixo continua o pad)', () => {
+  const pcb = fs.readFileSync(path.join(RAIZ, 'hub-simulador-pcb.js'), 'utf8'), vista = fs.readFileSync(path.join(RAIZ, 'hub-pcb3d-vista.js'), 'utf8');
+  assert.ok(/corpoSob\(ev\)\{/.test(vista) && /if \(c && c\.kind === 'solda'\) return null;/.test(vista) && /caixaDe\(ref\)\{/.test(vista), 'a vista diz o corpo sob o mouse (a solda é o pad) e a caixa dele');
+  assert.ok(/\|\| cp\.alturaHit > Math\.min\(0\.6, 0\.45 \* cp\.alturaCorpo\)\)\) return alvoDoComp\(cp, q\);/.test(pcb) && /if \(em3d && cp\) return alvoDoComp\(cp, q\);/.test(pcb), 'o corpo ganha do pad embaixo dele; a perna baixa continua o pad');
+  assert.ok(/else if \(a\.tipo === 'comp'\) alternaBalaoComp\(a\.comp\);/.test(pcb) && /function pintaBalaoComp\(b\)/.test(pcb) && /\.\.\.baloes\.filter\(b => b\.comp\)\.map\(b => b\.comp\)/.test(pcb), 'o clique abre o balão e seleciona (o destaque do editor)');
+  assert.ok(/extra: edicaoDoComp\(ref, sc, true\)/.test(pcb) && /ligaEdicao\(b\.el, ref\);/.test(pcb), 'o balão do componente edita o valor');
+  assert.ok(/d\.mcus\[cp\.ref\]/.test(pcb), 'o corpo do MCU continua abrindo o balão do NexoCode');
 });
 
 (async () => { for (const f of fila) await f();

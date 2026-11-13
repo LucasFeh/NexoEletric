@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.110.1
+
+Clicar no componente no 3D do Simulador (o dono: "tô tentando clicar em cima do componente no 3D e ele não tá
+selecionando"; "os pads estão perfeitos, mas o 3D ainda não funciona").
+
+- O CORPO do componente (o modelo 3D sob o mouse) agora é alvo: ao passar o mouse fica marcado em ciano no topo do
+  corpo, e o clique SELECIONA o componente (o mesmo destaque do editor) e abre o balão dele: tensão sobre ele,
+  corrente, potência (e o brilho do LED), o valor editável (resistência, capacitância, Vf e corrente máxima do LED) e o
+  queimado com "Trocar". Clicar de novo no corpo, ou no ×, fecha e tira a seleção. O corpo do microcontrolador continua
+  abrindo o balão do NexoCode.
+- O corpo na frente ganha do pad atrás dele (a câmera de lado: o raio passava pelo corpo e caía no pad); a perna ou o
+  terminal na altura da placa continua abrindo o pad. A solda conta como o pad.
+- No 2D, o clique entre os pads de um componente abre o mesmo balão.
+
 ## 1.110.0
 
 A mira no 2D e no 3D do Simulador (o dono: "na visão 3D, antes de eu clicar em cima dos pinos, trilhas, quero poder
