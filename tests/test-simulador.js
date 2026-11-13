@@ -399,6 +399,13 @@ caso('1.103.1: leve — PWM com motor sem a busca em linha travar, anda/soma/mé
   assert.ok(/analise\.tomaSerie\(\)/.test(sim) && /_ligado: \(\) => st\.ligado/.test(sim), 'o osciloscópio do pad lê a simulação ligada');
   assert.ok(/if \(chave === chaveB && svgB\.childNodes\.length\) return;/.test(pcb) && /if \(chave === chaveP\) return;/.test(pec), 'balões e peças só se mexem quando algo mudou');
 });
+caso('1.106.0: "Desconectado" no balão do MCU conecta: abre no NexoCode o firmware ligado ao projeto e roda', () => {
+  const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
+  const pcb = ler('hub-simulador-pcb.js'), rota = ler('tools/rotas/nexocode.py');
+  assert.ok(/<button class="conectar" data-con/.test(pcb) && /fetch\('\/api\/nexocode\/conectar'/.test(pcb), 'o botão chama a rota');
+  assert.ok(/@app\.route\('\/api\/nexocode\/conectar', methods=\['POST'\]\)/.test(rota) && /\[exe, '--abrir', pasta\] \+ \(\['--rodar'\] if rodar else \[\]\)/.test(rota), 'a rota abre o NexoCode na pasta com --rodar');
+  assert.ok(/def pasta_ligada\(projeto\)/.test(rota) && /'\.nexocode', 'projeto\.json'/.test(rota), 'a pasta pelo vínculo do projeto');
+});
 caso('1.105.0: o clique no microcontrolador na PCB 2D/3D mostra se o NexoCode está conectado', () => {
   const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
   const sim = ler('hub-simulador.js'), pcb = ler('hub-simulador-pcb.js');

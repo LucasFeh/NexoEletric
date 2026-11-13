@@ -48,6 +48,24 @@ def main():
         app2 = Flask('fora')
         R.registra(app2, RAIZ, lambda req: False)
         assert app2.test_client().post('/api/nexocode/abrir', json={'briefing': briefing}).status_code == 403
+        # 1.106.0: /api/nexocode/conectar acha a pasta LIGADA ao projeto (.nexocode/projeto.json) nas recentes e em Documentos
+        docs = os.path.join(tmp, 'docs'); outra = os.path.join(tmp, 'outro-lugar', 'firmware-x')
+        for d in (os.path.join(docs, 'SEM-LIGACAO'), os.path.join(outra, '.nexocode'), os.path.join(docs, 'PELO-NOME', 'src')):
+            os.makedirs(d)
+        with open(os.path.join(outra, '.nexocode', 'projeto.json'), 'w', encoding='utf-8') as f:
+            json.dump({'projetoEletric': 'PLACA-LEDS', 'esquema': {'projeto': 'PLACA-LEDS', 'mcu': {'ref': 'U1'}}}, f)
+        cfg = os.path.join(tmp, 'config.json')
+        with open(cfg, 'w', encoding='utf-8') as f:
+            json.dump({'recentes': [outra, os.path.join(tmp, 'sumiu')]}, f)
+        os.environ['NEXOCODE_DOCS'] = docs; os.environ['NEXOCODE_CONFIG'] = cfg
+        r = c.post('/api/nexocode/conectar', json={'projeto': 'placa-leds', 'mcu': 'U1'}); j = r.get_json()
+        assert r.status_code == 200 and j['ok'] and os.path.normcase(j['pasta']) == os.path.normcase(outra) and j['mcu'] == 'U1', j
+        j = c.post('/api/nexocode/conectar', json={'projeto': 'PELO-NOME'}).get_json()
+        assert j['ok'] and j['pasta'].endswith('PELO-NOME'), j
+        r = c.post('/api/nexocode/conectar', json={'projeto': 'SEM-LIGACAO'})
+        assert r.status_code == 404 and r.get_json()['semCodigo'], r.get_json()
+        assert c.post('/api/nexocode/conectar', json={}).status_code == 400
+        assert app2.test_client().post('/api/nexocode/conectar', json={'projeto': 'PLACA-LEDS'}).status_code == 403
         print('ok: rotas do NexoCode')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

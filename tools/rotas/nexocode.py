@@ -11,9 +11,14 @@ Rotas (so desta maquina):
   GET  /api/nexocode/estado   {ok, instalado, exe, aberto, versao}
   POST /api/nexocode/pasta    {titulo?} -> {ok, pasta}   dialogo de pasta do Windows (o software que ja existe)
   POST /api/nexocode/abrir    {briefing} -> {ok, arquivo, exe}
+  POST /api/nexocode/conectar {projeto, mcu?, rodar?} -> {ok, pasta, exe} | {ok:false, semCodigo|semNexoCode, erro}
+       (1.106.0, o balao "Desconectado" do MCU no Simulador: acha a pasta do firmware LIGADA ao projeto
+       (.nexocode/projeto.json -> projetoEletric, nas pastas recentes do NexoCode e em Documentos/NexoCode) e abre o
+       NexoCode nela com --rodar: ele conecta sozinho ao MCU do esquema e roda o firmware)
 
 Para os testes: NEXOCODE_EXE aponta o executavel; NEXOCODE_NAO_ABRIR=1 grava o pedido sem abrir nada;
-NEXOCODE_BRIEFINGS troca a pasta dos pedidos.
+NEXOCODE_BRIEFINGS troca a pasta dos pedidos; NEXOCODE_DOCS troca a pasta dos projetos (Documentos/NexoCode) e
+NEXOCODE_CONFIG o config.json do NexoCode (os recentes).
 
 No hubserver.py:
     import nexocode as _nexocode
@@ -150,6 +155,73 @@ def abrir_nexocode(arquivo):
     return exe
 
 
+def pasta_docs():
+    return os.environ.get('NEXOCODE_DOCS') or os.path.join(os.path.expanduser('~'), 'Documents', 'NexoCode')
+
+
+def _pastas_candidatas():
+    """As pastas de firmware que o NexoCode conhece: as recentes (config.json dele) e as de Documentos/NexoCode."""
+    out = []
+    cfg = os.environ.get('NEXOCODE_CONFIG') or os.path.join(os.environ.get('APPDATA') or os.path.expanduser('~'), 'NexoCode', 'config.json')
+    try:
+        with open(cfg, encoding='utf-8') as f:
+            out += [str(r) for r in (json.load(f).get('recentes') or []) if r]
+    except (OSError, ValueError, AttributeError):
+        pass
+    docs = pasta_docs()
+    try:
+        out += [os.path.join(docs, n) for n in sorted(os.listdir(docs))]
+    except OSError:
+        pass
+    vistos, final = set(), []
+    for p in out:
+        k = os.path.normcase(os.path.abspath(p))
+        if k not in vistos and os.path.isdir(p):
+            vistos.add(k)
+            final.append(p)
+    return final
+
+
+def pasta_ligada(projeto):
+    """A pasta do firmware ligada ao projeto do NexoEletric (.nexocode/projeto.json -> projetoEletric); senao a de
+    Documentos/NexoCode com o nome do projeto que tenha codigo (platformio.ini ou src/); '' se nenhuma."""
+    alvo = str(projeto or '').strip().lower()
+    if not alvo:
+        return ''
+    for p in _pastas_candidatas():
+        try:
+            with open(os.path.join(p, '.nexocode', 'projeto.json'), encoding='utf-8') as f:
+                j = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(j, dict):
+            continue
+        nomes = [j.get('projetoEletric'), (j.get('esquema') or {}).get('projeto'), (j.get('sincronia') or {}).get('projeto')]
+        if any(str(n or '').strip().lower() == alvo for n in nomes):
+            return p
+    p = os.path.join(pasta_docs(), str(projeto))
+    if os.path.isdir(p) and (os.path.isfile(os.path.join(p, 'platformio.ini')) or os.path.isdir(os.path.join(p, 'src'))):
+        return p
+    return ''
+
+
+def abrir_pasta(pasta, rodar=True):
+    """Abre o NexoCode na pasta (ja aberto: a janela aberta troca para ela) e, com rodar, ja roda o firmware."""
+    if os.environ.get('NEXOCODE_NAO_ABRIR') == '1':
+        return ''
+    exe = acha_exe()
+    if not exe:
+        return ''
+    flags = 0
+    if os.name == 'nt':
+        flags = getattr(subprocess, 'DETACHED_PROCESS', 0x8) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x200)
+    env = dict(os.environ)
+    env.pop('ELECTRON_RUN_AS_NODE', None)
+    subprocess.Popen([exe, '--abrir', pasta] + (['--rodar'] if rodar else []), cwd=os.path.dirname(exe), creationflags=flags,
+                     close_fds=True, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return exe
+
+
 _PS_PASTA = r'''
 Add-Type -AssemblyName System.Windows.Forms
 $dono = New-Object System.Windows.Forms.Form
@@ -207,3 +279,24 @@ def registra(app, root, eh_local=None):
             return _json({'ok': False, 'arquivo': arq, 'semNexoCode': True,
                           'erro': 'o NexoCode não está instalado nesta máquina — instale pelo Nexo Hub › Instaladores'}, 404)
         return _json({'ok': True, 'arquivo': arq, 'exe': exe})
+
+    @app.route('/api/nexocode/conectar', methods=['POST'])
+    def nexocode_conectar():
+        if not eh_local(request):
+            return _json({'ok': False, 'erro': 'só desta máquina'}, 403)
+        corpo = request.get_json(silent=True) or {}
+        projeto = str(corpo.get('projeto') or '').strip()
+        if not projeto:
+            return _json({'ok': False, 'erro': 'falta o projeto'}, 400)
+        pasta = pasta_ligada(projeto)
+        if not pasta:
+            return _json({'ok': False, 'semCodigo': True, 'projeto': projeto,
+                          'erro': 'nenhum código do NexoCode está ligado a "%s" — crie o firmware pelo botão NexoCODE do Esquema' % projeto}, 404)
+        try:
+            exe = abrir_pasta(pasta, corpo.get('rodar') is not False)
+        except OSError as e:
+            return _json({'ok': False, 'pasta': pasta, 'erro': 'não consegui abrir o NexoCode (%s)' % e}, 503)
+        if not exe and os.environ.get('NEXOCODE_NAO_ABRIR') != '1':
+            return _json({'ok': False, 'pasta': pasta, 'semNexoCode': True,
+                          'erro': 'o NexoCode não está instalado nesta máquina — instale pelo Nexo Hub › Instaladores'}, 404)
+        return _json({'ok': True, 'pasta': pasta, 'exe': exe, 'mcu': corpo.get('mcu') or ''})

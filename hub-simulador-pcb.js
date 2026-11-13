@@ -738,8 +738,10 @@
     function pintaBalaoMcu(b) {
       const d = dadosDoTopo(), m = d && d.mcus && d.mcus[b.mcu];
       const con = !!(m && m.conectado), est = !d ? 'sem' : con ? (m.rodando ? 'rod' : 'par') : 'desc';
-      if (b.sig === est) return;
-      b.sig = est;
+      if (con) { b.msg = ''; b.abrindo = false; }
+      const sig = est + '|' + (b.msg || '') + (b.abrindo ? '|a' : '');
+      if (b.sig === sig) return;
+      b.sig = sig;
       const sa = setasMcu.get(b.mcu);
       if (sa && sa.con !== con) { sa.con = con; montaSetas(); }
       const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -748,8 +750,22 @@
       b.el.innerHTML = '<div class="hd"><b>' + esc(b.mcu) + '</b><span>' + esc((m && m.titulo) || 'microcontrolador') + '</span><button data-x title="Fechar">×</button></div>'
         + (est === 'sem' ? '<div class="st">a simulação do esquema está desligada</div>'
           : con ? '<div class="st">● Conectado ao NexoCode</div><div class="f">firmware ' + (est === 'rod' ? 'rodando' : 'parado') + '</div>'
-          : '<div class="st">✕ Desconectado</div><div class="f">nenhum código do NexoCode está ligado a este microcontrolador — abra o firmware do projeto no NexoCode (Documents/NexoCode/' + esc(proj) + '): ele conecta sozinho e o MCU fica verde</div>');
+          : '<button class="conectar" data-con' + (b.abrindo ? ' disabled' : '') + ' title="Abre no NexoCode o firmware ligado a este projeto, conecta a este microcontrolador e roda">✕ Desconectado · conectar e rodar ▸</button>'
+            + '<div class="f">' + esc(b.msg || 'clique para abrir no NexoCode o firmware ligado a ' + proj + ': ele conecta a este microcontrolador e roda a simulação') + '</div>');
       b.el.querySelector('[data-x]').onclick = () => fechaBalao(b);
+      /* 1.106.0 (o dono: "quero clicar em cima de 'desconectado' e ele conecta sozinho, pega o código vinculado ao projeto
+         e abre, direto na simulação no NexoCode"): POST /api/nexocode/conectar acha a pasta ligada e abre o NexoCode
+         com --rodar; o balao vira "Conectado" sozinho quando o batimento chega */
+      const bc = b.el.querySelector('[data-con]');
+      if (bc) bc.onclick = async () => {
+        b.abrindo = true; b.msg = 'abrindo o NexoCode…'; pintaBalaoMcu(b);
+        try {
+          const r = await fetch('/api/nexocode/conectar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projeto: proj, mcu: b.mcu }) });
+          const j = await r.json().catch(() => ({}));
+          b.msg = j.ok ? 'abrindo ' + String(j.pasta || '').split(/[\\/]/).pop() + ' no NexoCode — conecta em alguns segundos' : (j.erro || 'não consegui abrir o NexoCode');
+        } catch (e) { b.msg = 'não consegui falar com o hub: ' + (e && e.message || e); }
+        b.abrindo = false; pintaBalaoMcu(b);
+      };
     }
     /* O MCU MARCADO (1.105.2, o dono: "tem uma seta enorme, e o microcontrolador perdeu o efeito de seleção; era pra
        ter só o balão"): sem a seta 3D da 1.105.1 — com o balao aberto o MCU fica SELECIONADO como no editor (o mesmo
@@ -774,7 +790,7 @@
       const b = { el, mcu: hit.ref, ax: hit.ax, ay: hit.ay, bottom: hit.bottom, dx: 30, dy: -26 };
       baloes.push(b);
       pintaBalaoMcu(b);
-      marcaSetaMcu(hit, b.sig === 'rod' || b.sig === 'par');
+      marcaSetaMcu(hit, /^(rod|par)\|/.test(b.sig || ''));
       rodaBaloes();
     }
     try { topo.addEventListener('nexo-sim', () => { for (const b of baloes) if (b.mcu) pintaBalaoMcu(b); }); } catch (_e) { /* ok */ }
@@ -796,6 +812,9 @@
 .simpcb-balao button.on{background:#f59e0b; color:#111; border-color:#f59e0b}
 .simpcb-mcu.desc{border-color:#9ca3af} .simpcb-mcu.desc .hd b{color:#d1d5db} .simpcb-mcu.desc .st{color:#fca5a5; font-weight:700; margin-top:4px}
 .simpcb-mcu.con{border-color:#22c55e} .simpcb-mcu.con .hd b{color:#4ade80} .simpcb-mcu.con .st{color:#4ade80; font-weight:700; margin-top:4px}
+.simpcb-mcu button.conectar{display:block; width:100%; height:auto; margin-top:5px; padding:5px 8px; text-align:left; font:700 12px system-ui, sans-serif;
+  color:#fca5a5; border-color:rgba(252,165,165,.45); background:rgba(239,68,68,.12)}
+.simpcb-mcu button.conectar:hover{background:rgba(239,68,68,.25); color:#fee2e2} .simpcb-mcu button.conectar[disabled]{opacity:.6; cursor:progress}
 .simpcb-balao.simpcb-mcu .f{max-width:300px; white-space:normal; font:11px system-ui, sans-serif; color:#cbd5e1}
 .simpcb-balao .f{margin-top:5px; color:#93c5fd; font:10.5px ui-monospace, monospace; line-height:1.45}
 .simpcb-cartao .ab{display:flex; gap:4px; margin:-2px 0 7px} .simpcb-cartao .ab button{flex:1; height:24px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.05); color:inherit; cursor:pointer; font:inherit}
