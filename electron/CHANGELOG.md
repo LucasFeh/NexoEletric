@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.106.0
+
+Conectar o NexoCode pelo balão do microcontrolador (o dono: "quando eu clicar em cima e ele estiver desconectado, quero
+clicar em 'desconectado' e ele conecta sozinho, pega o código vinculado ao projeto e abre, direto na simulação no
+NexoCode").
+
+- No balão do MCU (Simulador, 3D e 2D), "✕ Desconectado · conectar e rodar ▸" é um botão. Ele acha a pasta do firmware
+  LIGADA a este projeto (`.nexocode/projeto.json` › `projetoEletric`, nas pastas recentes do NexoCode e em
+  Documentos/NexoCode; senão a pasta com o nome do projeto) e abre o NexoCode nela com `--rodar`. O NexoCode conecta
+  sozinho ao microcontrolador do esquema e o balão vira "● Conectado" quando o batimento chega.
+- Sem código ligado ao projeto, o balão diz isso e indica o botão NexoCODE do Esquema; sem o NexoCode instalado, o
+  Nexo Hub › Instaladores.
+- Rota nova `POST /api/nexocode/conectar {projeto, mcu?, rodar?}` (só desta máquina).
+
 ## 1.105.2
 
 O MCU marcado no 3D do Simulador fica só com o balão (o dono: "tem uma seta enorme, e o microcontrolador perdeu o efeito
