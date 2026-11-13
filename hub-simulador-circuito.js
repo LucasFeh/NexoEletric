@@ -164,7 +164,7 @@
     [/IRLZ|IRLB|IRL5|IRL2|IRL3|IRL7|LR7843|IRLR/, { pol: 1, vth: 1.5, k: 40, nome: 'MOSFET N (nível lógico)' }],
     [/IRF[0-9]{3,4}N?\b|IRFZ|IRFB|IRFP|IRFR|STP\d|FQP\d|IRFS|NTD|AOD4|STD\d/, { pol: 1, vth: 3.0, k: 15, nome: 'MOSFET N' }],
     [/AO340[1-9]|AO3415|SI230[1-9]|IRLML6402|IRLML2244|DMP|FDN3[03][0-9]P|BSS84/, { pol: -1, vth: 0.9, k: 15, nome: 'MOSFET P' }],
-    [/IRF9|IRF4905|IRF5305|FQP27P|SPP|STP\d+P/, { pol: -1, vth: 3.0, k: 12, nome: 'MOSFET P' }],
+    [/IRF9|IRF4905|IRF5305|FQP27P|\bSPP\d|STP\d+P/, { pol: -1, vth: 3.0, k: 12, nome: 'MOSFET P' }],
   ];
   /* 1.114.0 (lote 2): os MOSFETs da lib Almox — Vdss, Id max, Pd, Vth, Rds(on) e o canal */
   const FET_LIM = [
@@ -212,11 +212,14 @@
   }
   function reguladorLinear(t) {
     const daLib = reguladorDaLib(t); if (daLib) return daLib;
-    let m = /(?:L|LM|MC|UA|KA|L)?78(?:M|L|S|T)?(\d{2})/.exec(t);
-    if (m && /78(?:M|L|S|T)?\d{2}/.test(t) && +m[1] === 0) { const m0 = /780+([1-9])/.exec(t); if (m0) m = [m0[0], m0[1]]; }   // 1.116.0: "78008AP" = 7808
-    if (m && /78(?:M|L|S|T)?\d{2}/.test(t) && +m[1] > 0) return { vout: +m[1], vdo: 2.0, iq: 5e-3, ilim: /78L/.test(t) ? 0.1 : /78M/.test(t) ? 0.5 : 1.5, ordem: ['IN', 'GND', 'OUT'], nome: 'regulador linear 78' + String(m[1]).padStart(2, '0') };
-    m = /(?:L|LM|MC|UA|KA)?79(?:M|L)?(\d{2})/.exec(t);
-    if (m && /79(?:M|L)?\d{2}/.test(t)) return { vout: -m[1], vdo: 2.0, iq: 5e-3, ilim: /79L/.test(t) ? 0.1 : /79M/.test(t) ? 0.5 : 1.5, ordem: ['GND', 'IN', 'OUT'], nome: 'regulador negativo 79' + m[1], neg: true };
+    /* 1.118.0 (lote 6): o 78/79 so com nada ou um prefixo de regulador colado antes (L, LM, MC, UA, KA, KIA, NJM...):
+       ADS7812/7809/7816 sao conversores A/D; "78008AP" = 7808 (os zeros a mais) */
+    const PRE_REG = /^(?:|L|LM|MC|UA|KA|KIA|NJM|AN|TA|UPC|NCV|CJ|HT|SL|NTE|ECG|GL)$/;
+    const acha7x = (re) => { re.lastIndex = 0; let q; while ((q = re.exec(t))) { if (PRE_REG.test(q[1]) && (q[3].length === 2 || q[3][0] === '0') && +q[3] > 0) return [q[0], String(+q[3])]; } return null; };
+    let m = acha7x(/(?<![0-9])([A-Z]*)78(M|L|S|T)?(\d{2,3})(?!\d)/g);
+    if (m) return { vout: +m[1], vdo: 2.0, iq: 5e-3, ilim: /78L/.test(t) ? 0.1 : /78M/.test(t) ? 0.5 : 1.5, ordem: ['IN', 'GND', 'OUT'], nome: 'regulador linear 78' + String(m[1]).padStart(2, '0') };
+    m = acha7x(/(?<![0-9])([A-Z]*)79(M|L)?(\d{2,3})(?!\d)/g);
+    if (m) return { vout: -m[1], vdo: 2.0, iq: 5e-3, ilim: /79L/.test(t) ? 0.1 : /79M/.test(t) ? 0.5 : 1.5, ordem: ['GND', 'IN', 'OUT'], nome: 'regulador negativo 79' + String(m[1]).padStart(2, '0'), neg: true };
     if (/LM[123]17(?![0-9])|LM1086.*ADJ|1117.*ADJ|LM338|LM350|LD1117.*ADJ/.test(t)) return { adj: 1.25, vdo: /1117|1086/.test(t) ? 1.1 : 2.0, iq: 5e-3, ilim: 1.5, ordem: /1117|1086/.test(t) ? ['ADJ', 'OUT', 'IN'] : ['ADJ', 'OUT', 'IN'], nome: 'regulador ajustável (Vref 1,25 V)' };
     m = /(?:AMS|LM|LD|AP|NCP|TLV|SPX|AZ|HT|MCP|XC|RT|ME|LP|TPS|MIC|LDK|LDL)\s*-?(1117|1086|1084|1085|1585|29150|2950|2985|1700|1702|73\d\d|72\d\d|7333|7350|7533|6206|6219|9193|5205|2992|1801|3985|7302|5150|7330|1803|1702)[A-Z]*\s*[-_ ]?\s*(ADJ|\d{2}|\d[.,]\d{1,2})?/.exec(t);
     if (m) {
@@ -244,16 +247,26 @@
   }
   const MCUS = [
     [/ESP32-?C3|ESP32C3/, { vmin: 3.0, vmax: 3.6, iq: 0.025, nome: 'ESP32-C3' }],
-    [/ESP32|ESP-?WROOM-?32|ESP-?WROVER/, { vmin: 3.0, vmax: 3.6, iq: 0.08, nome: 'ESP32' }],
+    [/ESP32|ESP-?WROOM-?32|ESP-?WROVER|ESPPCOMNI/, { vmin: 3.0, vmax: 3.6, iq: 0.08, nome: 'ESP32' }],
     [/ESP8266|ESP-?12|ESP-?01|ESP-?07/, { vmin: 3.0, vmax: 3.6, iq: 0.07, nome: 'ESP8266' }],
     [/STM32|GD32|AT32|CH32/, { vmin: 2.0, vmax: 3.6, iq: 0.02, nome: 'STM32' }],
     [/ATMEGA\d*U\d|ATMEGA32U4/, { vmin: 2.7, vmax: 5.5, iq: 0.015, nome: 'ATmega USB' }],
     [/ATMEGA|ATTINY|AT90|ATXMEGA/, { vmin: 1.8, vmax: 5.5, iq: 0.008, nome: 'AVR' }],
     [/RP2040|RP2350/, { vmin: 1.8, vmax: 3.6, iq: 0.025, nome: 'RP2040' }],
-    [/PIC1[0268]F|PIC24|DSPIC|PIC32/, { vmin: 2.0, vmax: 5.5, iq: 0.005, nome: 'PIC' }],
+    [/PIC1[0268]LF/, { vmin: 2.0, vmax: 5.5, iq: 0.005, nome: 'PIC (LF: 2,0–5,5 V)' }],
+    [/PIC1[0268]F|PIC16C\d|PIC18\d{4}|PIC24|DSPIC|PIC32/, { vmin: 2.0, vmax: 5.5, iq: 0.005, nome: 'PIC' }],
     [/NRF5[12]|CC2[56]\d\d|EFR32|EFM32|MSP430/, { vmin: 1.8, vmax: 3.6, iq: 0.008, nome: 'MCU baixo consumo' }],
-    [/CH340|CP210|FT232|CH9102|PL2303/, { vmin: 3.0, vmax: 5.5, iq: 0.015, nome: 'conversor USB-serial' }],
+    [/CH340|CP210|FTDI?232|FT2232|FT231|CH9102|PL2303/, { vmin: 3.0, vmax: 5.5, iq: 0.015, nome: 'conversor USB-serial' }],
   ];
+  /* 1.118.0 (lote 6): a pinagem pela familia quando o simbolo so numera os pinos (os MICROCONTROLADOR [40P]/[28P]/[18P]/[8P]
+     da lib Almox): VDD, VSS e o reset (MCLR/RESET) */
+  function pinagemMcu(t, n) {
+    if (/DSPIC30F/.test(t)) return { 40: { vdd: [11, 32, 40], vss: [12, 31, 39], rst: 1 }, 28: { vdd: [13, 20, 28], vss: [8, 19, 27], rst: 1 }, 18: { vdd: [13, 18], vss: [12, 17], rst: 1 } }[n] || null;
+    if (/PIC1[0268]/.test(t)) return { 40: { vdd: [11, 32], vss: [12, 31], rst: 1 }, 28: { vdd: [20], vss: [8, 19], rst: 1 }, 18: { vdd: [14], vss: [5], rst: 4 }, 8: { vdd: [1], vss: [8], rst: 4 } }[n] || null;
+    if (/ATMEGA(?:8|48|88|168|328)/.test(t) && n === 28) return { vdd: [7, 20], vss: [8, 22], rst: 1 };
+    if (/FTDI?232R/.test(t) && n === 28) return { vdd: [20, 4], vss: [7, 18, 21, 25], rst: 19 };
+    return null;
+  }
   /* 1.116.0 (lote 4): a alimentacao maxima (V+ − V−) e os rail-to-rail */
   const OPAMP_VMAX = [[/LM358|LM324|LM2904|LM2902|LM224|LM158|LM258|LM124|LM348/, 32], [/OP07|NE553|LF35[5-7]|LT1490|MC3307|ADA4522/, 44], [/TL0[3-8]\d|LM741|UA741|MC1741|HA17741|TBA221|LM1458|MC1458|4558|AD70\d|AD711|TLE2021|LM318|LM30[17]/, 36],
     [/MCP60|LMV|TLV23|ADA4528|LTC2050|TSX56|OPA3\d\d/, 5.5], [/CA3130|CA3140|TLC27/, 16]];
@@ -288,6 +301,14 @@
   };
   /* CI conhecido so pela faixa de alimentacao e consumo (o resto dos pinos fica em alta impedancia) */
   const CIS_ALIM = [
+    /* 1.118.0 (lote 6): os modulos de display (nao sao MCU mesmo com "ESP32/STM" no nome) */
+    [/OLED|SSD13\d\d|SH110\d|\bLCD\b|\bTFT\b|\bIPS\b|DWIN|\d{3,4}\s*X\s*\d{2,3}\b|SMR3\.|P4-\d+\*/, { vmin: 3.0, vmax: 5.5, iq: 0.02, nome: 'display (módulo)' }],
+    [/TP4056|BQ20\d\d|BQ2[45]\d{3}|MAX86\d\d|MCP738\d\d|LTC40\d\d/, { vmin: 4.0, vmax: 6.6, iq: 2e-3, nome: 'gestão de bateria (carregador)' }],
+    [/TDA16822|TDA1683\d/, { vmin: 8.5, vmax: 20, iq: 5e-3, nome: 'controlador de fonte chaveada' }],
+    [/HEDS-?\s?9\d{3}|AEDR|AEAT/, { vmin: 4.5, vmax: 5.5, iq: 0.04, nome: 'encoder óptico (saídas A/B: não simuladas)' }],
+    [/XGZP\d|MPX\d|MPXV/, { vmin: 4.5, vmax: 5.5, iq: 2e-3, nome: 'sensor de pressão (saída analógica: não simulada)' }],
+    [/SCA10\dT|SCA8\d0|ADIS16\d{3}|ICM-?4\d{4}|ICM-?20\d{3}/, { vmin: 3.0, vmax: 5.25, iq: 4e-3, nome: 'acelerômetro/inclinômetro' }],
+    [/INA2[12]\d|INA22\d/, { vmin: 3.0, vmax: 5.5, iq: 1e-3, nome: 'monitor de corrente/potência I2C' }],
     [/SN65HVD7|SN65HVD1|SP3485|MAX3485|ADM3485|THVD/, { vmin: 3.0, vmax: 3.6, iq: 1e-3, nome: 'transceptor RS-485 3,3 V' }],
     [/MAX485|MAX487|SN75176|ADM485|SP485|MAX13487|RS485/, { vmin: 4.75, vmax: 5.25, iq: 0.5e-3, nome: 'transceptor RS-485 5 V' }],
     [/MAX232|MAX3232|SP3232|ST3232/, { vmin: 3.0, vmax: 5.5, iq: 8e-3, nome: 'transceptor RS-232' }],
@@ -296,7 +317,7 @@
     [/STWD100|TPS382|MAX6369|TPL5010|ADM809|MAX809|APX803/, { vmin: 1.6, vmax: 5.5, iq: 15e-6, nome: 'supervisor/watchdog' }],
     [/74HC|74AHC|74LVC|CD40|HEF40|MC140/, { vmin: 2.0, vmax: 6.0, iq: 20e-6, nome: 'lógica CMOS' }],
     [/74LS|74F\d|74S\d|SN74LS/, { vmin: 4.75, vmax: 5.25, iq: 5e-3, nome: 'lógica TTL' }],
-    [/24C\d|24LC|AT24|W25Q|25Q|AT25|M24/, { vmin: 1.7, vmax: 5.5, iq: 1e-3, nome: 'memória' }],
+    [/24C\d|24LC|AT24|W25Q|\b25Q|AT25|\bM24/, { vmin: 1.7, vmax: 5.5, iq: 1e-3, nome: 'memória' }],
     [/DS1307|DS3231|PCF8563|RV-?3028/, { vmin: 2.3, vmax: 5.5, iq: 0.2e-3, nome: 'relógio (RTC)' }],
     [/ADS1\d{3}|MCP3\d{3}|HX711|ADS7/, { vmin: 2.0, vmax: 5.5, iq: 0.5e-3, nome: 'conversor A/D' }],
     [/PCF8574|MCP230\d\d|TCA95/, { vmin: 2.5, vmax: 5.5, iq: 0.1e-3, nome: 'expansor de I/O' }],
@@ -376,6 +397,17 @@
     function resistor(info, a, b, r, papel) {
       return poe(info, { tipo: 'R', nos: [nomeTerm(info, a), nomeTerm(info, b)], r: Math.max(r, 1e-4), papel: papel || 'R' }, [pk(info, a), pk(info, b)]);
     }
+    /* 1.118.0 (lote 6): a saida de um sensor — o pino OUT vai ao alvo(vcc, on) por rout, com corrente limitada a imax; o
+       consumo iq sai do Vcc; abaixo de vmin o sensor nao liga (a saida cai a 0) */
+    function saidaSensor(info, pV, pG, pO, alvo, rout, iq, vmin, imax, papel) {
+      const f = v => {
+        const vcc = v[0] - v[1], on = sig((vcc - vmin) * 20);
+        const io = imax * Math.tanh((v[2] - v[1] - alvo(vcc, on)) / rout / imax);
+        const q = iq * Math.tanh(Math.max(vcc, 0) / 0.5);
+        return [q + sp(-io, 1e-6), -q - sp(io, 1e-6), io];
+      };
+      return poe(info, { tipo: 'NL', nos: [nomeTerm(info, pV), nomeTerm(info, pG), nomeTerm(info, pO)], f, dc: [[0, 1, 2]], papel }, [pk(info, pV), pk(info, pG), pk(info, pO)]);
+    }
     function diodo(info, a, k, m, papel) {
       const n = m.n || 1.8, is = m.is || 1e-12, bv = m.bv, nz = m.nz || 1, bid = m.bidir;
       let na = nomeTerm(info, a);
@@ -417,7 +449,7 @@
       comps.set(ref, info);
       if (c.dnp || desligados.has(ref)) { info.tipo = 'fora'; info.rotulo = c.dnp ? 'não montado (DNP)' : 'desligado na simulação'; continue; }
       /* 1.116.0: as placas da casa usadas como componente (DTN-DI251837, DMPU-ATE220004): nao sao simuladas aqui */
-      if (/\bD[A-Z]{2,6}-?(?:DI|ATE?)\d{6}/.test(desc)) { info.tipo = 'ignorado'; info.rotulo = 'Placa da casa (' + (c.comment || '') + '): não simulada'; continue; }
+      if (/\b[A-Z]{2,6}[- ]?DI\d{6}|\bD[A-Z]{2,6}-?ATE?\d{6}/.test(desc)) { info.tipo = 'ignorado'; info.rotulo = 'Placa da casa (' + (c.comment || '') + '): não simulada'; continue; }
       const ps = c.pinos.filter(p => p.net);
       const p1 = c.pinos.find(p => String(p.num) === '1') || c.pinos[0];
       const p2 = c.pinos.find(p => String(p.num) === '2') || c.pinos[1];
@@ -456,6 +488,8 @@
          em barramento (o pino 1 comum aos outros: 4608X-101, 9/10 pinos) */
       if ((/^(RN|RP|RA|RR|RZ)$/.test(pre) || /RESISTOR REDE|REDE DE RESIST|RES(?:ISTOR)? NETWORK|RESISTOR ARRAY|\b41[0-9]{2}R|\b46\d{2}X|\b43\d{2}R|\bCAY\d|\bEXB/.test(desc)) && c.pinos.length >= 4) {
         let r = val.v;
+        const codR = /\b4[1-6]\d{2}[RX]-\d{1,3}-(\d)(\d)(\d)/.exec(desc);
+        if (!(r > 0) && codR) r = (+codR[1] * 10 + +codR[2]) * Math.pow(10, +codR[3]);
         if (!(r > 0)) { r = 10e3; info.avisos.push('sem valor: simulando com 10 kΩ em cada resistor'); }
         const prmR = (cfg.params && cfg.params[ref]) || {};
         const ord = [...c.pinos].sort((x, y) => (+x.num || 0) - (+y.num || 0)), n = ord.length;
@@ -820,7 +854,12 @@
         info.ih = isFinite(+prmS.ih) && +prmS.ih > 0 ? +prmS.ih : ref0.ih;
         info.vdrm = isFinite(+prmS.vdrm) && +prmS.vdrm > 0 ? +prmS.vdrm : vdrm > 0 && sub !== 'diac' ? vdrm : ref0.vdrm;
         info.itrms = isFinite(+prmS.itrms) && +prmS.itrms > 0 ? +prmS.itrms : it > 0 ? it : ref0.it;
-        info.tipo = 'tiristor'; info.sub = sub; info.on = false;
+        info.tipo = 'tiristor'; info.sub = sub;
+        /* 1.118.0: a TRAVA sobrevive a remontagem (tirar o gatilho, mudar um campo): guardada por ref em cfg.travados
+           (como os queimados); so solta com a corrente abaixo de Ih, no "religar" ou no limpar */
+        const memT = cfg.travados && typeof cfg.travados === 'object' ? cfg.travados : null;
+        const guardaT = on => { if (memT) { if (on) memT[ref] = 1; else delete memT[ref]; } };
+        info.on = !!(memT && memT[ref]);
         info.rotulo = { scr: 'SCR', triac: 'TRIAC', put: 'PUT (transistor unijunção programável)', diac: 'DIAC' }[sub] + ' ' + (c.comment || '') + (sub === 'diac' ? ' (dispara em ' + fmt(info.vbo, 'V') + ')' : ' (' + fmt(info.itrms, 'A') + ', ' + fmt(info.vdrm, 'V') + ')');
         info.campos = sub === 'diac' ? [{ k: 'vbo', rot: 'Tensão de disparo Vbo (V)', un: 'V', v: info.vbo, dica: '32' }, { k: 'itrms', rot: 'Corrente máx (A)', un: 'A', v: info.itrms, dica: '2' }]
           : (sub === 'put' ? [] : [{ k: 'igt', rot: 'Corrente de gatilho Igt (A)', un: 'A', v: info.igt, dica: '5m' }]).concat([{ k: 'ih', rot: 'Corrente de manutenção Ih (A)', un: 'A', v: info.ih, dica: '7m' },
@@ -828,8 +867,8 @@
         if (sub === 'diac') {
           const f = v => { const d = v[0] - v[1]; const i = info.on ? Math.sign(d) * sp(Math.abs(d) - 5, 0.05) / 10 + 1e-6 * d : 1e-9 * d; return [i, -i]; };
           const el = poe(info, { tipo: 'NL', nos: [nomeTerm(info, p1), nomeTerm(info, p2)], f, papel: 'DIAC' }, [pk(info, p1), pk(info, p2)]);
-          el.reinicia = () => { info.on = false; };
-          el.atualiza = v => { const d = Math.abs(v[0] - v[1]), i = info.on ? sp(d - 5, 0.05) / 10 : 0; const on = info.on ? i > info.ih : d > info.vbo; if (on === info.on) return false; info.on = on; return true; };
+          el.reinicia = () => { info.on = !!(memT && memT[ref]); };
+          el.atualiza = v => { const d = Math.abs(v[0] - v[1]), i = info.on ? sp(d - 5, 0.05) / 10 : 0; const on = info.on ? i > info.ih : d > info.vbo; if (on === info.on) return false; info.on = on; guardaT(on); return true; };
           info.el = el;
           continue;
         }
@@ -848,7 +887,7 @@
           return [ia, -ia - ig, ig];
         };
         const el = poe(info, { tipo: 'NL', nos: [nomeTerm(info, pA), nomeTerm(info, pK), nomeTerm(info, pG)], f, dc: [[0, 1]], papel: sub.toUpperCase() }, [pk(info, pA), pk(info, pK), pk(info, pG)]);
-        el.reinicia = () => { info.on = false; };
+        el.reinicia = () => { info.on = !!(memT && memT[ref]); };
         el.atualiza = v => {
           const vak = v[0] - v[1], vgk = v[2] - v[1];
           const ig = Math.abs(isG * (lexp(Math.abs(vgk) / (nG * VT)) - 1));
@@ -860,7 +899,7 @@
             else on = ig > info.igt && vgk > 0 && vak > 0.5;
           } else if (ia < info.ih) on = false;
           if (on === info.on) return false;
-          info.on = on; return true;
+          info.on = on; guardaT(on); return true;
         };
         info.el = el;
         continue;
@@ -1108,7 +1147,7 @@
       /* --- modulo conversor DC/DC isolado (1.115.0, lote 3): Mornsun/Recom/TI ("10.8~13.2/5 2W A1205S", "18~36/±15 3W",
          "E2415S-1WR3", DCP010505, "Mt3608 Step Up"): saida em Vout (Imax = P/Vout), a entrada consome Pout/η, sem saida com
          Vin fora da faixa. Pinagem sem nome (SIP-4): 1 −Vin, 2 +Vin, 3 −Vout/0V, 4 +Vout */
-      if ((/CONVERSOR DC\/?DC|DC-?DC/.test(norm(c.sym || '') + ' ' + txt) || /DCP01\d{4}|MT3608|STEP[ -]?(UP|DOWN)|\d+(?:[.,]\d+)?\s*~\s*\d+(?:[.,]\d+)?\s*\/\s*[±+-]?\d/.test(txt)) && c.pinos.length >= 4 && c.pinos.length <= 12 && !/DPA\d|TOP\d{3}|LNK\d/.test(txt)) {
+      if ((/CONVERSOR DC\/?DC|DC-?DC|CONVERSOR AC\/?DC/.test(norm(c.sym || '') + ' ' + txt) || /MODULO/.test(norm(c.sym || '')) && /BOOST|ELEVADOR|STEP/.test(txt) || /\bHLK-?(?:\d+M\d{2}|PM\d{2})|\bIRM-\d/.test(txt) || /DCP01\d{4}|MT3608|STEP[ -]?(UP|DOWN)|\d+(?:[.,]\d+)?\s*~\s*\d+(?:[.,]\d+)?\s*\/\s*[±+-]?\d/.test(txt)) && c.pinos.length >= 4 && c.pinos.length <= 12 && !/DPA\d|TOP\s?\d{3}|LNK\d|VIPER/.test(txt)) {
         const prmD = (cfg.params && cfg.params[ref]) || {};
         const cm = String(c.comment || '').replace(/,/g, '.');
         let vin = NaN, vimin = NaN, vimax = NaN, vo = NaN, pw = grandezaDoNome(cm, 'W'), dual = /±|\bD\b|\d{4}D\b/.test(cm), mD;
@@ -1122,8 +1161,18 @@
         else if ((mD = /\b(?:THN|TEN|TMR|TMA|TES)(\d+)-?(\d{2})(\d{2})/.exec(cm.toUpperCase()))) { vimin = +mD[2] * 0.6; vimax = +mD[2] * 2.2; vo = +mD[3]; if (!(pw > 0)) pw = +mD[1]; }
         else if ((mD = /(\d+)\s*-\s*(\d+)\s*V(?:DC)?\b/.exec(cm)) && /O\/?P\s*\+?(\d+(?:\.\d+)?)\s*V/i.test(cm)) { vimin = +mD[1]; vimax = +mD[2]; vo = +/O\/?P\s*\+?(\d+(?:\.\d+)?)\s*V/i.exec(cm)[1]; const ia = grandezaDoNome(cm.replace(/V(\d)/, 'V $1'), 'A'); if (!(pw > 0) && ia > 0) pw = ia * vo; }
         else if ((mD = /\bXW-?(\d{2})(\d{2})-(\d+(?:\.\d+)?)-(\d+)W/.exec(cm.toUpperCase()))) { vimin = +mD[1] * 0.9; vimax = +mD[2] * 1.1; vo = +mD[3]; pw = +mD[4]; }
-        const stepUp = /MT3608|STEP[ -]?UP|BOOST/.test(txt);
-        if (stepUp) { vimin = 2; vimax = 24; if (!(vo > 0)) vo = 12; if (!(pw > 0)) pw = 10; }
+        /* 1.118.0 (lote 6): Hi-Link HLK-<P>M<Vout> ("5M05" = 5 W 5 V; PM01 = 3 W 5 V) e Mean Well IRM-<P>-<Vout>: entrada AC
+           (a faixa em VAC RMS); o "Boost-Elevador entrada 0.9vdc A 5vdc saída 5vdc" */
+        const cmU = cm.toUpperCase();
+        if (!(vo > 0) && (mD = /\bHLK-?(\d+)M(\d{2})/.exec(cmU))) { pw = pw > 0 ? pw : +mD[1]; vo = +mD[2]; vimin = 100; vimax = 240; }
+        else if (!(vo > 0) && (mD = /\bHLK-?PM(\d{2})/.exec(cmU))) { vo = { '01': 5, '03': 3.3, '12': 12, '24': 24 }[mD[1]] || 5; pw = 3; vimin = 100; vimax = 240; }
+        else if (!(vo > 0) && (mD = /\bIRM-(\d+)-(\d+(?:\.\d+)?)/.exec(cmU))) { pw = +mD[1]; vo = +mD[2]; vimin = 90; vimax = 264; }
+        if ((mD = /ENTRADA\s*(\d+(?:\.\d+)?)\s*V\w*\s*(?:A|ATE|-|~)\s*(\d+(?:\.\d+)?)\s*V/i.exec(cm))) { vimin = +mD[1]; vimax = +mD[2]; }
+        if (!(vo > 0) && (mD = /SA[IÍ]DA\s*(\d+(?:\.\d+)?)\s*V/i.exec(cm))) vo = +mD[1];
+        const acdc = /AC\/?DC/.test(norm(c.sym || '')) || /\bHLK-?(?:\d+M|PM)|\bIRM-\d/.test(cmU) || vimin >= 80;
+        info.acdc = acdc; info.v2 = 0;
+        const stepUp = /MT3608|STEP[ -]?UP|BOOST|ELEVADOR/.test(txt);
+        if (stepUp) { if (!(vimin > 0)) { vimin = 2; vimax = 24; } if (!(vo > 0)) vo = 12; if (!(pw > 0)) pw = 10; }
         if (!(vimin > 0) && vin > 0) { vimin = vin * 0.9; vimax = vin * 1.1; }
         if (!(vo > 0)) { vo = 5; info.avisos.push('tensão de saída não lida do nome: 5 V (mude no campo)'); }
         if (!(pw > 0)) pw = 1;
@@ -1134,31 +1183,41 @@
         if (isFinite(+prmD.vinmax) && +prmD.vinmax > 0) vimax = +prmD.vinmax;
         const eta = isFinite(+prmD.eta) && +prmD.eta > 0 ? +prmD.eta / 100 : 0.8;
         const ord = [...c.pinos].sort((x, y) => (+x.num || 0) - (+y.num || 0));
-        const pVinP = achaPino(info, [/^(\+?VIN\+?|VIN|\+IN|IN\+|VI\+)$/i], ord.length >= 7 ? 2 : 2), pVinN = achaPino(info, [/^(-VIN|VIN-|GND|-IN|IN-|VI-|0V IN)$/i], 1);
+        const pVinP = achaPino(info, [/^(\+?VIN\+?|VIN|\+IN|IN\+|VI\+|AC\(?L\)?|L|ACL|AC1|~1?)$/i], ord.length >= 7 ? 2 : 2), pVinN = achaPino(info, [/^(-VIN|VIN-|GND|-IN|IN-|VI-|0V IN|AC\(?N\)?|N|ACN|AC2|~2)$/i], 1);
         const pVoP = achaPino(info, [/^(\+?VOUT\+?|\+VO|VO\+|OUT\+|\+OUT)$/i], ord.length >= 7 ? 7 : 4), pVoN = achaPino(info, [/^(-VOUT|VOUT-|-VO|VO-|0V|COM|OUT-|-OUT)$/i], ord.length >= 7 ? 6 : 3);
-        if (!c.pinos.some(p => /[A-Z]/i.test(String(p.name || '')))) info.avisos.push('pinos sem nome: ' + (ord.length >= 7 ? '1 −Vin, 2 +Vin, 6 0V, 7 +Vout' : '1 −Vin, 2 +Vin, 3 −Vout, 4 +Vout') + (dual ? ' (o ±: só a saída positiva contra o 0V)' : ''));
+        if (!c.pinos.some(p => /[A-Z]/i.test(String(p.name || '')))) info.avisos.push('pinos sem nome: ' + (acdc ? '1 e 2 a entrada AC (L/N), 3 −Vout, 4 +Vout' : ord.length >= 7 ? '1 −Vin, 2 +Vin, 6 0V, 7 +Vout' : '1 −Vin, 2 +Vin, 3 −Vout, 4 +Vout') + (dual ? ' (o ±: só a saída positiva contra o 0V)' : ''));
         const imaxD = pw / vo;
         info.tipo = 'dcdc'; info.vout = vo; info.pout = pw; info.vinmin = vimin; info.vinmax = vimax; info.eta = eta; info.imax = imaxD; info.dual = dual;
-        info.rotulo = 'Conversor DC/DC ' + (stepUp ? 'elevador ' : 'isolado ') + fmt(vimin, 'V') + '–' + fmt(vimax, 'V') + ' → ' + (dual ? '±' : '') + fmt(vo, 'V') + ' ' + fmt(pw, 'W');
+        info.rotulo = (acdc ? 'Fonte AC/DC ' + fmt(vimin, 'V') + '–' + fmt(vimax, 'V') + ' AC' : 'Conversor DC/DC ' + (stepUp ? 'elevador (não isolado) ' : 'isolado ') + fmt(vimin, 'V') + '–' + fmt(vimax, 'V')) + ' → ' + (dual ? '±' : '') + fmt(vo, 'V') + ' ' + fmt(pw, 'W');
         info.campos = [{ k: 'vout', rot: 'Tensão de saída (V)', un: 'V', v: vo, dica: '5, 12, 15' }, { k: 'pout', rot: 'Potência (W)', un: 'W', v: pw, dica: '1, 2' },
           { k: 'vinmin', rot: 'Vin mínima (V)', un: 'V', v: vimin, dica: '10,8' }, { k: 'vinmax', rot: 'Vin máxima (V)', un: 'V', v: vimax, dica: '13,2' }, { k: 'eta', rot: 'Rendimento (%)', un: '%', v: Math.round(eta * 100), dica: '80' }];
         if (pVoP && pVoP.net) produzidas.add(pVoP.net);
         const G = 50;
-        const f = v => {
-          const vi = v[0] - v[1], vout = v[2] - v[3];
+        /* 1.118.0: a entrada AC — no Tempo vale o RMS da entrada (a media de v² em ~20 ms, guardada no atualiza: nao desliga no
+           cruzamento do zero da senoide); a entrada consome como um resistor de Vef²/Pin (a potencia media certa) */
+        const f = (v, e, ctx) => {
+          const vi0 = v[0] - v[1], vout = v[2] - v[3];
+          const vi = acdc ? (ctx && ctx.modo === 'dc' ? Math.abs(vi0) : Math.sqrt(info.v2 || 0)) : vi0;
           const on = sig((vi - vimin * 0.98) * 25) * sig((vimax * 1.25 - vi) * 4);   // 1.116.0: abaixo da faixa nao sai nada
           const ia = G * (vo * on - vout);
           const io = smin(sp(ia, 0.01) + 1e-3 * ia, imaxD * 2 + 0.01 * ia, 1e-3);
-          const iin = Math.max(vout, 0) * Math.max(io, 0) / (eta * Math.max(vi, 0.5)) + 2e-3 * on;
+          const pin = Math.max(vout, 0) * Math.max(io, 0) / eta;
+          const iin = acdc ? vi0 * (pin + 0.1 * on) / Math.max(vi * vi, 1) + 1e-6 * vi0 : pin / Math.max(vi, 0.5) + 2e-3 * on;
           return [iin, -iin, -io, io];
         };
-        info.el = poe(info, { tipo: 'NL', nos: [nomeTerm(info, pVinP), nomeTerm(info, pVinN), nomeTerm(info, pVoP), nomeTerm(info, pVoN)], f, dc: [[0, 1], [2, 3]], papel: 'DC/DC' }, [pk(info, pVinP), pk(info, pVinN), pk(info, pVoP), pk(info, pVoN)]);
+        info.el = poe(info, { tipo: 'NL', nos: [nomeTerm(info, pVinP), nomeTerm(info, pVinN), nomeTerm(info, pVoP), nomeTerm(info, pVoN)], f, dc: [[0, 1], [2, 3]], papel: acdc ? 'AC/DC' : 'DC/DC' }, [pk(info, pVinP), pk(info, pVinN), pk(info, pVoP), pk(info, pVoN)]);
+        if (acdc) info.el.atualiza = (v, e, ctx) => {
+          const x = v[0] - v[1];
+          if (!ctx || ctx.modo === 'dc') { info.v2 = x * x; return false; }
+          info.v2 += (x * x - info.v2) * Math.min(1, (ctx.dt || 1e-3) / 0.02);
+          return false;
+        };
         continue;
       }
       /* --- bateria (1.115.0, lote 3): a tensao do nome manda (a quimica so preenche quando falta: "12 V 50 Ah Li-ion" e 12 V);
          a capacidade (mAh/Ah) e a resistencia interna pela quimica; o modulo indicador de carga nao e bateria */
       if (/BATERIA/.test(norm(c.sym || '')) && /INDICADOR|JX-?\d{4}|\d+\s*-\s*\d+\s*V\s*CC|MODULO/.test(txt)) { info.tipo = 'ignorado'; info.rotulo = 'Módulo indicador de bateria (não simulado: consome ~15 mA)'; continue; }
-      if ((/^(BT|BAT|B|G|BATT)$/.test(pre) && c.pinos.length === 2 && !/BUZZ|BOT/.test(txt) || /BATER|BATTERY|PILHA|CR20\d\d|CR1220|18650|LIPO|\bLI-?ION|\bLR44/.test(txt)) && !/CLIP|SUPORTE|HOLDER|PORTA[- ]?PILHA|SOQUETE|CONECTOR/.test(txt)) {
+      if ((/^(BT|BAT|B|G|BATT)$/.test(pre) && c.pinos.length === 2 && !/BUZZ|BOT/.test(txt) || /BATER|BATTERY|PILHA|CR20\d\d|CR1220|18650|LIPO|\bLI-?ION|\bLR44/.test(txt)) && !/CLIP|SUPORTE|HOLDER|PORTA[- ]?PILHA|SOQUETE|CONECTOR|GESTAO|CARREGADOR|CHARGER|CARGA EM MODO|\bRTC\b|DS3231|DS1307|PCF8563|TP4056|\bBQ\d{4}|MAX86\d\d|TDA168/.test(txt)) {
         const prmB = (cfg.params && cfg.params[ref]) || {};
         const QUIM = [
           [/CR20\d\d|CR2\d{3}/, 3, 15, false, 0.03, 'lítio (moeda)'], [/CR1[2-6]\d\d/, 3, 30, false, 0.01, 'lítio (moeda)'],
@@ -1194,6 +1253,7 @@
         continue;
       }
       /* --- buzzer, alto-falante, motor, lampada */
+      if ((/\bDM\d{3}[A-Z]?\b/.test(txt) && /MOTOR|PASSO|STEP/.test(txt) || /TB6600|DRIVER DE MOTOR|MOTOR DRIVER/.test(txt)) && !/^(M|MOT)$/.test(pre)) { info.tipo = 'ignorado'; info.rotulo = 'Driver de motor externo (' + (c.comment || '') + '): não simulado — a placa só manda PUL/DIR/ENA'; continue; }
       if (/^(BZ|LS|SP|SPK|M|MOT|LP|LA|H)$/.test(pre) && c.pinos.length === 2 && !/MOUNT|FURO|HOLE|MH|FIXA/.test(txt) || /BUZZER|SPEAKER|ALTO-?FAL|MOTOR|LAMPAD/.test(txt)) {
         const buz = /^BZ$/.test(pre) || /BUZZ/.test(txt), alto = /^(LS|SP|SPK)$/.test(pre) || /SPEAK|FALANTE/.test(txt), motor = /^(M|MOT)$/.test(pre) || /MOTOR/.test(txt);
         const r = val.v > 0 ? val.v : buz ? 170 : alto ? 8 : motor ? 12 : 60;
@@ -1225,6 +1285,83 @@
         info.tipo = 'ignorado'; info.rotulo = 'Cristal ' + (fhz ? fmt(fhz, 'Hz') + ' ' : '') + (info.carga ? '(' + fmt(info.carga, 'F') + ') ' : '') + '— no DC é aberto';
         continue;
       }
+      /* --- 1.118.0 (lote 6): modulos — o display de 7 segmentos/matricial (nao simulado: os segmentos sao LEDs) e o modulo
+         laser 650 nm (uma carga: ~30 mA a 5 V no de 5 mW; queima acima de 1,2× a tensao) */
+      if (/MODULO|DISPLAY/.test(norm(c.sym || '')) || /7 ?SEG|SEGMENTOS/.test(txt)) {
+        if (/7 ?SEG|SEGMENTOS|\bSEG\.|TM1637|HCMS-?29|\b3461|\b56[34]1|PHD5\d0|PHDE10|PD567|\bTDS[GLR]\d/.test(txt)) {
+          info.tipo = 'ignorado'; info.rotulo = 'Display de 7 segmentos/matricial ' + (c.comment || '') + ' (não simulado: cada segmento é um LED de ~10–20 mA)'; continue;
+        }
+        if (/6[35]0\s*NM|\bLASER\b/.test(txt) && !/LEITOR|RFID/.test(txt)) {
+          const mwL = /(\d+(?:\.\d+)?)\s*MW\b/.exec(txt), mw = mwL ? +mwL[1] : 5;
+          const iL = mw <= 5 ? 0.03 : mw / 1000 / 0.15 / 5, vL = 5;
+          const pA = achaPino(info, [/^(\+|VCC|V\+|VIN|5V|\+5V)$/i], 1), pB = achaPino(info, [/^(-|GND|V-|0V)$/i], 2);
+          info.tipo = 'carga'; info.sub = 'laser'; info.vmax = vL; info.r = vL / iL;
+          info.rotulo = 'Módulo laser 650 nm ' + fmt(mw / 1000, 'W') + ' (≈ ' + fmt(iL, 'A') + ' a ' + fmt(vL, 'V') + ')';
+          if (!c.pinos.some(p => /[A-Z+-]/i.test(String(p.name || '')))) info.avisos.push('pinos sem nome: 1 +, 2 −');
+          resistor(info, pA, pB, info.r, 'laser');
+          continue;
+        }
+      }
+      /* --- 1.118.0 (lote 6): sensores com saida — LM35 (10 mV/°C), ACS714/TMCS1123 (Hall de corrente: Vcc/2 + I·sens) e a
+         chave Hall TMAG5131 (o ima perto: a saida vai a 0, push-pull ativo baixo) */
+      const prmSn = (cfg.params && cfg.params[ref]) || {};
+      if (/\bLM35(?![0-9])/.test(txt) && c.pinos.length >= 3) {
+        const pV = achaPino(info, [/^(\+?VS|VCC|V\+|\+VS|VIN)$/i], 1), pO = achaPino(info, [/^(VOUT|OUT|VO)$/i], 2), pG = achaPino(info, [/^(GND|VSS|-VS)$/i], 3);
+        const temp = prmSn.temp != null && prmSn.temp !== '' && isFinite(+prmSn.temp) ? +prmSn.temp : 25;
+        info.tipo = 'sensor'; info.sub = 'temp'; info.temp = temp; info.vmin = 4; info.vmax = 30; info.vabs = 35;
+        info.rotulo = 'Sensor de temperatura LM35 (10 mV/°C; ' + String(temp).replace('.', ',') + ' °C)';
+        info.campos = [{ k: 'temp', rot: 'Temperatura (°C)', un: '°C', v: temp, dica: '25, 100' }];
+        if (!c.pinos.some(p => /[A-Z]/i.test(String(p.name || '')))) info.avisos.push('pinos sem nome: 1 +Vs, 2 Vout, 3 GND (TO-92)');
+        info.el = saidaSensor(info, pV, pG, pO, (vcc, on) => on * Math.max(0, 0.01 * temp), 1, 60e-6, 4, 0.01, 'LM35');
+        continue;
+      }
+      if (/ACS7[0-9]{2}|TMCS11\d\d|\bCS1123/.test(txt) && c.pinos.length >= 5) {
+        const tm = /TMCS11\d\d|\bCS1123/.test(txt);
+        let sens, faixa;
+        if (tm) { const dT = /(?:TMCS|CS)11\d\d[A-Z]?(\d)/.exec(txt); sens = { 1: 0.025, 2: 0.05, 3: 0.075, 4: 0.1, 5: 0.15 }[dT && dT[1]] || 0.05; faixa = 2.3 / sens; }
+        else {
+          const dA = /ACS71[0-9]\w*?-(\d{2})([AB])/.exec(txt);
+          const n = dA ? +dA[1] : 5; sens = { 5: 0.185, 10: 0.1, 20: 0.1, 30: 0.066 }[n] || 0.1; faixa = n;
+          if (!dA) info.avisos.push('a faixa não foi lida do código: ±5 A, 185 mV/A (mude nos campos)');
+        }
+        if (isFinite(+prmSn.sens) && +prmSn.sens > 0) sens = +prmSn.sens;
+        if (isFinite(+prmSn.faixa) && +prmSn.faixa > 0) faixa = +prmSn.faixa;
+        const imaxC = isFinite(+prmSn.imax) && +prmSn.imax > 0 ? +prmSn.imax : tm ? 80 : 60;
+        const rs = tm ? 0.67e-3 : 1.2e-3;
+        /* ACS714 (SOIC-8): 1-2 IP+, 3-4 IP−, 5 GND, 6 FILTER, 7 VIOUT, 8 VCC; TMCS1123 (SOIC-10): 1 IN+, 2 IN−, 3 GND, 6 VOUT, 8 VS */
+        const pA = achaPino(info, [/^(IP\+|IN\+|I\+|IP\+1)$/i], 1), pB = achaPino(info, [/^(IP-|IN-|I-)$/i], tm ? 2 : 3);
+        const pG = achaPino(info, [/^(GND|VSS)$/i], tm ? 3 : 5), pO = achaPino(info, [/^(VIOUT|VOUT|OUT)$/i], tm ? 6 : 7), pV = achaPino(info, [/^(VCC|VS|VDD)$/i], 8);
+        if (!c.pinos.some(p => /[A-Z]/i.test(String(p.name || '')))) info.avisos.push('pinos sem nome: ' + (tm ? '1 IN+, 2 IN−, 3 GND, 6 VOUT, 8 VS' : '1-2 IP+, 3-4 IP−, 5 GND, 7 VIOUT, 8 VCC'));
+        info.tipo = 'sensor'; info.sub = 'corrente'; info.sens = sens; info.faixa = faixa; info.imaxc = imaxC; info.rs = rs;
+        info.vmin = tm ? 3 : 4.5; info.vmax = 5.5; info.vabs = tm ? 6 : 8; info.ratiom = !tm;
+        info.rotulo = 'Sensor de corrente ' + (tm ? 'TMCS1123' : 'Hall ' + (c.comment || 'ACS714')) + ' (±' + fmt(faixa, 'A') + ', ' + fmt(sens, 'V') + '/A; zero em Vcc/2)';
+        info.campos = [{ k: 'sens', rot: 'Sensibilidade (V/A)', un: 'V', v: sens, dica: '0,185' }, { k: 'faixa', rot: 'Faixa (± A)', un: 'A', v: faixa, dica: '5' }, { k: 'imax', rot: 'Corrente máx contínua (A)', un: 'A', v: imaxC, dica: '60' }];
+        /* os pinos duplicados do caminho da corrente (ACS: 1-2 e 3-4) ligados por dentro */
+        if (!tm) for (const [x, y] of [[1, 2], [3, 4]]) { const px = achaPino(info, [], x), py = achaPino(info, [], y); if (px && py && px.net && py.net && px.net !== py.net) resistor(info, px, py, 1e-4, 'IP ' + x + '-' + y); }
+        const smax = (a, b, e) => -smin(-a, -b, e);
+        const f = v => {
+          const ip = (v[0] - v[1]) / rs, vcc = v[2] - v[3], on = sig((vcc - info.vmin * 0.9) * 20);
+          const bruto = vcc * 0.5 + sens * (info.ratiom ? vcc / 5 : 1) * ip;
+          const alvo = on * smin(smax(bruto, 0.1, 0.02), Math.max(vcc - 0.1, 0.1), 0.02);
+          const io = 0.01 * Math.tanh((v[4] - v[3] - alvo) / 10 / 0.01), q = 10e-3 * Math.tanh(Math.max(vcc, 0) / 0.5);
+          return [ip, -ip, q + sp(-io, 1e-6), -q - sp(io, 1e-6), io];
+        };
+        info.el = poe(info, { tipo: 'NL', nos: [nomeTerm(info, pA), nomeTerm(info, pB), nomeTerm(info, pV), nomeTerm(info, pG), nomeTerm(info, pO)], f, dc: [[0, 1], [2, 3, 4]], papel: 'sensor de corrente' },
+          [pk(info, pA), pk(info, pB), pk(info, pV), pk(info, pG), pk(info, pO)]);
+        continue;
+      }
+      if ((/TMAG51\d\d|\bAG5131|\bDRV50[0-9]{2}|\bA3144|\bA1120/.test(txt) || /HALL/.test(txt) && /SENSOR/.test(norm(c.sym || ''))) && c.pinos.length >= 3 && c.pinos.length <= 4 && !/ACS7|TMCS|CORRENTE/.test(txt)) {
+        const ima = prmSn.ima != null && prmSn.ima !== '' && isFinite(+prmSn.ima) ? (+prmSn.ima ? 1 : 0) : 0;
+        const ativoAlto = /C5D/.test(txt);
+        const pV = achaPino(info, [/^(VCC|VDD|V\+)$/i], 1), pO = achaPino(info, [/^(OUT|VOUT|Q)$/i], 2), pG = achaPino(info, [/^(GND|VSS)$/i], 3);
+        info.tipo = 'sensor'; info.sub = 'hall'; info.ima = ima; info.ativoAlto = ativoAlto; info.vmin = 1.65; info.vmax = 5.5; info.vabs = 6;
+        info.rotulo = 'Chave Hall ' + (c.comment || '') + ' (ímã ' + (ima ? 'PERTO' : 'longe') + '; saída ativa ' + (ativoAlto ? 'alta' : 'baixa') + ')';
+        info.campos = [{ k: 'ima', rot: 'Ímã perto (1) ou longe (0)', un: '', v: ima, dica: '0, 1' }];
+        if (!c.pinos.some(p => /[A-Z]/i.test(String(p.name || '')))) info.avisos.push('pinos sem nome: 1 VCC, 2 OUT, 3 GND (SOT-23)');
+        const alto = ativoAlto ? ima === 1 : ima === 0;
+        info.el = saidaSensor(info, pV, pG, pO, (vcc, on) => on * (alto ? vcc : 0), 50, 5e-6, info.vmin, 0.01, 'chave Hall');
+        continue;
+      }
       if (/^(TP|FID|MH|H|MK|LOGO|TEST)$/.test(pre)) { info.tipo = 'ignorado'; info.rotulo = 'ponto de teste / fixação'; continue; }
       /* 1.117.0 (lote 5): o transformador (P1, P2, S1, S2): no tempo o secundario = primario × Vs/Vp (com a resistencia dos
          enrolamentos e a corrente refletida no primario); no DC ele nao transfere (o primario e um indutor: alerta) */
@@ -1236,7 +1373,7 @@
         else if ((mT = /(\d+(?:\.\d+)?)\s*V?\s*\/\s*(\d+(?:\.\d+)?)\s*V/i.exec(cmT))) { vp = +mT[1]; vs = +mT[2]; }                          // 200/30V
         if (isFinite(+prmT.vp) && +prmT.vp > 0) vp = +prmT.vp;
         if (isFinite(+prmT.vs) && +prmT.vs > 0) vs = +prmT.vs;
-        if ((!(vp > 0) || !(vs > 0)) && /PULSO|PULSE/.test(txt)) { vp = 5; vs = 5; info.avisos.push('transformador de pulso: 1:1 (mude nos campos)'); }
+        if ((!(vp > 0) || !(vs > 0)) && /PULSO|PULSE|\b786\d{2}\//.test(txt)) { vp = 5; vs = 5; info.avisos.push('transformador de pulso: 1:1 (mude nos campos)'); }
         if (!(vp > 0) || !(vs > 0)) { vp = vp > 0 ? vp : 220; vs = vs > 0 ? vs : 12; info.avisos.push('relação não lida do nome: ' + vp + ' V / ' + vs + ' V (mude nos campos)'); }
         const vaN = /(\d+(?:\.\d+)?)\s*VA\b/i.exec(cmT);
         const va = isFinite(+prmT.va) && +prmT.va > 0 ? +prmT.va : vaN ? +vaN[1] : 10;
@@ -1260,8 +1397,10 @@
 
       /* --- CIs */
       if (ps.length) {
-        const alim = c.pinos.filter(p => PINOS_ALIM.test(String(p.name || '').trim()));
-        const gnds = c.pinos.filter(p => PINOS_TERRA.test(String(p.name || '').trim()) || (p.net && ehTerra(p.net)));
+        const pinMcu = !c.pinos.some(p => PINOS_ALIM.test(String(p.name || '').trim())) ? pinagemMcu(desc, c.pinos.length) : null;
+        const alim = pinMcu ? c.pinos.filter(p => pinMcu.vdd.includes(+p.num)) : c.pinos.filter(p => PINOS_ALIM.test(String(p.name || '').trim()));
+        const gnds = c.pinos.filter(p => PINOS_TERRA.test(String(p.name || '').trim()) || (p.net && ehTerra(p.net)) || (pinMcu && pinMcu.vss.includes(+p.num)));
+        if (pinMcu) { info.pinoReset = pinMcu.rst; info.avisos.push('pinos só numerados: pela família, VDD ' + pinMcu.vdd.join('/') + ', VSS ' + pinMcu.vss.join('/') + ', reset ' + pinMcu.rst); }
 
         /* 1.115.0 (lote 3): a referencia shunt ajustavel TL431 (2,495 V entre REF e A; drena corrente de K para A) */
         if (/TL431|TLV431|AZ431|KA431|LM431|ATL431|\bTL432/.test(desc) && c.pinos.length >= 3) {
@@ -1503,7 +1642,7 @@
           continue;
         }
         /* as placas da casa na categoria DRIVER (DTN-DI251837, DMPU-ATE220004): nao sao simuladas aqui */
-        if (/\bD[A-Z]{2,6}-?(?:DI|ATE?)\d{6}/.test(desc)) { info.tipo = 'ignorado'; info.rotulo = 'Placa da casa (' + (c.comment || '') + '): não simulada'; continue; }
+        if (/\b[A-Z]{2,6}[- ]?DI\d{6}|\bD[A-Z]{2,6}-?ATE?\d{6}/.test(desc)) { info.tipo = 'ignorado'; info.rotulo = 'Placa da casa (' + (c.comment || '') + '): não simulada'; continue; }
         /* ULN2003 / ULN2803 (1.116.0, lote 4: campos corrente por canal, Vmax e Pd; queima por canal e pela potencia total) */
         if (/ULN200[34]|ULN280[34]|MC1413|TD62003/.test(desc)) {
           const n = /280/.test(desc) ? 8 : 7, gnd = achaPino(info, [/^(GND|E)$/i], n + 1), com = achaPino(info, [/^(COM|CD\+|K)$/i], n + 2);
@@ -1661,7 +1800,7 @@
           continue;
         }
         /* microcontrolador e CI generico: consumo entre alimentacao e terra; GPIO configuravel */
-        const mcu = MCUS.find(([re]) => re.test(desc));
+        const mcu = /DISPLAY|DWIN|\bLCD\b|\bTFT\b|\bIPS\b|ETHERNET|W5500|ENC28J60/.test(desc) ? null : MCUS.find(([re]) => re.test(desc));
         const fam = mcu ? mcu[1] : (CIS_ALIM.find(([re]) => re.test(desc)) || [null, null])[1];
         if (/^(J|CN|P|X|CON|JP|XS|XP|K\d?)$/.test(pre) && !mcu && !fam) { /* conector: tratado abaixo */ }
         else {
@@ -1734,7 +1873,7 @@
           if (mais && mais.net && menos && menos.net && ehTerra(menos.net)) info.sugeridas.push({ net: mais.net, v: vb, pino: mais.num, motivo: 'o clip de bateria ' + ref + ' (' + fmt(vb, 'V') + ')' });
         }
         /* o USB da placa: o VBUS e uma fonte suposta de 5 V */
-        if (/USB/.test(txt)) { const vbus = achaPino(info, [/^(VBUS|V\+|VCC|5V|VUSB)$/i], null); if (vbus && vbus.net && !ehTerra(vbus.net)) info.sugeridas.push({ net: vbus.net, v: 5, pino: vbus.num, motivo: 'o VBUS do USB ' + ref + ' (5 V)' }); }
+        if (/USB/.test(txt)) { const vbus = achaPino(info, [/^(VBUS|V\+|VCC|5V|VUSB)$/i], c.pinos.length >= 4 && c.pinos.length <= 6 && !/USB.?C|TYPE.?C/.test(txt) && !c.pinos.some(p => /[A-Z]/i.test(String(p.name || ''))) ? 1 : null); if (vbus && vbus.net && !ehTerra(vbus.net)) info.sugeridas.push({ net: vbus.net, v: 5, pino: vbus.num, motivo: 'o VBUS do USB ' + ref + ' (5 V)' }); }
         for (const p of c.pinos) {
           if (!p.net || ehTerra(p.net)) continue;
           const t = tensaoDoNome(p.comentarioParte || '') ;
@@ -2232,15 +2371,57 @@
         }
         case 'dcdc': {
           const r = elRes.get(info.el); if (!r) break;
-          const vi = r.v[0] - r.v[1], vo = r.v[2] - r.v[3], io = -r.i[2], ii = r.i[0];
-          out.linhas.push(L('Entrada', 'faixa ' + fmt(info.vinmin, 'V') + '–' + fmt(info.vinmax, 'V'), fmt(vi, 'V')));
+          const vi0 = r.v[0] - r.v[1], vo = r.v[2] - r.v[3], io = -r.i[2], ii = r.i[0];
+          const vi = info.acdc ? (res.modo === 'dc' ? Math.abs(vi0) : Math.sqrt(info.v2 || 0)) : vi0;
+          out.linhas.push(L('Entrada' + (info.acdc ? ' (RMS)' : ''), 'faixa ' + fmt(info.vinmin, 'V') + '–' + fmt(info.vinmax, 'V') + (info.acdc ? ' AC (aceita DC também)' : ''), fmt(vi, 'V')));
           out.linhas.push(L('Saída', 'nominal ' + (info.dual ? '±' : '') + fmt(info.vout, 'V'), fmt(vo, 'V')));
           out.linhas.push(L('Corrente de saída', 'máx = P/Vout = ' + fmt(info.pout, 'W') + '/' + fmt(info.vout, 'V') + ' = ' + fmt(info.imax, 'A'), fmt(io, 'A')));
-          out.linhas.push(L('Corrente de entrada', 'Iin = Pout/(η·Vin), η ' + Math.round(info.eta * 100) + ' %', fmt(ii, 'A')));
+          out.linhas.push(L('Corrente de entrada' + (info.acdc ? ' (RMS)' : ''), 'Iin = Pout/(η·Vin), η ' + Math.round(info.eta * 100) + ' %', fmt(info.acdc ? (vi >= info.vinmin * 0.98 ? (Math.max(vo, 0) * Math.max(io, 0) / info.eta + 0.1) / Math.max(vi, 1) : 0) : ii, 'A')));
           out.corrente = io;
           if (vi < info.vinmin && vi > 0.5) out.alertas.push('entrada de ' + fmt(vi, 'V') + ' abaixo da faixa (' + fmt(info.vinmin, 'V') + '–' + fmt(info.vinmax, 'V') + '): sem saída');
           lim(vi, info.vinmax, 1.2, 'entrada', 'V', 'entrada de ' + fmt(vi, 'V') + ' acima da faixa (máx ' + fmt(info.vinmax, 'V') + '; queima acima de 1,2×)');
           lim(io, info.imax, 1.5, 'corrente de saída', 'A', 'saída sobrecarregada: ' + fmt(io, 'A') + ' (máx ' + fmt(info.imax, 'A') + ' = ' + fmt(info.pout, 'W') + '; queima acima de 1,5×)');
+          break;
+        }
+        case 'sensor': {
+          const r = elRes.get(info.el); if (!r) break;
+          if (info.sub === 'corrente') {
+            const ip = r.i[0], vcc = r.v[2] - r.v[3], vo = r.v[4] - r.v[3];
+            out.linhas.push(L('Corrente medida', 'de IP+ para IP− (faixa ±' + fmt(info.faixa, 'A') + '; ' + fmt(info.rs, 'Ω') + ' por dentro)', fmt(ip, 'A')));
+            out.linhas.push(L('Saída', 'Vcc/2 + I·' + fmt(info.sens, 'V') + '/A' + (info.ratiom ? ' (proporcional ao Vcc)' : '') + ' = ' + fmt(vcc / 2 + info.sens * (info.ratiom ? vcc / 5 : 1) * ip, 'V'), fmt(vo, 'V')));
+            out.linhas.push(L('Alimentação', 'faixa ' + fmt(info.vmin, 'V') + '–' + fmt(info.vmax, 'V'), fmt(vcc, 'V')));
+            out.corrente = ip;
+            if (Math.abs(ip) > info.faixa) out.alertas.push('corrente de ' + fmt(Math.abs(ip), 'A') + ' fora da faixa (±' + fmt(info.faixa, 'A') + '): a saída satura');
+            lim(ip, info.imaxc, 1, 'corrente', 'A', 'o condutor interno queimou: ' + fmt(Math.abs(ip), 'A') + ' contínuos (máx ' + fmt(info.imaxc, 'A') + ')');
+            if (vcc < info.vmin && vcc > 0.5) out.alertas.push('alimentação de ' + fmt(vcc, 'V') + ' abaixo da mínima (' + fmt(info.vmin, 'V') + ')');
+            lim(vcc, info.vmax, info.vabs / info.vmax, 'alimentação', 'V', 'alimentação de ' + fmt(vcc, 'V') + ' (máx ' + fmt(info.vmax, 'V') + ', absoluta ' + fmt(info.vabs, 'V') + ')');
+            break;
+          }
+          const vcc = r.v[0] - r.v[1], vo = r.v[2] - r.v[1];
+          if (info.sub === 'temp') {
+            out.linhas.push(L('Temperatura', 'o campo (mude para ver a saída)', String(info.temp).replace('.', ',') + ' °C'));
+            out.linhas.push(L('Saída', '10 mV/°C × ' + String(info.temp).replace('.', ',') + ' °C = ' + fmt(Math.max(0, 0.01 * info.temp), 'V'), fmt(vo, 'V')));
+            if (info.temp < 2) out.alertas.push('abaixo de 2 °C a saída precisa de alimentação negativa (com um só Vs ela fica em 0 V)');
+          } else {
+            const alta = vo > vcc / 2;
+            out.linhas.push(L('Ímã', 'o campo (1 perto, 0 longe)', info.ima ? 'PERTO' : 'longe'));
+            out.linhas.push(L('Saída', 'push-pull ativa ' + (info.ativoAlto ? 'alta' : 'baixa') + ' (com o ímã vai a ' + (info.ativoAlto ? 'Vcc' : '0 V') + ')', fmt(vo, 'V') + (alta ? ' (ALTA)' : ' (BAIXA)')));
+          }
+          out.linhas.push(L('Alimentação', 'faixa ' + fmt(info.vmin, 'V') + '–' + fmt(info.vmax, 'V'), fmt(vcc, 'V')));
+          out.corrente = r.i[0];
+          if (vcc < info.vmin && vcc > 0.3) out.alertas.push('alimentação de ' + fmt(vcc, 'V') + ' abaixo da mínima (' + fmt(info.vmin, 'V') + '): a saída não vale');
+          lim(vcc, info.vmax, info.vabs / info.vmax, 'alimentação', 'V', 'alimentação de ' + fmt(vcc, 'V') + ' (máx ' + fmt(info.vmax, 'V') + ', absoluta ' + fmt(info.vabs, 'V') + ')');
+          lim(r.i[2], 0.01, 2, 'corrente na saída', 'A', 'a saída queimou: ' + fmt(Math.abs(r.i[2]), 'A') + ' (curto na saída)');
+          break;
+        }
+        case 'carga': {
+          if (info.sub !== 'laser') break;
+          const { va, vb, ia } = doisPinos(), vl = va - vb;
+          out.linhas.push(L('Tensão', 'nominal ' + fmt(info.vmax, 'V'), fmt(vl, 'V')));
+          out.linhas.push(L('Corrente', 'I = V / R (≈ ' + fmt(info.r, 'Ω') + ')', fmt(Math.abs(ia), 'A')));
+          out.corrente = ia;
+          if (vl < -0.5) out.alertas.push('o laser está invertido (− no +): não acende');
+          lim(vl, info.vmax, 1.2, 'tensão', 'V', 'o diodo laser queimou: ' + fmt(vl, 'V') + ' (máx ' + fmt(info.vmax, 'V') + '; queima acima de 1,2×)');
           break;
         }
         case 'shunt': {
@@ -2522,6 +2703,17 @@
             if (vv > info.fam.vmax) out.alertas.push('alimentação ' + fmt(vv, 'V') + ' ACIMA da máxima (' + fmt(info.fam.vmax, 'V') + ')');
           }
           if (info.fam) out.linhas.push(L('Consumo', 'corrente típica de operação', fmt(info.fam.iq, 'A')));
+          /* 1.118.0 (lote 6): o reset — MCLR/RESET/NRST (e o EN do ESP32) em nivel baixo: o microcontrolador nao roda */
+          if (info.tipo === 'mcu') {
+            const pr = info.pinos.find(p => /^(?:~|\/|!|N_?)?(?:MCLR|RESET|RST|CHIP_PU)\b/i.test(String(p.name || '').trim()) || /ESP/.test(info.fam && info.fam.nome || '') && /^EN$/i.test(String(p.name || '').trim()))
+              || (info.pinoReset ? info.pinos.find(p => +p.num === info.pinoReset) : null);
+            const vdd = info.alim && info.alim[0] ? v(info.alim[0].net) - (info.gnd ? v(info.gnd.net) : 0) : NaN;
+            if (pr && pr.net && isFinite(vdd) && vdd > 1) {
+              const vr = v(pr.net) - (info.gnd ? v(info.gnd.net) : 0);
+              out.linhas.push(L('Reset (' + (pr.name || pr.num) + ')', 'em nível baixo o microcontrolador fica parado', fmt(vr, 'V') + (vr < 0.3 * vdd ? ' (EM RESET)' : ' (rodando)')));
+              if (vr < 0.3 * vdd) out.alertas.push('o pino ' + (pr.name || pr.num) + ' está em ' + fmt(vr, 'V') + ': o microcontrolador está EM RESET (não roda)');
+            } else if (pr && !pr.net) out.linhas.push(L('Reset (' + (pr.name || pr.num) + ')', 'solto: sem o pull-up (~10 kΩ ao VDD) pode resetar sozinho', 'solto'));
+          }
           break;
         }
       }

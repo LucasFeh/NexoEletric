@@ -40,7 +40,7 @@
        ponto aparece no clique > Analisar; quem quiser liga em "Tensao nas nets" */
     mostrar: { pontos: true, cores: true, tensoes: false, valores: false, brilho: true },
     calc: true, osc: false, fixo: null,
-    cfg: { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [], params: {}, queimados: {} },
+    cfg: { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [], params: {}, queimados: {}, travados: {} },
     comps: null, mt: null, sim: null, res: null, an: null,
     sujo: true, ultimaAnalise: 0, folhaFluxo: -1, fluxos: null, fase: new Map(), vmax: 5,
     hover: null, raf: 0, tUlt: 0, osciloscopio: [], amostras: [], erro: '', ultQuadro: 0,
@@ -54,7 +54,7 @@
       const j = JSON.parse(localStorage.getItem(chave()) || 'null');
       if (j && typeof j === 'object') {
         Object.assign(st.cfg, j.cfg || {});
-        st.cfg.params = st.cfg.params || {}; st.cfg.queimados = st.cfg.queimados || {};
+        st.cfg.params = st.cfg.params || {}; st.cfg.queimados = st.cfg.queimados || {}; st.cfg.travados = {};   // 1.118.0: abrir = ligar (o tiristor parte bloqueado)
         if (j.mostrar) Object.assign(st.mostrar, j.mostrar);
         if (!j.v2) st.mostrar.tensoes = false;   // o padrao novo vale tambem para quem ja tinha gravado
         if (j.modo) st.modo = j.modo;
@@ -822,7 +822,7 @@
     botao.pinta();
     return st.ligado;
   }
-  function religa() { st.sujo = true; st.rodando = true; st.fase.clear(); agenda(); }
+  function religa() { st.cfg.travados = {}; st.sujo = true; st.rodando = true; st.fase.clear(); agenda(); }
 
   /* ------------------------------------------------------------------------------------------------ CSS */
   const CSS = `
@@ -2068,7 +2068,7 @@
       }
       case 'recolher': return recolher();
       case 'dados': await carregaDados(); painel.atualiza(true); return { componentes: Object.keys((st.dados && st.dados.componentes) || {}).length };
-      case 'limpar': st.cfg = { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [], params: {}, queimados: {} }; st.osciloscopio = []; gravaCfg(); st.sujo = true; agenda(); return { limpo: true };
+      case 'limpar': st.cfg = { fontes: {}, terra: [], chaves: {}, pots: {}, gpio: {}, valores: {}, desligados: [], params: {}, queimados: {}, travados: {} }; st.osciloscopio = []; gravaCfg(); st.sujo = true; agenda(); return { limpo: true };
     }
     throw new Error('ação do simulador desconhecida: ' + acao);
   }

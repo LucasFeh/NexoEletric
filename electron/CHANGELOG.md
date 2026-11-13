@@ -4,6 +4,31 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.118.0
+
+Simulador — lote 6 (o último) da lib Almox e as correções do lote 5 (testado ao vivo no SIM-TIPOS pela outra sessão).
+
+- Tiristores: a TRAVA sobrevive à remontagem do circuito (tirar o gatilho, mudar um campo, desligar um componente) — o
+  SCR/TRIAC/DIAC disparado segue conduzindo enquanto a corrente passa de Ih; só solta sem a corrente, no "religar", no
+  limpar ou ao reabrir o projeto.
+- O Murata 78602/786xx é transformador de pulso (1:1) mesmo sem "pulso" no nome.
+- Microcontroladores: PIC18 sem o F no código (PIC182553), PIC16C77, PIC18LF (2,0–5,5 V), FTDI232RL, o ESP32-PICO-MINI
+  da Mouser (356-ESPPCOMNI, era "MOSFET P"). O símbolo da lib só numera os pinos: VDD, VSS e o reset saem da família
+  (PIC de 8/18/28/40 pinos, dsPIC30F, ATmega328, FT232RL). O MCLR/RESET (e o EN do ESP32) em nível baixo: alerta "EM
+  RESET"; o GPIO sem o NexoCode segue em alta impedância.
+- Sensores: LM35 (10 mV/°C, campo temperatura; queima acima de 35 V), sensor de corrente ACS714/TMCS1123 (Vcc/2 +
+  I·sensibilidade, 1,2 mΩ no caminho; a faixa do código, 05B = ±5 A 185 mV/A; satura fora da faixa), chave Hall
+  TMAG5131 (campo ímã: perto leva a saída a 0). Encoders HEDS, pressão XGZP, acelerômetros e o INA219 como CI rotulado.
+- CIs: o ADS7812/7809/7816 não é mais regulador 78xx (o 78/79 só com o prefixo de regulador; os códigos Phoenix
+  "1778069" e de capacitores também viravam 7806/7801); os carregadores (TDA16822, MAX8677A, BQ2031) e o módulo RTC
+  "com bateria" não são bateria; "4114R-1-222LF" = 2,2 kΩ; o driver DM542 não é motor; a porta 74HC00 conferida.
+- Módulos: displays de 7 segmentos/matriciais (rotulados, não simulados), OLED/LCD/DWIN como display (o "DWIN … ESP32" e o
+  "Ethernet W5500 … Stm32" não são MCU), o laser 650 nm (~30 mA a 5 V; queima acima de 6 V), o "Boost-Elevador
+  0,9–5 V → 5 V" (DC/DC não isolado), as placas da casa com qualquer sigla (DV-DI251835, SI-DI141389XY).
+- AC/DC: Hi-Link HLK-<P>M<Vout> e PM01, Mean Well IRM-<P>-<Vout> (o HLK-10M24 virava "memória"); no modo Tempo a entrada
+  vale o RMS (não desliga no cruzamento do zero da senoide) e consome a potência média certa; aceita DC também.
+- O VBUS do USB com os pinos só numerados é o pino 1 (fonte suposta de 5 V).
+
 ## 1.117.1
 
 Varistor: a VAC editada leva junto o V1mA (antes o V1mA ficava o do nome e ele nunca conduzia). Transformador: o aviso

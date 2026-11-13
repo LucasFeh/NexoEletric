@@ -916,6 +916,75 @@ caso('1.117.0 (lote 5 da lib Almox): varistor, tiristor/TRIAC/DIAC/PUT, cristal/
   assert.ok(a358.linhas.some(l => /canal sem uso/.test(l.r)), 'o canal B com as entradas soltas: "canal sem uso"');
 });
 
+caso('1.118.0 (lote 6 da lib Almox): MCU, sensores, CIs, módulos, AC/DC; e as correções do lote 5 (a trava do tiristor)', () => {
+  const roda = (comps, cfg) => { const mt = C.monta(comps, cfg || {}); const s = M.cria(mt.elementos, { terra: mt.terra }); const r = s.dc(); return { a: C.analisa(mt, r).comps, mt, s, r }; };
+  const um = (c, cfg) => C.monta([c], cfg || {}).comps.get(c.ref);
+  const P = (n, nm, net) => pin(n, nm || '', net);
+  /* a trava do SCR sobrevive a remontagem (tirar o gatilho); so solta sem a corrente de anodo ou no religar */
+  const scr = (gate, cfg, anodo) => roda([{ ref: 'Q1', comment: 'Unidirecional 500V 12A 771-BT151-500C127', sym: 'TIRISTOR [PTH]', pinos: [P(1, 'A', 'AN'), P(2, 'K', 'GND'), P(3, 'G', 'GT')] },
+    { ref: 'R1', valor: '100', pinos: [P(1, '1', anodo || '+12V'), P(2, '2', 'AN')] }, { ref: 'R2', valor: '1k', pinos: [P(1, '1', gate), P(2, '2', 'GT')] }], cfg);
+  const cfgT = { travados: {} };
+  assert.ok(scr('+5V', cfgT).mt.comps.get('Q1').on && cfgT.travados.Q1, 'disparou e guardou a trava');
+  const semG = scr('GND', cfgT);
+  assert.ok(semG.mt.comps.get('Q1').on && Math.abs(semG.a.R1.corrente) > 0.09, 'sem o gatilho, remontado: SEGUE TRAVADO (Ia ≫ Ih)');
+  assert.ok(!scr('GND', cfgT, 'GND').mt.comps.get('Q1').on && !cfgT.travados.Q1, 'sem a corrente de anodo: solta e esquece');
+  assert.ok(!scr('GND', { travados: {} }).mt.comps.get('Q1').on, 'religar (travados vazio): bloqueado');
+  /* o Murata 78602 e trafo de pulso */
+  assert.strictEqual(um({ ref: 'T1', comment: '580-78602/1JC-R', sym: 'TRANSFORMADOR [PINAGEM A DEFINIR]', pinos: [1, 2, 3, 4].map(k => P(k, '', 'n' + k)) }).vs, 5, '78602: 1:1');
+  /* 78xx so com o prefixo de regulador */
+  const reg = cm => um({ ref: 'U1', comment: cm, sym: 'CIRCUITO INTEGRADO [3P]', pinos: [P(1, '', 'a'), P(2, '', 'GND'), P(3, '', 'c')] }).tipo;
+  assert.strictEqual(reg('ADS7812P'), 'ci', 'ADS7812 é conversor A/D');
+  assert.strictEqual(reg('KA7812/UA7812C'), 'regulador');
+  assert.strictEqual(reg('MSTB 2,5/10-STF-5,08 (1778069)'), 'ci', 'o código Phoenix não é 7806');
+  assert.ok(/7808/.test(um({ ref: 'U1', comment: '78008AP', sym: 'REGULADOR [3P]', pinos: [P(1, '', 'a'), P(2, '', 'GND'), P(3, '', 'c')] }).rotulo), '78008AP = 7808');
+  assert.ok(/7905/.test(um({ ref: 'U1', comment: 'MC79L05ACPG', sym: 'REGULADOR [3P]', pinos: [P(1, '', 'GND'), P(2, '', 'a'), P(3, '', 'c')] }).rotulo), 'o rótulo do 79 com o zero');
+  /* MCU e afins */
+  const tipo = (cm, sym, n) => um({ ref: 'U1', comment: cm, sym, pinos: Array.from({ length: n || 8 }, (_, i) => P(i + 1, '', 'x' + i)) });
+  for (const cm of ['PIC182553-I/SP', 'PIC16C77/JW', 'PIC18LF452-I/P', 'FTDI232RL', '356-ESPPCOMNI02UN8R2']) assert.strictEqual(tipo(cm, 'MICROCONTROLADOR [PINAGEM A DEFINIR]').tipo, 'mcu', cm);
+  assert.strictEqual(tipo('DWIN-IPS para Arduino STM ESP32 21.5"', 'MODULO [PINAGEM A DEFINIR]').tipo, 'ci', 'o display não é MCU');
+  assert.ok(/Ethernet/.test(tipo('Ethernet W5500 Tcp Ip Spi Stm32', 'MODULO [PINAGEM A DEFINIR]').rotulo), 'o W5500 é Ethernet');
+  for (const [cm, sym] of [['TDA16822', 'GESTAO DE BATERIA [8P]'], ['Rtc Ds3231 Raspberry Pi Mini Bateria', 'RTC [PINAGEM A DEFINIR]'], ['HLK-10M24', 'CI']]) assert.notStrictEqual(tipo(cm, sym, 4).tipo, 'bateria', cm);
+  assert.strictEqual(tipo('motor de passo DM542', 'CIRCUITO INTEGRADO [8P]').tipo, 'ignorado', 'o driver DM542 não é o motor');
+  for (const cm of ['DV-DI251835', 'SI-DI141389XY', '7 Segmentos Vermelho Catodo Comum 0,36 (PD567)']) assert.strictEqual(tipo(cm, 'MODULO [PINAGEM A DEFINIR]').tipo, 'ignorado', cm);
+  assert.strictEqual(um({ ref: 'RN1', comment: '4114R-1-222LF', sym: 'CIRCUITO INTEGRADO [14P]', pinos: Array.from({ length: 14 }, (_, i) => P(i + 1, '', 'r' + i)) }).r, 2200, '4114R-1-222 = 2,2 kΩ');
+  /* o reset do PIC: o MCLR no GND = EM RESET */
+  const pic = roda([{ ref: 'U2', comment: 'PIC16F877A-I/P', sym: 'MICROCONTROLADOR [40P]', pinos: [P(1, 'MCLR/VPP', 'GND'), P(11, 'VDD', '+5V'), P(12, 'VSS', 'GND')] }]).a.U2;
+  assert.ok(pic.alertas.some(a => /EM RESET/.test(a)), 'MCLR no GND: EM RESET');
+  /* o simbolo da lib so numera os pinos: VDD/VSS/MCLR pela familia (PIC de 40 pinos: 11/32, 12/31, 1) */
+  const picN = mclr => roda([{ ref: 'U2', comment: 'PIC16F877A-I/P', sym: 'MICROCONTROLADOR [40P]', pinos: Array.from({ length: 40 }, (_, i) => P(i + 1, String(i + 1), { 1: mclr, 11: '+5V', 32: '+5V', 12: 'GND', 31: 'GND' }[i + 1] || null)) }]).a.U2;
+  assert.ok(picN('+5V').linhas.some(l => /Alimentação/.test(l.t) && /5 V/.test(l.r)) && !picN('+5V').alertas.some(a => /RESET/.test(a)) && picN('GND').alertas.some(a => /EM RESET/.test(a)), 'PIC de pinos numerados: alimentação e MCLR pela família');
+  /* a porta 74HC00: 1 e 2 em alto, a saida 3 baixa */
+  const nand = roda([{ ref: 'U3', comment: '74HC00N', sym: 'CIRCUITO INTEGRADO [14P]', pinos: Array.from({ length: 14 }, (_, i) => P(i + 1, '', { 0: '+5V', 1: '+5V', 2: 'Y', 6: 'GND', 13: '+5V' }[i] || 'GND')) }, { ref: 'R1', valor: '10k', pinos: [P(1, '1', 'Y'), P(2, '2', '+5V')] }]);
+  assert.ok(nand.r.v.Y < 0.5, '74HC00: NAND(1,1) = 0: ' + nand.r.v.Y);
+  /* LM35: 10 mV/°C; acima de 35 V queima */
+  const lm35 = (t, vs) => roda([{ ref: 'U4', comment: 'LM35DZ', sym: 'SENSOR [PINAGEM A DEFINIR]', pinos: [P(1, '', '+' + (vs || 5) + 'V'), P(2, '', 'TEMP'), P(3, '', 'GND')] }, { ref: 'R1', valor: '100k', pinos: [P(1, '1', 'TEMP'), P(2, '2', 'GND')] }], { params: { U4: { temp: t } } });
+  perto(lm35(100).r.v.TEMP, 1.0, 0.01, 'LM35 a 100 °C: 1 V'); perto(lm35(25).r.v.TEMP, 0.25, 0.01, 'a 25 °C: 0,25 V');
+  assert.ok(/alimentação/.test(lm35(25, 40).a.U4.queima || ''), 'LM35 com 40 V: queima');
+  /* ACS714-05B: 2 A → 2,5 + 0,37 V */
+  const acs = roda([{ ref: 'U5', comment: 'ACS714ELCTR-05B-T', sym: 'SENSOR [8P]', pinos: [P(1, '', '+12V'), P(2, '', '+12V'), P(3, '', 'IL'), P(4, '', 'IL'), P(5, '', 'GND'), P(6, '', 'FLT'), P(7, '', 'VIOUT'), P(8, '', '+5V')] },
+    { ref: 'R1', valor: '6', pinos: [P(1, '1', 'IL'), P(2, '2', 'GND')] }]);
+  perto(acs.r.v.VIOUT, 2.5 + 0.185 * 2, 0.02, 'ACS714: Vcc/2 + 2 A·185 mV/A');
+  /* chave Hall: o ima perto leva a saida a 0 (ativa baixa) */
+  const hall = ima => roda([{ ref: 'U6', comment: 'Hall / Magnético TMAG5131A1', sym: 'SENSOR [PINAGEM A DEFINIR]', pinos: [P(1, '', '+3.3V'), P(2, '', 'HS'), P(3, '', 'GND')] }], { params: { U6: { ima } } }).r.v.HS;
+  assert.ok(hall(0) > 3 && hall(1) < 0.1, 'TMAG5131: longe ' + hall(0) + ' / perto ' + hall(1));
+  /* o laser: ~30 mA a 5 V; 7 V queima */
+  const laser = v => roda([{ ref: 'U7', comment: '650nm 5mw 5v Ø12mm Lente Ajustável - Formato Ponto', sym: 'MODULO [PINAGEM A DEFINIR]', pinos: [P(1, '', '+' + v + 'V'), P(2, '', 'GND')] }]).a.U7;
+  perto(Math.abs(laser(5).corrente), 0.03, 0.002, 'laser 5 mW: 30 mA'); assert.ok(/laser queimou/.test(laser(7).queima || ''), '7 V queima o laser');
+  /* o Boost-Elevador */
+  const bo = um({ ref: 'U8', comment: 'Boost-Elevador entrada 0.9vdc A 5vdc saída 5vdc', sym: 'MODULO [PINAGEM A DEFINIR]', pinos: [1, 2, 3, 4].map(k => P(k, '', 'b' + k)) });
+  assert.ok(bo.tipo === 'dcdc' && bo.vinmin === 0.9 && bo.vout === 5 && /não isolado/.test(bo.rotulo), 'Boost: 0,9–5 V → 5 V');
+  /* AC/DC: HLK-5M05 e IRM pelo código; no Tempo com a senoide de 220 V a saida NAO cai no cruzamento do zero */
+  const irm = um({ ref: 'PS1', comment: 'IRM-05-5', sym: 'CONVERSOR AC/DC [PINAGEM A DEFINIR]', pinos: [1, 2, 3, 4].map(k => P(k, '', 'p' + k)) });
+  assert.ok(irm.pout === 5 && irm.vout === 5 && irm.vinmax === 264, 'IRM-05-5: 5 W 5 V, 90–264 VAC');
+  const hlk = [{ ref: 'PS1', comment: 'HLK-5M05', sym: 'CONVERSOR AC/DC [PINAGEM A DEFINIR]', pinos: [P(1, '', 'GND'), P(2, '', 'L'), P(3, '', 'GND'), P(4, '', 'V5')] }, { ref: 'R1', valor: '10', pinos: [P(1, '1', 'V5'), P(2, '2', 'GND')] }];
+  const hdc = roda(hlk, { fontes: { L: { v: 220 } } });
+  perto(hdc.r.v.V5, 5, 0.1, 'HLK-5M05 com 220 V DC: 5 V'); assert.ok(!hdc.a.PS1.queima, 'sem queimar');
+  const hmt = C.monta(hlk, { fontes: { L: { v: 0, onda: { forma: 'seno', v: 311, f: 50 } } } });
+  const hs = M.cria(hmt.elementos, { terra: hmt.terra, dt: 1e-4 }); hs.liga();
+  let vmin = 99; for (let k = 0; k < 2500; k++) { const r = hs.passo(1); if (k > 2000) vmin = Math.min(vmin, r.v.V5); }
+  assert.ok(vmin > 4.7, 'HLK-5M05 na senoide de 220 V RMS: a saída fica em 5 V no ciclo todo (mín ' + vmin + ')');
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();
