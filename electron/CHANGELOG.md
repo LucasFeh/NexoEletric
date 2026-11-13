@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.108.0
+
+O LED aceso no 3D e o balão padrão (o dono: "quando o LED for devidamente alimentado, tenha efeito de iluminado no 3D";
+"no balão, o tipo do componente logo na frente, no final da linha a net; no canto inferior esquerdo a cor do LED escrita
+na cor dele; um pouco acima o nome do componente na lib; no meio, destacada, a tensão — 0 V cinza apagadinho,
+energizado vermelho vibrante; o mesmo padrão para todos os balões").
+
+- **LED aceso** no 3D (um brilho na cor do LED sobre o corpo, do tamanho do brilho da simulação) e no 2D.
+- **Balão padrão** na placa do Simulador (2D e 3D): o cartão do pino, o balão da trilha e o do microcontrolador.
+  - Primeira linha: o TIPO (LED, Microcontrolador, Resistor, Trilha...), o nome e o pino; no fim da linha, a net.
+  - No meio, a tensão grande: cinza apagado em 0 V, vermelho vibrante quando energizado.
+  - Depois a corrente (e o datasheet do pino, curto), o nome na biblioteca e, no LED, a cor escrita na cor dele.
+- O Esquema publica para a placa o tipo, o nome na biblioteca e (no CI/MCU) a tensão de alimentação de cada componente.
+
 ## 1.107.0
 
 Sentido da corrente, cores do positivo e do GND, e o simulador só na aba Simulador (o dono: "positivo e negativo estão

@@ -210,6 +210,50 @@
     let topo = window;
     try { topo = window.top && window.top.document ? window.top : window; } catch (_e) { topo = window; }
     function terraDe(d) { const t = new Set((d && d.terra) || []); if (!t.size && d && d.nets) for (const n of Object.keys(d.nets)) if (/^(GND|AGND|DGND|PGND|SGND|0V|VSS|TERRA|EARTH)/i.test(n)) t.add(n); return t; }
+    /* O BALAO PADRAO (1.108.0, o dono: "o tipo do componente logo na frente, no final da linha a net; no canto inferior
+       esquerdo a cor do LED escrita na cor dele; um pouco acima o nome na biblioteca; no meio, destacada, a tensao — 0 V
+       cinza apagadinho, energizado vermelho vibrante; o mesmo padrao para todos os baloes") */
+    const TIPOS_SIM = { led: 'LED', mcu: 'Microcontrolador', ci: 'CI', resistor: 'Resistor', capacitor: 'Capacitor', indutor: 'Indutor',
+      diodo: 'Diodo', mosfet: 'MOSFET', bjt: 'Transistor', regulador: 'Regulador', conversor: 'Conversor', conector: 'Conector',
+      chave: 'Chave', pot: 'Potenciômetro', rele: 'Relé', fusivel: 'Fusível', carga: 'Carga', motor: 'Motor', fonte_bancada: 'Fonte',
+      opto: 'Optoacoplador', '555': 'Temporizador', logica: 'Lógica', driver: 'Driver', ponte: 'Ponte', bateria: 'Bateria', trilha: 'Trilha' };
+    const CORES_NOME = [['#ff3b30', 'vermelho'], ['#ff9500', 'laranja'], ['#ffd60a', 'amarelo'], ['#34c759', 'verde'], ['#0a84ff', 'azul'],
+      ['#f5f5f7', 'branco'], ['#b0306a', 'infravermelho'], ['#bf5af2', 'ultravioleta'], ['#ff2d92', 'rosa']];
+    function nomeDaCor(hex) { const h = String(hex || '').toLowerCase(); const a = CORES_NOME.find(([c]) => c === h); return a ? a[1] : ''; }
+    const escB = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    /** o corpo do balao: {tipo, nome, sub, net, v, linhas:[[k, v]], extra (html), lib, cor:{nome, hex}, acoes (html), nota} */
+    function caixaBalao(o) {
+      const tp = TIPOS_SIM[o.tipo] || (o.tipo ? String(o.tipo) : 'Componente');
+      const temV = o.v != null && isFinite(o.v), on = temV && Math.abs(o.v) >= 0.05;
+      let h = '<div class="bx"><div class="l1"><span class="tp">' + escB(tp) + '</span><b>' + escB(o.nome || '') + '</b>'
+        + (o.sub ? '<span class="sb">' + escB(o.sub) + '</span>' : '') + '<span class="nt">' + escB(o.net || '') + '</span>' + (o.acoes || '') + '</div>';
+      h += '<div class="vv ' + (on ? 'on' : 'off') + '">' + (temV ? escB(fmt(o.v, 'V')) : '—') + '</div>';
+      if (o.nota) h += '<div class="nota">' + escB(o.nota) + '</div>';
+      const ls = (o.linhas || []).filter(x => x && x[1] != null && x[1] !== '');
+      if (ls.length) h += '<div class="ls">' + ls.map(([k, v]) => '<span>' + escB(k) + '</span><b>' + escB(v) + '</b>').join('') + '</div>';
+      if (o.extra) h += o.extra;
+      if (o.lib) h += '<div class="lib">' + escB(o.lib) + '</div>';
+      if (o.cor && o.cor.nome) h += '<div class="cr" style="color:' + escB(o.cor.hex || '#e5e7eb') + '">' + escB(o.cor.nome) + '</div>';
+      return h + '</div>';
+    }
+    function compSim(ref) { return (st.dados && st.dados.comps && st.dados.comps[ref]) || null; }
+    function corDoComp(c) { return c && c.tipo === 'led' && c.cor ? { nome: nomeDaCor(c.cor) || 'LED', hex: c.cor } : null; }
+    /* o brilho do LED: a textura (um degrade redondo) feita uma vez */
+    let texBrilho = null;
+    function texturaBrilho(T) {
+      if (texBrilho) return texBrilho;
+      const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+      const x = cv.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+      g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.25, 'rgba(255,255,255,.75)'); g.addColorStop(0.6, 'rgba(255,255,255,.18)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+      texBrilho = new T.CanvasTexture(cv);
+      return texBrilho;
+    }
+    function centroComp(c) {
+      let cx = c.x, cy = c.y;
+      if (!(isFinite(cx) && isFinite(cy)) && c.pads && c.pads.length) { cx = c.pads.reduce((s, p) => s + p.x, 0) / c.pads.length; cy = c.pads.reduce((s, p) => s + p.y, 0) / c.pads.length; }
+      return [cx, cy];
+    }
     function dadosDoTopo() { try { const d = topo.__nexoSim; return d && d.projeto === H.projeto() ? d : null; } catch (_e) { return null; } }
     try { topo.addEventListener('nexo-sim', () => { st.dados = dadosDoTopo(); agenda(); }); } catch (_e) { /* outra origem */ }
 
@@ -330,6 +374,21 @@
         g.add(inst);
         st.setas = { inst, usadas, T, esp };
       } else st.setas = null;
+      /* O LED ACESO NO 3D (1.108.0, o dono: "quando o LED for devidamente alimentado, tenha o efeito de iluminado no 3D"):
+         um brilho na cor do LED em cima do corpo, do tamanho do brilho da simulacao */
+      for (const c of H.placa().components || []) {
+        const sc = compSim(c.ref);
+        if (!sc || sc.tipo !== 'led' || !(sc.brilho > 0.02)) continue;
+        const [cx, cy] = centroComp(c), baixo = /bottom/i.test(c.layer || '');
+        const cor = new T.Color(sc.cor || '#ff3b30'), b = Math.sqrt(Math.min(1, sc.brilho));   // o olho ve a raiz: 24 % ja e um LED aceso
+        for (const [tam, op] of [[4 + 10 * b, 0.45 + 0.45 * b], [1.8 + 3 * b, 0.8 + 0.2 * b]]) {
+          const sp = new T.Sprite(new T.SpriteMaterial({ map: texturaBrilho(T), color: cor, transparent: true, opacity: Math.min(1, op), depthWrite: false, blending: T.AdditiveBlending, toneMapped: false }));
+          sp.scale.set(tam, tam, 1);
+          sp.position.set(cx, cy, baixo ? -esp - 1.1 : 1.1);
+          sp.renderOrder = 7;
+          g.add(sp);
+        }
+      }
       V.extra('simCorrente', g);
       rotulos(vivos);
       const M4 = st.setas ? new st.setas.T.Matrix4() : null, Q = st.setas ? new st.setas.T.Quaternion() : null, E = st.setas ? new st.setas.T.Euler() : null;
@@ -437,6 +496,17 @@
         ctx.save();
         ctx.lineCap = 'round';
         /* o cobre pela tensao da net */
+        /* 1.108.0: o LED aceso tambem no 2D (um brilho na cor dele) */
+        for (const c of H.placa().components || []) {
+          const sc = compSim(c.ref);
+          if (!sc || sc.tipo !== 'led' || !(sc.brilho > 0.02)) continue;
+          const [cx, cy] = centroComp(c), r = 1.5 + 5 * Math.min(1, sc.brilho);
+          const gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+          const hx = /^#[0-9a-f]{6}$/i.test(sc.cor || '') ? sc.cor : '#ff3b30', a = Math.min(1, 0.35 + 0.6 * sc.brilho);
+          const rgba = k => 'rgba(' + parseInt(hx.slice(1, 3), 16) + ',' + parseInt(hx.slice(3, 5), 16) + ',' + parseInt(hx.slice(5, 7), 16) + ',' + k + ')';
+          gr.addColorStop(0, rgba(a)); gr.addColorStop(0.4, rgba(a * 0.45)); gr.addColorStop(1, rgba(0));
+          ctx.globalAlpha = 1; ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+        }
         /* 1.107.0: o positivo AMARELO, o GND PRETO (com uma borda para aparecer no fundo escuro) */
         const terra = terraDe(st.dados);
         for (const s of st.res.segs) {
@@ -541,18 +611,22 @@
       const pin = st.dados && st.dados.pinos ? st.dados.pinos[p.ref + '-' + p.nome] : null;
       const ds = pinoDoDatasheet(p.ref, p.nome);
       const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-      let h = '<div class="t">' + esc(p.ref) + ' · pino ' + esc(p.nome) + (ds && ds.pino && ds.pino.nome ? ' (' + esc(ds.pino.nome) + ')' : '') + ' <span>' + esc(p.net || 'sem net') + '</span></div>';
-      if (p.comp && p.comp.comment) h += '<div class="c">' + esc(p.comp.comment) + '</div>';
-      if (pin) h += '<div class="g"><span>Tensão</span><b>' + fmt(pin.v, 'V') + '</b>' + (Math.abs(pin.i) > 1e-10 ? '<span>Corrente</span><b>' + fmt(Math.abs(pin.i), 'A') + (pin.i > 0 ? ' entrando' : ' saindo') + '</b>' : '') + '</div>';
-      else h += '<div class="c">sem simulação neste pino (ligue a simulação do esquema)</div>';
+      /* 1.108.0: o balao padrao — tipo · ref · pino ... net; a tensao do pino no meio; corrente; datasheet curto; lib; cor */
+      const sc = compSim(p.ref);
+      let extra = '';
       if (ds && ds.pino) {
         const q = ds.pino;
-        h += '<div class="ds"><b>' + esc(q.nome || 'pino ' + p.nome) + (q.tipo ? ' · ' + esc(q.tipo) : '') + '</b>'
-          + (q.funcao ? '<div>' + esc(q.funcao) + '</div>' : '') + (q.descricao ? '<div class="dd">' + esc(q.descricao) + '</div>' : '')
+        extra = '<div class="ds"><b>' + esc(q.nome || 'pino ' + p.nome) + (q.tipo ? ' · ' + esc(q.tipo) : '') + '</b>'
+          + (q.funcao ? '<div>' + esc(q.funcao) + '</div>' : '')
           + (q.vmax != null || q.imax != null ? '<div class="dd">' + [q.vmax != null ? 'máx. ' + fmt(+q.vmax, 'V') : '', q.imax != null ? fmt(+q.imax, 'A') : ''].filter(Boolean).join(' · ') + '</div>' : '') + '</div>';
-      } else if (ds && ds.comp) h += '<div class="c">o datasheet de ' + esc(ds.comp.chave) + ' não descreve este pino</div>';
-      else h += '<div class="c">sem dados de datasheet — use "Recolher informações" no Esquema do Simulador</div>';
-      if (ds && ds.comp && ds.comp.datasheet_url && fixo) h += '<a href="' + esc(ds.comp.datasheet_url) + '" target="_blank">abrir o datasheet</a>';
+      }
+      if (ds && ds.comp && ds.comp.datasheet_url && fixo) extra += '<a href="' + esc(ds.comp.datasheet_url) + '" target="_blank">abrir o datasheet</a>';
+      let h = caixaBalao({
+        tipo: sc ? sc.tipo : '', nome: p.ref, sub: 'pino ' + p.nome + (ds && ds.pino && ds.pino.nome && ds.pino.nome !== p.nome ? ' (' + ds.pino.nome + ')' : ''),
+        net: p.net || 'sem net', v: pin ? pin.v : null, nota: pin ? '' : 'sem simulação neste pino',
+        linhas: pin && Math.abs(pin.i) > 1e-10 ? [['Corrente', fmt(Math.abs(pin.i), 'A') + (pin.i > 0 ? ' entrando' : ' saindo')]] : [],
+        extra, lib: (sc && sc.lib) || (p.comp && p.comp.comment) || '', cor: corDoComp(sc),
+      });
       /* ANALISAR: a lista (o que esta acima) ou o osciloscopio da net do pad (o sinal passo a passo, do esquema) */
       if (fixo) {
         h = '<div class="ab"><button data-m="lista"' + (modoCartao === 'lista' ? ' class="on"' : '') + '>📋 Lista</button><button data-m="osc"' + (modoCartao === 'osc' ? ' class="on"' : '') + '>📈 Osciloscópio</button><button data-m="x" title="Fechar">×</button></div>'
@@ -691,12 +765,15 @@
     }
     function htmlTrilha(b) {
       const s = b.s, n = v => (+v || 0).toFixed(2).replace('.', ',');
-      let h = '<div class="hd"><b>' + fmt(Math.abs(s.i), 'A') + '</b><span>' + esc(s.net) + ' · ' + esc(s.layer) + '</span>'
-        + '<button data-b="c" class="' + (b.contas ? 'on' : '') + '" title="Mostrar as contas">contas</button><button data-b="x" title="Fechar">×</button></div>';
-      if (b.contas) h += '<div class="f">R = ρ·L/(w·t) = 1,72e-8·' + n(s.len) + ' mm/(' + n(s.w) + ' mm·35 µm) = ' + fmt(s.r, 'Ω')
+      const v = st.dados && st.dados.nets ? st.dados.nets[s.net] : null;
+      const contas = b.contas ? '<div class="f">R = ρ·L/(w·t) = 1,72e-8·' + n(s.len) + ' mm/(' + n(s.w) + ' mm·35 µm) = ' + fmt(s.r, 'Ω')
         + '<br>ΔV = I·R = ' + fmt(s.dv, 'V') + ' · P = I²·R = ' + fmt(s.p, 'W')
-        + '<br>ΔT (IPC-2221) ≈ ' + n(s.dT) + ' °C · Imáx p/ +10 °C = ' + fmt(s.imax10, 'A') + '</div>';
-      return h;
+        + '<br>ΔT (IPC-2221) ≈ ' + n(s.dT) + ' °C · Imáx p/ +10 °C = ' + fmt(s.imax10, 'A') + '</div>' : '';
+      return caixaBalao({
+        tipo: 'trilha', nome: s.layer, sub: n(s.w) + ' mm', net: s.net, v: v == null ? null : v,
+        acoes: '<button data-b="c" class="' + (b.contas ? 'on' : '') + '" title="Mostrar as contas">contas</button><button data-b="x" title="Fechar">×</button>',
+        linhas: [['Corrente', fmt(Math.abs(s.i), 'A')], ['Queda na trilha', fmt(Math.abs(s.dv || 0), 'V')]], extra: contas,
+      });
     }
     function pintaBalaoTrilha(b) {
       b.el.innerHTML = htmlTrilha(b);
@@ -765,11 +842,13 @@
       const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
       const proj = (() => { try { return new URLSearchParams(location.search).get('p') || ''; } catch (_e) { return ''; } })();
       b.el.classList.toggle('desc', est !== 'rod' && est !== 'par'); b.el.classList.toggle('con', con);
-      b.el.innerHTML = '<div class="hd"><b>' + esc(b.mcu) + '</b><span>' + esc((m && m.titulo) || 'microcontrolador') + '</span><button data-x title="Fechar">×</button></div>'
+      const scm = compSim(b.mcu);
+      b.el.innerHTML = caixaBalao({ tipo: 'mcu', nome: b.mcu, net: con ? 'NexoCode ●' : 'sem NexoCode', v: scm && scm.vdd != null ? scm.vdd : null,
+          linhas: [], lib: (scm && scm.lib) || (m && m.titulo) || '', acoes: '<button data-x title="Fechar">×</button>' }).replace(/<\/div>$/, '')
         + (est === 'sem' ? '<div class="st">a simulação do esquema está desligada</div>'
           : con ? '<div class="st">● Conectado ao NexoCode</div><div class="f">firmware ' + (est === 'rod' ? 'rodando' : 'parado') + '</div>'
           : '<button class="conectar" data-con' + (b.abrindo ? ' disabled' : '') + ' title="Abre no NexoCode o firmware ligado a este projeto, conecta a este microcontrolador e roda">✕ Desconectado · conectar e rodar ▸</button>'
-            + '<div class="f">' + esc(b.msg || 'clique para abrir no NexoCode o firmware ligado a ' + proj + ': ele conecta a este microcontrolador e roda a simulação') + '</div>');
+            + '<div class="f">' + esc(b.msg || 'clique para abrir no NexoCode o firmware ligado a ' + proj + ': ele conecta a este microcontrolador e roda a simulação') + '</div>') + '</div>';
       b.el.querySelector('[data-x]').onclick = () => fechaBalao(b);
       /* 1.106.0 (o dono: "quero clicar em cima de 'desconectado' e ele conecta sozinho, pega o código vinculado ao projeto
          e abre, direto na simulação no NexoCode"): POST /api/nexocode/conectar acha a pasta ligada e abre o NexoCode
@@ -828,6 +907,17 @@
 .simpcb-balao .hd{display:flex; align-items:center; gap:7px} .simpcb-balao .hd b{color:#facc15} .simpcb-balao .hd span{flex:1; color:#9ca3af}
 .simpcb-balao button{height:20px; padding:0 6px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.05); color:inherit; cursor:pointer; font:11px system-ui}
 .simpcb-balao button.on{background:#f59e0b; color:#111; border-color:#f59e0b}
+.bx{min-width:230px} .bx .l1{display:flex; align-items:center; gap:6px; font-weight:600; white-space:nowrap}
+.bx .tp{padding:1px 6px; border-radius:5px; background:rgba(245,158,11,.16); color:#fbbf24; font:700 9.5px system-ui, sans-serif; text-transform:uppercase; letter-spacing:.05em}
+.bx .l1 b{color:#f3f4f6} .bx .sb{color:#9ca3af; font-weight:500} .bx .nt{margin-left:auto; padding-left:12px; color:#93c5fd; font:600 11px ui-monospace, monospace}
+.bx .l1 button{margin-left:4px}
+.bx .vv{margin:8px 0 6px; text-align:center; font:800 26px system-ui, sans-serif; letter-spacing:-.01em; line-height:1.1}
+.bx .vv.off{color:#4b5563} .bx .vv.on{color:#ff2d2d; text-shadow:0 0 14px rgba(255,45,45,.55)}
+.bx .nota{text-align:center; color:#6b7280; font-size:11px; margin:-2px 0 4px}
+.bx .ls{display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:11.5px; color:#9ca3af} .bx .ls b{text-align:right; color:#e5e7eb; font-weight:600}
+.bx .ds{margin-top:6px; padding:5px 8px; border-radius:7px; background:rgba(59,130,246,.12); color:#dbeafe; font-size:11px} .bx .ds .dd{color:#93c5fd; font-size:10.5px}
+.bx .lib{margin-top:8px; color:#cbd5e1; font-size:11px} .bx .cr{margin-top:1px; font:700 11.5px system-ui, sans-serif}
+.bx a{display:inline-block; margin-top:5px; color:#93c5fd; font-size:11px}
 .simpcb-mcu.desc{border-color:#9ca3af} .simpcb-mcu.desc .hd b{color:#d1d5db} .simpcb-mcu.desc .st{color:#fca5a5; font-weight:700; margin-top:4px}
 .simpcb-mcu.con{border-color:#22c55e} .simpcb-mcu.con .hd b{color:#4ade80} .simpcb-mcu.con .st{color:#4ade80; font-weight:700; margin-top:4px}
 .simpcb-mcu button.conectar{display:block; width:100%; height:auto; margin-top:5px; padding:5px 8px; text-align:left; font:700 12px system-ui, sans-serif;

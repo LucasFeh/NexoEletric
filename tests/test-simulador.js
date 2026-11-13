@@ -399,6 +399,16 @@ caso('1.103.1: leve — PWM com motor sem a busca em linha travar, anda/soma/mé
   assert.ok(/analise\.tomaSerie\(\)/.test(sim) && /_ligado: \(\) => st\.ligado/.test(sim), 'o osciloscópio do pad lê a simulação ligada');
   assert.ok(/if \(chave === chaveB && svgB\.childNodes\.length\) return;/.test(pcb) && /if \(chave === chaveP\) return;/.test(pec), 'balões e peças só se mexem quando algo mudou');
 });
+caso('1.108.0: o LED aceso brilha no 3D e no 2D; o balão padrão (tipo, net, tensão no meio, lib, cor do LED)', () => {
+  const ler = f => fs.readFileSync(path.join(RAIZ, f), 'utf8');
+  const pcb = ler('hub-simulador-pcb.js'), sim = ler('hub-simulador.js');
+  assert.ok(/tipo: inf\.tipo \|\| '', lib: String\(cp\.comment/.test(sim) && /vdd \}\];/.test(sim), 'o Esquema publica tipo, lib e Vdd');
+  assert.ok(/new T\.Sprite\(new T\.SpriteMaterial\(\{ map: texturaBrilho\(T\)/.test(pcb) && /blending: T\.AdditiveBlending/.test(pcb), 'o brilho do LED no 3D');
+  assert.ok(/O LED aceso tambem no 2D/.test(pcb), 'o brilho do LED no 2D');
+  assert.ok(/function caixaBalao\(o\)/.test(pcb) && /\.bx \.vv\.off\{color:#4b5563\} \.bx \.vv\.on\{color:#ff2d2d/.test(pcb), 'a tensão no meio: cinza em 0 V, vermelho energizado');
+  assert.ok((pcb.match(/caixaBalao\(\{/g) || []).length >= 3, 'o mesmo padrão no pino, na trilha e no MCU');
+  assert.ok(/\['#34c759', 'verde'\]/.test(pcb) && /'<div class="cr" style="color:'/.test(pcb), 'a cor do LED escrita na cor dele');
+});
 caso('1.107.0: o + sai do conector e o GND volta para ele (sentido certo); cores; nada do simulador no esquema principal', () => {
   /* a fonte da simulacao e ideal (sem pad): o que os pinos nao fecham entra/sai pelo pad do CONECTOR da net */
   const eb = {

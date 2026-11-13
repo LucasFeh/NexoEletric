@@ -155,7 +155,13 @@
       terra: (st.mt && st.mt.terra) || [],
       pinos: Object.fromEntries(Object.entries(st.an.pinos).map(([k, p]) => [k, { v: p.v, i: p.i, net: p.net }])),
       nets: Object.fromEntries(Object.entries(st.an.nets).filter(([n]) => !n.includes('#')).map(([n, x]) => [n, x.v])),
-      comps: Object.fromEntries(Object.entries(st.an.comps).map(([r, c]) => [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor, rpm: c.rpm, corrente: c.corrente }])),
+      comps: Object.fromEntries(Object.entries(st.an.comps).map(([r, c]) => {
+        /* 1.108.0: o tipo, o nome na biblioteca e (no CI/MCU) a tensao de alimentacao — o balao padrao da placa */
+        const inf = info(r) || {}, cp = inf.comp || {};
+        const vdd = Array.isArray(inf.alim) && inf.alim[0] && inf.alim[0].net ? vMostra(inf.alim[0].net) : undefined;
+        return [r, { p: c.p, alertas: c.alertas.length, brilho: c.brilho, cor: c.cor, rpm: c.rpm, corrente: c.corrente,
+          tipo: inf.tipo || '', lib: String(cp.comment || cp.valor || cp.sym || '').trim(), titulo: c.titulo || inf.rotulo || '', vdd }];
+      })),
       /* 1.105.0: os microcontroladores e a conexao com o NexoCode (o clique no MCU na PCB 2D/3D mostra o balao) */
       mcus: Object.fromEntries((st.comps || []).filter(c => { const inf = info(c.ref); return inf && inf.tipo === 'mcu'; }).map(c => {
         const n = ncLigado(c.ref), inf = info(c.ref);
