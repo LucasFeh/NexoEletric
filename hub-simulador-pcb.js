@@ -751,39 +751,14 @@
           : '<div class="st">✕ Desconectado</div><div class="f">nenhum código do NexoCode está ligado a este microcontrolador — abra o firmware do projeto no NexoCode (Documents/NexoCode/' + esc(proj) + '): ele conecta sozinho e o MCU fica verde</div>');
       b.el.querySelector('[data-x]').onclick = () => fechaBalao(b);
     }
-    /* A SETA DO MCU NO 3D (1.105.1, pedido do dono: "quando eu clicar e marcar ele no 3D apareça uma seta, mostrando
-       que tá conectado"): marcado o MCU (o balao aberto), uma seta sobre ele aponta para o corpo — verde e brilhando
-       com o NexoCode conectado, cinza sem ele — e sobe e desce devagar. Sai com o balao. */
-    const setasMcu = new Map();   // ref -> {x, y, bottom, con}
-    let tSeta = 0;
+    /* O MCU MARCADO (1.105.2, o dono: "tem uma seta enorme, e o microcontrolador perdeu o efeito de seleção; era pra
+       ter só o balão"): sem a seta 3D da 1.105.1 — com o balao aberto o MCU fica SELECIONADO como no editor (o mesmo
+       destaque), e a selecao sai junto com o balao (fechar no x ou clicar de novo no MCU): nada fica grudado. */
+    const setasMcu = new Map();   // ref -> {x, y, bottom, con}: os MCUs com o balao aberto
     function montaSetas() {
       const V = H.vista3d && H.vista3d();
-      if (!V || !V.extra || !V.T) return;
-      if (!setasMcu.size) { V.extra('nexocode-mcu', null); if (V.animaExtra) V.animaExtra('nexocode-mcu', null); return; }
-      const T = V.T(), e = V.espessura ? V.espessura() : 1.6;
-      const raiz = new T.Group(); raiz.name = 'nexocode-mcu';
-      for (const [ref, a] of setasMcu) {
-        const cor = a.con ? 0x22c55e : 0x9ca3af;
-        const mat = new T.MeshStandardMaterial({ color: cor, emissive: cor, emissiveIntensity: a.con ? 0.7 : 0.15, roughness: 0.35, metalness: 0.05 });
-        /* a seta INCLINADA (vem de cima e de lado): de cima, como a vista abre, uma seta em pe vira um circulo */
-        const g = new T.Group(); g.name = 'seta-' + ref;
-        const ponta = new T.Mesh(new T.ConeGeometry(2.6, 4.5, 28), mat);
-        ponta.rotation.z = Math.PI; ponta.position.y = 2.25;            /* a ponta na origem, apontando para -Y local */
-        const haste = new T.Mesh(new T.CylinderGeometry(0.9, 0.9, 8, 18), mat);
-        haste.position.y = 4.5 + 4;
-        g.add(ponta, haste);
-        const dir = new T.Vector3(-0.75, 0.75, a.bottom ? -1 : 1).normalize();   /* da ponta para a cauda */
-        g.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), dir);
-        const z0 = a.bottom ? -e - 4 : 4;                                 /* a ponta logo acima do corpo do MCU */
-        g.position.set(a.x, a.y, z0);
-        g.userData = { base: g.position.clone(), dir, ref, conectado: a.con };
-        raiz.add(g);
-      }
-      V.extra('nexocode-mcu', raiz);
-      if (V.animaExtra) V.animaExtra('nexocode-mcu', dt => {
-        tSeta += dt || 0;
-        for (const g of raiz.children) g.position.copy(g.userData.base).addScaledVector(g.userData.dir, 1.6 * (1 + Math.sin(tSeta * 3.2)) / 2);
-      });
+      if (V && V.extra) { V.extra('nexocode-mcu', null); if (V.animaExtra) V.animaExtra('nexocode-mcu', null); }
+      try { if (window.HubMcpVista && window.HubMcpVista.selecionar) window.HubMcpVista.selecionar({ refs: [...setasMcu.keys()] }); } catch (_e) { /* ok */ }
     }
     function marcaSetaMcu(hit, con) {
       if (hit) setasMcu.set(hit.ref, { x: hit.ax, y: hit.ay, bottom: !!hit.bottom, con: !!con });

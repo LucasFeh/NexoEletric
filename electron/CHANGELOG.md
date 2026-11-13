@@ -4,6 +4,15 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.105.2
+
+O MCU marcado no 3D do Simulador fica só com o balão (o dono: "tem uma seta enorme, e o microcontrolador perdeu o efeito
+de seleção; era pra ter só o balão").
+
+- Sai a seta 3D sobre o microcontrolador (1.105.1).
+- Com o balão do MCU aberto, o microcontrolador fica SELECIONADO, com o mesmo destaque do editor; a seleção sai junto
+  com o balão (o × ou clicar de novo no MCU) — nada fica grudado. Os outros componentes continuam sem seleção no clique.
+
 ## 1.105.1
 
 O clique no 3D do Simulador e a seta do microcontrolador (o dono: "cliquei em um componente na placa, a retícula ficou

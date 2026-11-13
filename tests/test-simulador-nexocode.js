@@ -57,8 +57,9 @@ caso('1.105.1: o clique no 3D chega ao Simulador (pointerdown) e não seleciona 
   assert.ok(/if \(AREA_SIM\) return;/.test(pf) && (pf.match(/if \(AREA_SIM\) return;/g) || []).length >= 2, 'aoClicar/aoMenu sem efeito na área do Simulador');
   assert.ok(/function soltaAnel\(\)/.test(pcb) && /if \(fixo\) soltaAnel\(\);/.test(pcb), 'o anel do pad não gruda');
 });
-caso('1.105.1: a seta 3D sobre o MCU marcado — verde conectado, cinza sem o NexoCode, sai com o balão', () => {
-  assert.ok(/V\.extra\('nexocode-mcu', raiz\)/.test(pcb) && /const cor = a\.con \? 0x22c55e : 0x9ca3af;/.test(pcb));
+caso('1.105.2: o MCU marcado fica SELECIONADO (o destaque do editor) enquanto o balão está aberto — sem a seta 3D', () => {
+  assert.ok(!/ConeGeometry\(2\.6, 4\.5/.test(pcb) && /V\.extra\('nexocode-mcu', null\)/.test(pcb), 'sem a seta enorme');
+  assert.ok(/window\.HubMcpVista\.selecionar\(\{ refs: \[\.\.\.setasMcu\.keys\(\)\] \}\)/.test(pcb), 'a seleção acompanha o balão');
   assert.ok(/marcaSetaMcu\(hit, b\.sig === 'rod' \|\| b\.sig === 'par'\);/.test(pcb), 'abre com o balão do MCU');
   assert.ok(/if \(sa && sa\.con !== con\) \{ sa\.con = con; montaSetas\(\); \}/.test(pcb), 'muda de cor quando conecta/desconecta');
   assert.ok(/if \(b\.mcu && setasMcu\.delete\(b\.mcu\)\) montaSetas\(\);/.test(pcb), 'fecha com o balão');
