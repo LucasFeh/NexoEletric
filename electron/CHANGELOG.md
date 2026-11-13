@@ -4,6 +4,13 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.110.2
+
+A seleção do componente em volta dele inteiro (o dono: "a seleção do componente não dá pra ser ele todo? tipo, em volta
+dele?"): no 3D do Simulador o componente sob o mouse e o selecionado (o balão aberto) ganham uma caixa ciano em volta
+do corpo inteiro — as 12 arestas, da placa até o topo, com as faces bem de leve — no lugar do contorno só no topo. O
+microcontrolador também. A espessura acompanha o zoom. No 2D, o selecionado fica com o retângulo em volta dos pads.
+
 ## 1.110.1
 
 Clicar no componente no 3D do Simulador (o dono: "tô tentando clicar em cima do componente no 3D e ele não tá

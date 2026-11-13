@@ -539,6 +539,14 @@ caso('1.110.1: no 3D o clique no CORPO do componente seleciona e abre o balão d
   assert.ok(/d\.mcus\[cp\.ref\]/.test(pcb), 'o corpo do MCU continua abrindo o balão do NexoCode');
 });
 
+caso('1.110.2: o componente marcado/selecionado com a caixa em volta do corpo inteiro (as 12 arestas)', () => {
+  const pcb = fs.readFileSync(path.join(RAIZ, 'hub-simulador-pcb.js'), 'utf8');
+  assert.ok(/function caixa3d\(T, k, folga, lp, op\)/.test(pcb) && /for \(const \[x, y\] of \[\[x1, y1\], \[x2, y1\], \[x2, y2\], \[x1, y2\]\]\) ar\(x, y, z1, x, y, z2\);/.test(pcb), 'a caixa: as arestas de baixo, de cima e as verticais');
+  assert.ok(/if \(kc\) \{ g\.add\(caixa3d\(/.test(pcb), 'no passar do mouse');
+  assert.ok(/function marcaSel3d\(\)/.test(pcb) && /V\.extra\('simSel', g\.children\.length \? g : null\)/.test(pcb) && /marcaSel3d\(\);\n    \}/.test(pcb), 'e enquanto está selecionado (o balão aberto)');
+  assert.ok(/for \(const b of baloes\) \{\n\s+const ref = b\.comp \|\| b\.mcu/.test(pcb), 'no 2D também');
+});
+
 (async () => { for (const f of fila) await f();
 console.log(falhou ? 'test-simulador: ' + falhou + ' FALHA(S) de ' + (n + falhou) : 'test-simulador: ' + n + ' casos ok');
 process.exit(falhou ? 1 : 0); })();

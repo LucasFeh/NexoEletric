@@ -563,6 +563,43 @@
     const trechosDoAlvo = a => (st.res && st.res.segs || []).filter(s => s.trilha === a.trilha.s.trilha && s.layer === a.trilha.s.layer);
     const COR_ALVO = '#22d3ee';
     /* no 3D: uma camada propria na cena (o contorno ciano por cima de tudo), refeita so quando o alvo muda */
+    /* 1.110.2 (o dono: "a seleção do componente não dá pra ser ele todo? tipo, em volta dele?"): a CAIXA em volta do
+       corpo inteiro — as 12 arestas, de baixo ate o topo — no passar do mouse e enquanto esta selecionado */
+    function caixa3d(T, k, folga, lp, op) {
+      const g = new T.Group();
+      const mat = new T.MeshBasicMaterial({ color: new T.Color(COR_ALVO), transparent: true, opacity: op, depthTest: false, depthWrite: false, toneMapped: false });
+      const x1 = k.x1 - folga, x2 = k.x2 + folga, y1 = k.y1 - folga, y2 = k.y2 + folga, z1 = k.z1 - folga * 0.5, z2 = k.z2 + folga * 0.5;
+      const ar = (ax, ay, az, bx, by, bz) => {
+        const L = Math.hypot(bx - ax, by - ay, bz - az) + lp;
+        const m = new T.Mesh(new T.BoxGeometry(bx !== ax ? L : lp, by !== ay ? L : lp, bz !== az ? L : lp), mat);
+        m.position.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2); m.renderOrder = 21; g.add(m);
+      };
+      for (const z of [z1, z2]) { ar(x1, y1, z, x2, y1, z); ar(x2, y1, z, x2, y2, z); ar(x2, y2, z, x1, y2, z); ar(x1, y2, z, x1, y1, z); }
+      for (const [x, y] of [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]) ar(x, y, z1, x, y, z2);
+      /* as faces bem de leve (o volume do componente) */
+      const f = new T.Mesh(new T.BoxGeometry(x2 - x1, y2 - y1, Math.max(0.01, z2 - z1)), new T.MeshBasicMaterial({ color: new T.Color(COR_ALVO), transparent: true, opacity: op * 0.12, depthWrite: false, toneMapped: false }));
+      f.position.set((x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2); f.renderOrder = 20; g.add(f);
+      return g;
+    }
+    /* a espessura de ~px pixels na tela, em mm, perto do ponto (x, y, z) */
+    function mmDePx(V, x, y, z, px) {
+      const a = V.projeta(x, y, z), b = V.projeta(x + 1, y, z), c = V.projeta(x, y + 1, z);
+      const esc = (Math.hypot(b.x - a.x, b.y - a.y) + Math.hypot(c.x - a.x, c.y - a.y)) / 2;
+      return Math.max(0.03, px / (esc > 1e-3 ? esc : 20));
+    }
+    const caixaDoRef = (V, ref) => V && V.caixaDe ? V.caixaDe(ref) : null;
+    /* os selecionados (balao aberto: componente ou MCU) com a caixa em volta, na camada propria */
+    function marcaSel3d() {
+      const V = H.em3d() && H.vista3d && H.vista3d();
+      if (!V || typeof V.extra !== 'function') return;
+      const refs = [...new Set(baloes.filter(b => b.comp || b.mcu).map(b => b.comp || b.mcu))];
+      const T = V.T(), g = new T.Group(); g.name = 'simSel';
+      for (const ref of refs) {
+        const k = caixaDoRef(V, ref); if (!k) continue;
+        g.add(caixa3d(T, k, 0.25, mmDePx(V, (k.x1 + k.x2) / 2, (k.y1 + k.y2) / 2, k.z2, 2.5), 1));
+      }
+      V.extra('simSel', g.children.length ? g : null);
+    }
     function marcaAlvo3d() {
       const V = H.em3d() && H.vista3d && H.vista3d();
       if (!V || typeof V.extra !== 'function') return;
@@ -581,6 +618,9 @@
       };
       /* a espessura do traco: ~2,5 px na tela */
       const pq = pontoNaPlaca(ultMouse || { clientX: 0, clientY: 0 }), lp = Math.max(0.05, 2.5 / ((pq && pq.esc) || 20));
+      /* o componente (e o MCU com corpo 3D): a caixa em volta dele inteiro */
+      const refCaixa = a.tipo === 'comp' ? a.comp.ref : a.tipo === 'mcu' ? a.mcu.ref : null, kc = refCaixa && caixaDoRef(V, refCaixa);
+      if (kc) { g.add(caixa3d(T, kc, 0.25, mmDePx(V, (kc.x1 + kc.x2) / 2, (kc.y1 + kc.y2) / 2, kc.z2, 2.2), 0.7)); V.extra('simAlvo', g); return; }
       if (a.tipo === 'trilha') {
         for (const s of trechosDoAlvo(a)) barra(s.x1, s.y1, s.x2, s.y2, (s.w || 0.25) + 2 * lp, 0.5);
       } else {
@@ -594,7 +634,16 @@
       V.extra('simAlvo', g);
     }
     function marcaAlvo2d(ctx, px) {
-      const a = hoverAlvo; if (!a || H.em3d()) return;
+      if (H.em3d()) return;
+      const pl = H.placa();
+      for (const b of baloes) {
+        const ref = b.comp || b.mcu, c = ref && pl && (pl.components || []).find(x => x.ref === ref), k = c && caixaPads(c);
+        if (!k) continue;
+        const f = b.mcu ? 1 : 0.6;
+        ctx.save(); ctx.strokeStyle = COR_ALVO; ctx.lineWidth = px(2.6); ctx.fillStyle = 'rgba(34,211,238,.08)';
+        ctx.beginPath(); ctx.rect(k.x1 - f, k.y1 - f, k.x2 - k.x1 + 2 * f, k.y2 - k.y1 + 2 * f); ctx.fill(); ctx.stroke(); ctx.restore();
+      }
+      const a = hoverAlvo; if (!a) return;
       ctx.save(); ctx.globalAlpha = 1; ctx.strokeStyle = COR_ALVO; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       if (a.tipo === 'trilha') {
         ctx.globalAlpha = 0.55;
@@ -1098,6 +1147,7 @@
       const V = H.vista3d && H.vista3d();
       if (V && V.extra) { V.extra('nexocode-mcu', null); if (V.animaExtra) V.animaExtra('nexocode-mcu', null); }
       try { if (window.HubMcpVista && window.HubMcpVista.selecionar) window.HubMcpVista.selecionar({ refs: [...setasMcu.keys(), ...baloes.filter(b => b.comp).map(b => b.comp)] }); } catch (_e) { /* ok */ }
+      marcaSel3d();
     }
     function marcaSetaMcu(hit, con) {
       if (hit) setasMcu.set(hit.ref, { x: hit.ax, y: hit.ay, bottom: !!hit.bottom, con: !!con });
@@ -1264,6 +1314,8 @@
           if (H.em3d()) marcaAlvo3d(); else H.redesenha();
         };
         alvo.addEventListener('mousemove', e => { ultMouse = { clientX: e.clientX, clientY: e.clientY, buttons: e.buttons }; if (!pedeMira) pedeMira = requestAnimationFrame(mira); }, { passive: true });
+        let tSel = 0;
+        alvo.addEventListener('wheel', () => { clearTimeout(tSel); tSel = setTimeout(marcaSel3d, 250); }, { passive: true });
         alvo.addEventListener('wheel', e => { ultMouse = { clientX: e.clientX, clientY: e.clientY, buttons: 0 }; if (!pedeMira) pedeMira = requestAnimationFrame(() => requestAnimationFrame(mira)); }, { passive: true });
         alvo.addEventListener('mouseleave', () => { ultMouse = null; alvo.classList.remove('simpcb-mira'); soltaAnel(); if (cartao && !cartao.classList.contains('fixo')) cartao.hidden = true; }, { passive: true });
         alvo.addEventListener('dblclick', e => e.stopPropagation(), true);
